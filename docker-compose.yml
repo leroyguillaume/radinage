@@ -1,0 +1,56 @@
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: radinage
+      POSTGRES_PASSWORD: radinage
+      POSTGRES_DB: radinage
+    ports:
+      - 5432:5432
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  api:
+    profiles:
+      - radinage
+    build:
+      context: .
+      target: api
+    environment:
+      DATABASE_URL: postgres://radinage:radinage@postgres:5432/radinage
+      JWT_SECRET: changeit
+      ADMIN_PASSWORD: admin
+      WEBAPP_URL: http://localhost:8080
+      ROOT_PATH: api
+      CORS_ORIGINS: localhost:8080
+    ports:
+      - 3000:3000
+    depends_on:
+      - postgres
+
+  mcp:
+    profiles:
+      - radinage
+    build:
+      context: .
+      target: mcp
+    environment:
+      RADINAGE_API_URL: http://api:3000
+    ports:
+      - 3001:3001
+    depends_on:
+      - api
+
+  webapp:
+    profiles:
+      - radinage
+    build:
+      context: .
+      target: webapp
+    ports:
+      - 8080:8080
+    depends_on:
+      - api
+
+volumes:
+  postgres_data:

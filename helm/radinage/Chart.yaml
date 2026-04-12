@@ -1,0 +1,6 @@
+apiVersion: v2
+name: radinage
+description: A personal bank account tracking application
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

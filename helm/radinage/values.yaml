@@ -1,0 +1,411 @@
+# Global configuration shared by all apps.
+# Each key can be overridden per-app under `apps.<name>.<key>`.
+global:
+  # -- (string) Domain name used by the ingress and to derive URLs
+  domain: radinage.example.com
+  # -- (string) Log level filter shared across apps (e.g. info, debug, warn)
+  logFilter: info
+
+  # Pod / Container
+
+  # -- (object) Container image defaults
+  image:
+    # -- (string) Image registry
+    registry: ghcr.io/leroyguillaume
+    # -- (string) Image pull policy
+    pullPolicy: IfNotPresent
+    # -- (string) Image tag — overrides the chart `appVersion`
+    tag: ""
+  # -- (list) Image pull secrets
+  imagePullSecrets: []
+  # -- (int) Number of replicas
+  replicaCount: 1
+  # -- (object) Pod-level security context (restricted by default)
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    runAsGroup: 1000
+    fsGroup: 1000
+    seccompProfile:
+      type: RuntimeDefault
+  # -- (object) Container-level security context (restricted by default)
+  containerSecurityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    capabilities:
+      drop:
+        - ALL
+  # -- (object) Container resource requests and limits
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      memory: 256Mi
+  # -- (object) ServiceAccount configuration
+  serviceAccount:
+    # -- (bool) Create a ServiceAccount for each app
+    create: true
+    # -- (object) Annotations to add to the ServiceAccount
+    annotations: {}
+    # -- (bool) Automount the ServiceAccount token
+    automountServiceAccountToken: false
+  # -- (object) Annotations to add to pods
+  podAnnotations: {}
+  # -- (object) Labels to add to pods
+  podLabels: {}
+  # -- (object) Node selector constraints
+  nodeSelector: {}
+  # -- (list) Tolerations for pod scheduling
+  tolerations: []
+  # -- (object) Affinity rules for pod scheduling
+  affinity: {}
+
+  # Service
+
+  # -- (object) Service configuration
+  service:
+    # -- (string) Kubernetes Service type
+    type: ClusterIP
+  # -- (object) Horizontal Pod Autoscaler configuration
+  autoscaling:
+    # -- (bool) Enable autoscaling
+    enabled: false
+    # -- (int) Minimum number of replicas
+    minReplicas: 1
+    # -- (int) Maximum number of replicas
+    maxReplicas: 3
+    # -- (int) Target CPU utilization percentage
+    targetCPUUtilizationPercentage: 80
+
+# Ingress (single resource for all apps)
+ingress:
+  # -- (bool) Enable the Ingress resource
+  enabled: false
+  # -- (string) Ingress class name
+  className: ""
+  # -- (object) Annotations to add to the Ingress
+  annotations: {}
+  # -- (string) Default backend app (must match a key in `apps`)
+  defaultBackend: webapp
+  # Per-app ingress rules. Domain defaults to `global.domain`.
+  apps:
+    # API ingress rule
+    api:
+      # -- (string) API URL path
+      path: /api
+      # -- (string) API path type (Prefix, Exact, ImplementationSpecific)
+      pathType: Prefix
+    # MCP ingress rule
+    mcp:
+      # -- (string) MCP URL path
+      path: /mcp
+      # -- (string) MCP path type
+      pathType: Prefix
+    # Webapp ingress rule
+    webapp:
+      # -- (string) Webapp URL path
+      path: /
+      # -- (string) Webapp path type
+      pathType: Prefix
+      # -- (string) Protocol used to build the webapp URL (http or https)
+      protocol: https
+  # -- (list) TLS configuration
+  tls: []
+
+# Per-app configuration
+apps:
+  # Radinage API
+  api:
+    # -- (bool) Set to false to skip deploying the API
+    enabled: true
+
+    # Radinage API config
+
+    # -- (bool) Emit logs in JSON format
+    logJson: false
+    # -- (string) Root path prefix for API routes
+    rootPath: api
+    # -- (string) JWT token expiration in seconds
+    jwtExpirationSecs: "86400"
+    # -- (string) Admin account username
+    adminUsername: admin
+    # -- (string) Maximum number of budgets per user
+    maxBudgetsPerUser: "100"
+    # -- (string) Base URL of the web application (used for invitation links).
+    # Defaults to `<protocol>://<global.domain><ingress.apps.webapp.path>`
+    webappUrl: ""
+    # -- (string) Allowed CORS origins (comma-separated)
+    corsOrigins: ""
+    # -- (object) Existing Secret holding the database connection string
+    databaseSecret:
+      # -- (string) Secret name
+      name: radinage-db
+      # -- (string) Key inside the Secret
+      key: url
+    # -- (object) JWT signing key secret
+    jwtSecret:
+      # -- (bool) Create the secret (Helm generates a random value, kept across upgrades)
+      create: true
+      # -- (string) Secret name (defaults to `<release>-jwt`)
+      name: ""
+      # -- (object) Extra labels for the Secret
+      labels: {}
+      # -- (object) Extra annotations for the Secret
+      annotations: {}
+      # -- (string) Key inside the Secret
+      key: secret
+    # -- (object) Admin password secret
+    adminPasswordSecret:
+      # -- (bool) Create the secret (Helm generates a random value, kept across upgrades)
+      create: true
+      # -- (string) Secret name (defaults to `<release>-admin-password`)
+      name: ""
+      # -- (object) Extra labels for the Secret
+      labels: {}
+      # -- (object) Extra annotations for the Secret
+      annotations: {}
+      # -- (string) Key inside the Secret
+      key: password
+
+    # Pod / Container
+
+    # -- (object) API container image — override `global.image`
+    image:
+      # -- (string) Image repository
+      repository: radinage-api
+      # -- (string) Image tag — override `global.image.tag`
+      tag: ""
+      # -- (string) Image pull policy — override `global.image.pullPolicy`
+      pullPolicy: ""
+    # -- (list) API image pull secrets — override `global.imagePullSecrets`
+    imagePullSecrets: []
+    # -- (string) API replica count — override `global.replicaCount`
+    replicaCount: ""
+    # -- (object) API pod security context — override `global.podSecurityContext`
+    podSecurityContext: {}
+    # -- (object) API container security context — override `global.containerSecurityContext`
+    containerSecurityContext: {}
+    # -- (object) API resource requests and limits — override `global.resources`
+    resources: {}
+    # -- (object) API ServiceAccount — override `global.serviceAccount`
+    serviceAccount: {}
+    # -- (object) API pod annotations — override `global.podAnnotations`
+    podAnnotations: {}
+    # -- (object) API pod labels — override `global.podLabels`
+    podLabels: {}
+    # -- (object) API node selector — override `global.nodeSelector`
+    nodeSelector: {}
+    # -- (list) API tolerations — override `global.tolerations`
+    tolerations: []
+    # -- (object) API affinity — override `global.affinity`
+    affinity: {}
+    # -- (int) API container port
+    port: 3000
+    # -- (list) API additional environment variables
+    extraEnv: []
+    # -- (object) API liveness and readiness probes
+    probes:
+      # -- (object) Liveness probe configuration
+      liveness:
+        httpGet:
+          path: /api/health
+          port: http
+        initialDelaySeconds: 5
+        periodSeconds: 10
+      # -- (object) Readiness probe configuration
+      readiness:
+        httpGet:
+          path: /api/health
+          port: http
+        initialDelaySeconds: 5
+        periodSeconds: 5
+
+    # Volumes
+
+    # -- (list) API volumes to mount
+    volumes: []
+    # -- (list) API additional volumes to mount
+    extraVolumes: []
+    # -- (list) API volume mounts for the container
+    volumeMounts: []
+    # -- (list) API additional volume mounts for the container
+    extraVolumeMounts: []
+
+    # Service
+
+    # -- (object) API service — override `global.service`
+    service: {}
+
+    # Autoscaling
+
+    # -- (object) API autoscaling — override `global.autoscaling`
+    autoscaling: {}
+
+  # Radinage MCP server
+  mcp:
+    # -- (bool) Set to false to skip deploying the MCP server
+    enabled: true
+
+    # Radinage MCP config
+
+    # -- (string) Radinage API URL. Defaults to the cluster-internal service URL.
+    apiUrl: ""
+
+    # Pod / Container
+
+    # -- (object) MCP container image — override `global.image`
+    image:
+      # -- (string) Image repository
+      repository: radinage-mcp
+      # -- (string) Image tag — override `global.image.tag`
+      tag: ""
+      # -- (string) Image pull policy — override `global.image.pullPolicy`
+      pullPolicy: ""
+    # -- (list) MCP image pull secrets — override `global.imagePullSecrets`
+    imagePullSecrets: []
+    # -- (string) MCP replica count — override `global.replicaCount`
+    replicaCount: ""
+    # -- (object) MCP pod security context — override `global.podSecurityContext`
+    podSecurityContext: {}
+    # -- (object) MCP container security context — override `global.containerSecurityContext`
+    containerSecurityContext: {}
+    # -- (object) MCP resource requests and limits — override `global.resources`
+    resources: {}
+    # -- (object) MCP ServiceAccount — override `global.serviceAccount`
+    serviceAccount: {}
+    # -- (object) MCP pod annotations — override `global.podAnnotations`
+    podAnnotations: {}
+    # -- (object) MCP pod labels — override `global.podLabels`
+    podLabels: {}
+    # -- (object) MCP node selector — override `global.nodeSelector`
+    nodeSelector: {}
+    # -- (list) MCP tolerations — override `global.tolerations`
+    tolerations: []
+    # -- (object) MCP affinity — override `global.affinity`
+    affinity: {}
+    # -- (int) MCP container port
+    port: 3001
+    # -- (list) MCP additional environment variables
+    extraEnv: []
+    # -- (object) MCP liveness and readiness probes
+    probes:
+      # -- (object) Liveness probe configuration
+      liveness:
+        httpGet:
+          path: /health
+          port: http
+        initialDelaySeconds: 5
+        periodSeconds: 10
+      # -- (object) Readiness probe configuration
+      readiness:
+        httpGet:
+          path: /health
+          port: http
+        initialDelaySeconds: 5
+        periodSeconds: 5
+
+    # Volumes
+
+    # -- (list) MCP volumes to mount
+    volumes: []
+    # -- (list) MCP additional volumes to mount
+    extraVolumes: []
+    # -- (list) MCP volume mounts for the container
+    volumeMounts: []
+    # -- (list) MCP additional volume mounts for the container
+    extraVolumeMounts: []
+
+    # Service
+
+    # -- (object) MCP service — override `global.service`
+    service: {}
+
+    # Autoscaling
+
+    # -- (object) MCP autoscaling — override `global.autoscaling`
+    autoscaling: {}
+
+  # Radinage webapp (nginx)
+  webapp:
+    # -- (bool) Set to false to skip deploying the webapp
+    enabled: true
+
+    # Pod / Container
+
+    # -- (object) Webapp container image — override `global.image`
+    image:
+      # -- (string) Image repository
+      repository: radinage-webapp
+      # -- (string) Image tag — override `global.image.tag`
+      tag: ""
+      # -- (string) Image pull policy — override `global.image.pullPolicy`
+      pullPolicy: ""
+    # -- (list) Webapp image pull secrets — override `global.imagePullSecrets`
+    imagePullSecrets: []
+    # -- (string) Webapp replica count — override `global.replicaCount`
+    replicaCount: ""
+    # -- (object) Webapp pod security context — override `global.podSecurityContext`
+    podSecurityContext: {}
+    # -- (object) Webapp container security context — override `global.containerSecurityContext`
+    containerSecurityContext: {}
+    # -- (object) Webapp resource requests and limits — override `global.resources`
+    resources: {}
+    # -- (object) Webapp ServiceAccount — override `global.serviceAccount`
+    serviceAccount: {}
+    # -- (object) Webapp pod annotations — override `global.podAnnotations`
+    podAnnotations: {}
+    # -- (object) Webapp pod labels — override `global.podLabels`
+    podLabels: {}
+    # -- (object) Webapp node selector — override `global.nodeSelector`
+    nodeSelector: {}
+    # -- (list) Webapp tolerations — override `global.tolerations`
+    tolerations: []
+    # -- (object) Webapp affinity — override `global.affinity`
+    affinity: {}
+    # -- (int) Webapp container port
+    port: 8080
+    # -- (list) Webapp additional environment variables
+    extraEnv: []
+    # -- (object) Webapp liveness and readiness probes
+    probes:
+      # -- (object) Liveness probe configuration
+      liveness:
+        httpGet:
+          path: /
+          port: http
+        initialDelaySeconds: 5
+        periodSeconds: 10
+      # -- (object) Readiness probe configuration
+      readiness:
+        httpGet:
+          path: /
+          port: http
+        initialDelaySeconds: 5
+        periodSeconds: 5
+
+    # Volumes (nginx needs writable temp directories)
+
+    # -- (list) Webapp volumes to mount
+    volumes:
+      - name: tmp
+        emptyDir: {}
+    # -- (list) Webapp additional volumes to mount
+    extraVolumes: []
+    # -- (list) Webapp volume mounts for the container
+    volumeMounts:
+      - name: tmp
+        mountPath: /tmp
+        subPath: tmp
+    # -- (list) Webapp additional volume mounts for the container
+    extraVolumeMounts: []
+
+    # Service
+
+    # -- (object) Webapp service — override `global.service`
+    service: {}
+
+    # Autoscaling
+
+    # -- (object) Webapp autoscaling — override `global.autoscaling`
+    autoscaling: {}

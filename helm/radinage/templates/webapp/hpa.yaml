@@ -1,0 +1,26 @@
+{{- $app := .Values.apps.webapp }}
+{{- if $app.enabled }}
+{{- if (dig "autoscaling" "enabled" $.Values.global.autoscaling.enabled $app) }}
+{{- $ctx := dict "appName" "webapp" "appValues" $app "root" $ }}
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ include "radinage.fullname" $ctx }}
+  labels:
+    {{- include "radinage.labels" $ctx | nindent 4 }}
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ include "radinage.fullname" $ctx }}
+  minReplicas: {{ default $.Values.global.autoscaling.minReplicas (dig "autoscaling" "minReplicas" nil $app) }}
+  maxReplicas: {{ default $.Values.global.autoscaling.maxReplicas (dig "autoscaling" "maxReplicas" nil $app) }}
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ default $.Values.global.autoscaling.targetCPUUtilizationPercentage (dig "autoscaling" "targetCPUUtilizationPercentage" nil $app) }}
+{{- end }}
+{{- end }}

@@ -1,0 +1,58 @@
+[[bin]]
+name = "radinage-api"
+path = "src/main.rs"
+
+[dependencies]
+aide = {version = "0.16.0-alpha.3", features = ["axum", "axum-json", "axum-query"]}
+anyhow = "1.0"
+argon2 = "0.5"
+axum = {version = "0.8", features = ["multipart"]}
+axum-extra = {version = "0.10", features = ["typed-header"]}
+calamine = {version = "0.26", features = ["dates"]}
+chrono = {version = "0.4", features = ["serde"]}
+clap = {version = "4.6", features = ["derive", "env"]}
+csv = "1.4"
+indexmap = "2.13"
+jsonwebtoken = "9.3"
+rand_core = {version = "0.6", features = ["std"]}
+rust_decimal = {version = "1.40", features = ["serde-with-str"]}
+schemars = {version = "1.2", features = ["chrono04", "uuid1"]}
+serde = {version = "1.0", features = ["derive"]}
+serde_json = "1.0"
+sqlx = {version = "0.8", features = [
+  "postgres",
+  "runtime-tokio-rustls",
+  "uuid",
+  "chrono",
+  "rust_decimal"
+]}
+thiserror = "2.0"
+tokio = {version = "1.50", features = ["full"]}
+tower = "0.5"
+tower-http = {version = "0.6", features = ["cors", "trace"]}
+tracing = "0.1"
+tracing-subscriber = {version = "0.3", features = ["json", "env-filter"]}
+uuid = {version = "1.22", features = ["v4", "serde"]}
+
+[dev-dependencies]
+bytes = "1.11"
+http = "1.4"
+http-body-util = "0.1"
+mockall = "0.13"
+rust_decimal_macros = "1.40"
+serde_json = "1.0"
+sqlx = {version = "0.8", features = [
+  "postgres",
+  "runtime-tokio-rustls",
+  "uuid",
+  "chrono",
+  "rust_decimal",
+  "macros",
+  "migrate"
+]}
+tokio = {version = "1.50", features = ["full"]}
+
+[package]
+edition = "2024"
+name = "radinage-api"
+version = "0.1.0"

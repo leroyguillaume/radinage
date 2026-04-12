@@ -1,0 +1,17 @@
+changelog:
+  categories:
+    - title: Features
+      labels:
+        - feature
+    - title: Bug Fixes
+      labels:
+        - fix
+    - title: Build
+      labels:
+        - build
+    - title: CI
+      labels:
+        - ci
+    - title: Other Changes
+      labels:
+        - '*'

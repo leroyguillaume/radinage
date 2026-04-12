@@ -1,0 +1,58 @@
+name: Docker Build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build (${{ matrix.platform }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+          - linux/amd64
+          - linux/arm64
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set platform slug
+        run: echo "PLATFORM_SLUG=${PLATFORM#linux/}" >> "$GITHUB_ENV"
+        env:
+          PLATFORM: ${{ matrix.platform }}
+
+      - uses: docker/setup-qemu-action@v3
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build API
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: api
+          platforms: ${{ matrix.platform }}
+          cache-from: type=gha,scope=rust-${{ env.PLATFORM_SLUG }}
+          cache-to: type=gha,mode=max,scope=rust-${{ env.PLATFORM_SLUG }}
+
+      - name: Build MCP
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: mcp
+          platforms: ${{ matrix.platform }}
+          cache-from: type=gha,scope=rust-${{ env.PLATFORM_SLUG }}
+
+      - name: Build Webapp
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: webapp
+          platforms: ${{ matrix.platform }}
+          cache-from: type=gha,scope=webapp-${{ env.PLATFORM_SLUG }}
+          cache-to: type=gha,mode=max,scope=webapp-${{ env.PLATFORM_SLUG }}

@@ -1,0 +1,38 @@
+{{- $app := .Values.apps.mcp }}
+{{- if $app.enabled }}
+{{- $ctx := dict "appName" "mcp" "appValues" $app "root" $ }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "radinage.fullname" $ctx }}
+  labels:
+    {{- include "radinage.labels" $ctx | nindent 4 }}
+spec:
+  {{- if not (dig "autoscaling" "enabled" $.Values.global.autoscaling.enabled $app) }}
+  replicas: {{ default $.Values.global.replicaCount $app.replicaCount }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "radinage.selectorLabels" $ctx | nindent 6 }}
+  template:
+    metadata:
+      {{- include "radinage.podMetadata" $ctx | nindent 6 }}
+    spec:
+      {{- include "radinage.podSpec" $ctx | nindent 6 }}
+      containers:
+        - name: mcp
+          {{- include "radinage.containerSpec" $ctx | nindent 10 }}
+          env:
+            - name: LOG_FILTER
+              value: {{ default $.Values.global.logFilter (dig "logFilter" "" $app) | quote }}
+            - name: LISTEN_ADDR
+              value: "0.0.0.0:{{ $app.port }}"
+            - name: RADINAGE_API_URL
+              value: {{ include "radinage.apiUrl" $ | quote }}
+            {{- with $app.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          {{- include "radinage.volumeMounts" $ctx | nindent 10 }}
+      {{- include "radinage.volumes" $ctx | nindent 6 }}
+      {{- include "radinage.scheduling" $ctx | nindent 6 }}
+{{- end }}

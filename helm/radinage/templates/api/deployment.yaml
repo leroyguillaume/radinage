@@ -1,0 +1,65 @@
+{{- $app := .Values.apps.api }}
+{{- if $app.enabled }}
+{{- $ctx := dict "appName" "api" "appValues" $app "root" $ }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "radinage.fullname" $ctx }}
+  labels:
+    {{- include "radinage.labels" $ctx | nindent 4 }}
+spec:
+  {{- if not (dig "autoscaling" "enabled" $.Values.global.autoscaling.enabled $app) }}
+  replicas: {{ default $.Values.global.replicaCount $app.replicaCount }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "radinage.selectorLabels" $ctx | nindent 6 }}
+  template:
+    metadata:
+      {{- include "radinage.podMetadata" $ctx | nindent 6 }}
+    spec:
+      {{- include "radinage.podSpec" $ctx | nindent 6 }}
+      containers:
+        - name: api
+          {{- include "radinage.containerSpec" $ctx | nindent 10 }}
+          env:
+            - name: LOG_FILTER
+              value: {{ default $.Values.global.logFilter (dig "logFilter" "" $app) | quote }}
+            - name: LOG_JSON
+              value: {{ $app.logJson | quote }}
+            - name: LISTEN_ADDR
+              value: "0.0.0.0:{{ $app.port }}"
+            - name: ROOT_PATH
+              value: {{ $app.rootPath | quote }}
+            - name: JWT_EXPIRATION_SECS
+              value: {{ $app.jwtExpirationSecs | quote }}
+            - name: ADMIN_USERNAME
+              value: {{ $app.adminUsername | quote }}
+            - name: MAX_BUDGETS_PER_USER
+              value: {{ $app.maxBudgetsPerUser | quote }}
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $app.databaseSecret.name }}
+                  key: {{ $app.databaseSecret.key }}
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "radinage.jwtSecretName" $ }}
+                  key: {{ $app.jwtSecret.key }}
+            - name: ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "radinage.adminPasswordSecretName" $ }}
+                  key: {{ $app.adminPasswordSecret.key }}
+            - name: WEBAPP_URL
+              value: {{ include "radinage.webappUrl" $ | quote }}
+            - name: CORS_ORIGINS
+              value: {{ $app.corsOrigins | quote }}
+            {{- with $app.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          {{- include "radinage.volumeMounts" $ctx | nindent 10 }}
+      {{- include "radinage.volumes" $ctx | nindent 6 }}
+      {{- include "radinage.scheduling" $ctx | nindent 6 }}
+{{- end }}

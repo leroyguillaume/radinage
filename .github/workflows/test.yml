@@ -1,0 +1,58 @@
+name: Test
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  rust:
+    name: Rust
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: radinage
+          POSTGRES_PASSWORD: radinage
+          POSTGRES_DB: radinage
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgresql://radinage:radinage@localhost:5432/radinage
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.94.1
+
+      - uses: Swatinem/rust-cache@v2
+
+      - run: cargo test
+
+  frontend:
+    name: Frontend
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: radinage-webapp
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '25'
+          cache: npm
+          cache-dependency-path: radinage-webapp/package-lock.json
+
+      - run: npm ci
+
+      - run: npm test

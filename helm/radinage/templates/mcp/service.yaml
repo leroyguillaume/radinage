@@ -1,0 +1,19 @@
+{{- $app := .Values.apps.mcp }}
+{{- if $app.enabled }}
+{{- $ctx := dict "appName" "mcp" "appValues" $app "root" $ }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "radinage.fullname" $ctx }}
+  labels:
+    {{- include "radinage.labels" $ctx | nindent 4 }}
+spec:
+  type: {{ default $.Values.global.service.type (dig "service" "type" "" $app) }}
+  ports:
+    - port: {{ $app.port }}
+      targetPort: http
+      protocol: TCP
+      name: http
+  selector:
+    {{- include "radinage.selectorLabels" $ctx | nindent 4 }}
+{{- end }}

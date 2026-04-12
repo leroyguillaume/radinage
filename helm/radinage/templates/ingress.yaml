@@ -1,0 +1,49 @@
+{{- if .Values.ingress.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ .Release.Name }}-radinage
+  labels:
+    helm.sh/chart: {{ include "radinage.chart" . }}
+    app.kubernetes.io/name: {{ include "radinage.name" . }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+  {{- with .Values.ingress.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- with .Values.ingress.className }}
+  ingressClassName: {{ . }}
+  {{- end }}
+  {{- with .Values.ingress.tls }}
+  tls:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- with .Values.ingress.defaultBackend }}
+  {{- $ctx := dict "appName" . "root" $ }}
+  defaultBackend:
+    service:
+      name: {{ include "radinage.fullname" $ctx }}
+      port:
+        name: http
+  {{- end }}
+  rules:
+    - host: {{ .Values.global.domain | quote }}
+      http:
+        paths:
+          {{- range $appName, $rule := .Values.ingress.apps }}
+          {{- $app := index $.Values.apps $appName }}
+          {{- if $app.enabled }}
+          {{- $ctx := dict "appName" $appName "root" $ }}
+          - path: {{ $rule.path }}
+            pathType: {{ $rule.pathType }}
+            backend:
+              service:
+                name: {{ include "radinage.fullname" $ctx }}
+                port:
+                  name: http
+          {{- end }}
+          {{- end }}
+{{- end }}

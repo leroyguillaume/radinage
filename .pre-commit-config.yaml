@@ -1,0 +1,81 @@
+repos:
+  # Common checks
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+        exclude: ^helm/
+      - id: check-toml
+      - id: check-json
+        exclude: tsconfig.*\.json$
+      - id: check-merge-conflict
+      - id: detect-private-key
+      - id: check-added-large-files
+      - id: pretty-format-json
+        args: [--autofix]
+        exclude: ^(helm/|radinage-webapp/)
+
+  # YAML / TOML formatting
+  - repo: https://github.com/macisamuele/language-formatters-pre-commit-hooks
+    rev: v2.16.0
+    hooks:
+      - id: pretty-format-toml
+        args: [--autofix]
+        exclude: ^(helm/|radinage-webapp/|Cargo.lock$)
+      - id: pretty-format-yaml
+        args: [--autofix, --offset, '2']
+        exclude: ^(helm/|radinage-webapp/)
+
+  # Dockerfile linting
+  - repo: https://github.com/hadolint/hadolint
+    rev: v2.14.0
+    hooks:
+      - id: hadolint-docker
+
+  # Rust format
+  - repo: local
+    hooks:
+      - id: cargo-fmt
+        name: cargo fmt
+        entry: cargo fmt --all
+        language: system
+        types: [rust]
+        pass_filenames: false
+      # Rust clippy (all targets, deny warnings)
+      - id: cargo-clippy
+        name: cargo clippy
+        entry: cargo clippy --all-targets -- -D warnings
+        language: system
+        types: [rust]
+        pass_filenames: false
+      # Biome (lint + format for TypeScript/JavaScript/JSON)
+      - id: biome-check
+        name: biome check
+        entry: bash -c 'cd radinage-webapp && npx @biomejs/biome check --write --error-on-warnings'
+        language: system
+        files: ^radinage-webapp/
+        types_or: [ts, tsx, javascript, jsx, json]
+        pass_filenames: false
+      # TypeScript type checking (biome does not do this)
+      - id: tsc
+        name: tsc
+        entry: bash -c 'cd radinage-webapp && npx tsc -b --noEmit'
+        language: system
+        files: ^radinage-webapp/.*\.(ts|tsx)$
+        pass_filenames: false
+      # Helm lint
+      - id: helm-lint
+        name: helm lint
+        entry: helm lint helm/radinage/
+        language: system
+        files: ^helm/
+        pass_filenames: false
+      # Helm docs (check that README is up-to-date)
+      - id: helm-docs
+        name: helm docs
+        entry: bash -c 'helm-docs --chart-search-root helm/radinage && git diff --exit-code helm/radinage/README.md'
+        language: system
+        files: ^helm/
+        pass_filenames: false

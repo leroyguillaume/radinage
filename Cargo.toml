@@ -1,0 +1,3 @@
+[workspace]
+members = ["radinage-api", "radinage-mcp"]
+resolver = "2"
