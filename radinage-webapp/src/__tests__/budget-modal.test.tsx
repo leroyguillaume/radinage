@@ -51,7 +51,7 @@ function renderModal(budget: BudgetResponse | null = null, onClose = vi.fn()) {
 
 	render(
 		<QueryClientProvider client={queryClient}>
-			<MantineProvider theme={theme}>
+			<MantineProvider theme={theme} env="test">
 				<DatesProvider settings={{ locale: "fr" }}>
 					<BudgetModal opened onClose={onClose} budget={budget} />
 				</DatesProvider>

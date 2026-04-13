@@ -31,7 +31,7 @@ function renderModal(onClose = vi.fn(), onSuccess = vi.fn()) {
 
 	render(
 		<QueryClientProvider client={queryClient}>
-			<MantineProvider theme={theme}>
+			<MantineProvider theme={theme} env="test">
 				<ImportModal opened onClose={onClose} onSuccess={onSuccess} />
 			</MantineProvider>
 		</QueryClientProvider>,

@@ -561,7 +561,7 @@ function LinkBudgetMenu({
 		: budgets;
 
 	return (
-		<Menu position="bottom-end" onClose={() => setSearch("")}>
+		<Menu position="bottom-end" withinPortal onClose={() => setSearch("")}>
 			<Menu.Target>
 				<Tooltip label={t("operations.linkBudget")}>
 					<ActionIcon

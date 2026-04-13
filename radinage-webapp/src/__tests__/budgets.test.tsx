@@ -119,7 +119,7 @@ async function renderBudgetsPage() {
 
 	render(
 		<QueryClientProvider client={queryClient}>
-			<MantineProvider theme={theme}>
+			<MantineProvider theme={theme} env="test">
 				<DatesProvider settings={{ locale: "fr" }}>
 					<RouterProvider router={router} />
 				</DatesProvider>

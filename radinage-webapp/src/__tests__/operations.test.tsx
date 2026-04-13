@@ -223,7 +223,7 @@ async function renderOperationsPage(year = "2026", month = "4") {
 
 	render(
 		<QueryClientProvider client={queryClient}>
-			<MantineProvider theme={theme}>
+			<MantineProvider theme={theme} env="test">
 				<DatesProvider settings={{ locale: "fr" }}>
 					<RouterProvider router={router} />
 				</DatesProvider>

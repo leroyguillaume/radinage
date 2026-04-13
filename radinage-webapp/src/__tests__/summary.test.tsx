@@ -142,7 +142,7 @@ async function renderSummaryPage(searchParams = "") {
 
 	render(
 		<QueryClientProvider client={queryClient}>
-			<MantineProvider theme={theme}>
+			<MantineProvider theme={theme} env="test">
 				<RouterProvider router={router} />
 			</MantineProvider>
 		</QueryClientProvider>,
