@@ -3,7 +3,7 @@
 # =============================================================================
 FROM rust:1.94.1-alpine3.23 AS rust-builder
 
-RUN apk add --no-cache musl-dev=1.2.5-r21 openssl-dev=3.5.6-r0 openssl-libs-static=3.5.6-r0
+RUN apk add --no-cache musl-dev~=1.2.5-r23 openssl-dev~=3.5.6 openssl-libs-static~=3.5.6
 
 WORKDIR /usr/src/local/radinage
 
