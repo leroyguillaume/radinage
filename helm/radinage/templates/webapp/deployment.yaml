@@ -11,6 +11,7 @@ spec:
   {{- if not (dig "autoscaling" "enabled" $.Values.global.autoscaling.enabled $app) }}
   replicas: {{ default $.Values.global.replicaCount $app.replicaCount }}
   {{- end }}
+  revisionHistoryLimit: {{ default $.Values.global.revisionHistoryLimit $app.revisionHistoryLimit }}
   selector:
     matchLabels:
       {{- include "radinage.selectorLabels" $ctx | nindent 6 }}
@@ -22,10 +23,12 @@ spec:
       containers:
         - name: webapp
           {{- include "radinage.containerSpec" $ctx | nindent 10 }}
-          {{- with $app.extraEnv }}
           env:
+            - name: API_HOST
+              value: {{ include "radinage.apiHost" $ | quote }}
+            {{- with $app.extraEnv }}
             {{- toYaml . | nindent 12 }}
-          {{- end }}
+            {{- end }}
           {{- include "radinage.volumeMounts" $ctx | nindent 10 }}
       {{- include "radinage.volumes" $ctx | nindent 6 }}
       {{- include "radinage.scheduling" $ctx | nindent 6 }}

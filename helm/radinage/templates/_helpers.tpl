@@ -90,7 +90,7 @@ Usage: {{ include "radinage.adminPasswordSecretName" . }}
 
 {{/*
 Radinage API URL for the MCP server.
-Defaults to the cluster-internal service: http://<release>-api:<port>.
+Defaults to the cluster-internal service: http://<release>-api:<port>/<rootPath>.
 Usage: {{ include "radinage.apiUrl" . }}
 */}}
 {{- define "radinage.apiUrl" -}}
@@ -99,7 +99,27 @@ Usage: {{ include "radinage.apiUrl" . }}
   {{- $url -}}
 {{- else -}}
   {{- $ctx := dict "appName" "api" "root" . -}}
-  {{- printf "http://%s:%v" (include "radinage.fullname" $ctx) .Values.apps.api.port -}}
+  {{- $path := trimPrefix "/" (default "" .Values.apps.api.rootPath) -}}
+  {{- if $path -}}
+    {{- printf "http://%s:%v/%s" (include "radinage.fullname" $ctx) .Values.apps.api.port $path -}}
+  {{- else -}}
+    {{- printf "http://%s:%v" (include "radinage.fullname" $ctx) .Values.apps.api.port -}}
+  {{- end -}}
+{{- end -}}
+{{- end }}
+
+{{/*
+Upstream API host:port used by the webapp nginx proxy_pass.
+Defaults to the cluster-internal service: <release>-api:<port>.
+Usage: {{ include "radinage.apiHost" . }}
+*/}}
+{{- define "radinage.apiHost" -}}
+{{- $host := .Values.apps.webapp.apiHost -}}
+{{- if $host -}}
+  {{- $host -}}
+{{- else -}}
+  {{- $ctx := dict "appName" "api" "root" . -}}
+  {{- printf "%s:%v" (include "radinage.fullname" $ctx) .Values.apps.api.port -}}
 {{- end -}}
 {{- end }}
 

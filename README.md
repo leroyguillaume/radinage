@@ -24,8 +24,8 @@ radinage/
 ├── radinage-webapp/    React SPA (TypeScript, Mantine, TanStack)
 ├── helm/               Kubernetes Helm charts
 ├── docker-compose.yml  Multi-service orchestration
-├── Dockerfile          Multi-stage build (API, MCP, Webapp)
-└── nginx.conf          Frontend reverse proxy config
+├── Dockerfile              Multi-stage build (API, MCP, Webapp)
+└── nginx.conf.template     Frontend reverse proxy config (envsubst at startup)
 ```
 
 ### Backend (`radinage-api`)
@@ -142,6 +142,12 @@ All API configuration is done via environment variables (or CLI flags):
 | `LOG_FILTER`           | tracing filter directive             | `info`             |
 | `LOG_JSON`             | Output logs as JSON                  | `false`            |
 | `JWT_EXPIRATION_SECS`  | Token expiration in seconds          | `86400`            |
+
+The webapp (nginx) image also accepts:
+
+| Variable    | Description                              | Default    |
+|-------------|------------------------------------------|------------|
+| `API_HOST`  | Upstream API host:port for `/api/` proxy | `api:3000` |
 
 ## Deployment
 

@@ -73,11 +73,14 @@ ENTRYPOINT ["radinage-mcp"]
 FROM nginx:1.29.8-alpine3.23 AS webapp
 
 RUN addgroup -g 1000 -S radinage && adduser -u 1000 -S radinage -G radinage \
-    && mkdir -p /var/cache/nginx /var/run \
-    && chown -R radinage:radinage /var/cache/nginx /var/run /etc/nginx/conf.d
+    && mkdir -p /var/cache/nginx /var/run /etc/nginx/templates \
+    && chown -R radinage:radinage /var/cache/nginx /var/run /etc/nginx/conf.d /etc/nginx/templates
 
 COPY nginx.conf /etc/nginx/nginx.conf
+COPY --chown=radinage:radinage default.conf.template /etc/nginx/templates/default.conf.template
 COPY --from=webapp-builder /usr/src/local/radinage/dist /usr/share/nginx/html
+
+ENV API_HOST=api:3000
 
 USER radinage
 

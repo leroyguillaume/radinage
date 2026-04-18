@@ -20,6 +20,8 @@ global:
   imagePullSecrets: []
   # -- (int) Number of replicas
   replicaCount: 1
+  # -- (int) Number of old ReplicaSets to retain for rollback
+  revisionHistoryLimit: 10
   # -- (object) Pod-level security context (restricted by default)
   podSecurityContext:
     runAsNonRoot: true
@@ -182,6 +184,8 @@ apps:
     imagePullSecrets: []
     # -- (string) API replica count — override `global.replicaCount`
     replicaCount: ""
+    # -- (string) API revision history limit — override `global.revisionHistoryLimit`
+    revisionHistoryLimit: ""
     # -- (object) API pod security context — override `global.podSecurityContext`
     podSecurityContext: {}
     # -- (object) API container security context — override `global.containerSecurityContext`
@@ -266,6 +270,8 @@ apps:
     imagePullSecrets: []
     # -- (string) MCP replica count — override `global.replicaCount`
     replicaCount: ""
+    # -- (string) MCP revision history limit — override `global.revisionHistoryLimit`
+    revisionHistoryLimit: ""
     # -- (object) MCP pod security context — override `global.podSecurityContext`
     podSecurityContext: {}
     # -- (object) MCP container security context — override `global.containerSecurityContext`
@@ -331,6 +337,12 @@ apps:
     # -- (bool) Set to false to skip deploying the webapp
     enabled: true
 
+    # Radinage webapp config
+
+    # -- (string) Upstream API host:port used by nginx proxy_pass.
+    # Defaults to the cluster-internal service: `<release>-api:<apps.api.port>`.
+    apiHost: ""
+
     # Pod / Container
 
     # -- (object) Webapp container image — override `global.image`
@@ -345,6 +357,8 @@ apps:
     imagePullSecrets: []
     # -- (string) Webapp replica count — override `global.replicaCount`
     replicaCount: ""
+    # -- (string) Webapp revision history limit — override `global.revisionHistoryLimit`
+    revisionHistoryLimit: ""
     # -- (object) Webapp pod security context — override `global.podSecurityContext`
     podSecurityContext: {}
     # -- (object) Webapp container security context — override `global.containerSecurityContext`
@@ -384,11 +398,14 @@ apps:
         initialDelaySeconds: 5
         periodSeconds: 5
 
-    # Volumes (nginx needs writable temp directories)
+    # Volumes (nginx needs writable temp directories and a writable
+    # /etc/nginx/conf.d where the entrypoint renders the envsubst template)
 
     # -- (list) Webapp volumes to mount
     volumes:
       - name: tmp
+        emptyDir: {}
+      - name: nginx-conf-d
         emptyDir: {}
     # -- (list) Webapp additional volumes to mount
     extraVolumes: []
@@ -397,6 +414,8 @@ apps:
       - name: tmp
         mountPath: /tmp
         subPath: tmp
+      - name: nginx-conf-d
+        mountPath: /etc/nginx/conf.d
     # -- (list) Webapp additional volume mounts for the container
     extraVolumeMounts: []
 

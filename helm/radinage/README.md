@@ -50,6 +50,7 @@ A personal bank account tracking application
 | apps.api.probes.readiness | object | `{"httpGet":{"path":"/api/health","port":"http"},"initialDelaySeconds":5,"periodSeconds":5}` | Readiness probe configuration |
 | apps.api.replicaCount | string | `""` | API replica count — override `global.replicaCount` |
 | apps.api.resources | object | `{}` | API resource requests and limits — override `global.resources` |
+| apps.api.revisionHistoryLimit | string | `""` | API revision history limit — override `global.revisionHistoryLimit` |
 | apps.api.rootPath | string | `"api"` | Root path prefix for API routes |
 | apps.api.service | object | `{}` | API service — override `global.service` |
 | apps.api.serviceAccount | object | `{}` | API ServiceAccount — override `global.serviceAccount` |
@@ -80,12 +81,14 @@ A personal bank account tracking application
 | apps.mcp.probes.readiness | object | `{"httpGet":{"path":"/health","port":"http"},"initialDelaySeconds":5,"periodSeconds":5}` | Readiness probe configuration |
 | apps.mcp.replicaCount | string | `""` | MCP replica count — override `global.replicaCount` |
 | apps.mcp.resources | object | `{}` | MCP resource requests and limits — override `global.resources` |
+| apps.mcp.revisionHistoryLimit | string | `""` | MCP revision history limit — override `global.revisionHistoryLimit` |
 | apps.mcp.service | object | `{}` | MCP service — override `global.service` |
 | apps.mcp.serviceAccount | object | `{}` | MCP ServiceAccount — override `global.serviceAccount` |
 | apps.mcp.tolerations | list | `[]` | MCP tolerations — override `global.tolerations` |
 | apps.mcp.volumeMounts | list | `[]` | MCP volume mounts for the container |
 | apps.mcp.volumes | list | `[]` | MCP volumes to mount |
 | apps.webapp.affinity | object | `{}` | Webapp affinity — override `global.affinity` |
+| apps.webapp.apiHost | string | `""` | Upstream API host:port used by nginx proxy_pass. Defaults to the cluster-internal service: `<release>-api:<apps.api.port>`. |
 | apps.webapp.autoscaling | object | `{}` | Webapp autoscaling — override `global.autoscaling` |
 | apps.webapp.containerSecurityContext | object | `{}` | Webapp container security context — override `global.containerSecurityContext` |
 | apps.webapp.enabled | bool | `true` | Set to false to skip deploying the webapp |
@@ -107,11 +110,12 @@ A personal bank account tracking application
 | apps.webapp.probes.readiness | object | `{"httpGet":{"path":"/","port":"http"},"initialDelaySeconds":5,"periodSeconds":5}` | Readiness probe configuration |
 | apps.webapp.replicaCount | string | `""` | Webapp replica count — override `global.replicaCount` |
 | apps.webapp.resources | object | `{}` | Webapp resource requests and limits — override `global.resources` |
+| apps.webapp.revisionHistoryLimit | string | `""` | Webapp revision history limit — override `global.revisionHistoryLimit` |
 | apps.webapp.service | object | `{}` | Webapp service — override `global.service` |
 | apps.webapp.serviceAccount | object | `{}` | Webapp ServiceAccount — override `global.serviceAccount` |
 | apps.webapp.tolerations | list | `[]` | Webapp tolerations — override `global.tolerations` |
-| apps.webapp.volumeMounts | list | `[{"mountPath":"/tmp","name":"tmp","subPath":"tmp"}]` | Webapp volume mounts for the container |
-| apps.webapp.volumes | list | `[{"emptyDir":{},"name":"tmp"}]` | Webapp volumes to mount |
+| apps.webapp.volumeMounts | list | `[{"mountPath":"/tmp","name":"tmp","subPath":"tmp"},{"mountPath":"/etc/nginx/conf.d","name":"nginx-conf-d"}]` | Webapp volume mounts for the container |
+| apps.webapp.volumes | list | `[{"emptyDir":{},"name":"tmp"},{"emptyDir":{},"name":"nginx-conf-d"}]` | Webapp volumes to mount |
 | global.affinity | object | `{}` | Affinity rules for pod scheduling |
 | global.autoscaling | object | `{"enabled":false,"maxReplicas":3,"minReplicas":1,"targetCPUUtilizationPercentage":80}` | Horizontal Pod Autoscaler configuration |
 | global.autoscaling.enabled | bool | `false` | Enable autoscaling |
@@ -132,6 +136,7 @@ A personal bank account tracking application
 | global.podSecurityContext | object | `{"fsGroup":1000,"runAsGroup":1000,"runAsNonRoot":true,"runAsUser":1000,"seccompProfile":{"type":"RuntimeDefault"}}` | Pod-level security context (restricted by default) |
 | global.replicaCount | int | `1` | Number of replicas |
 | global.resources | object | `{"limits":{"memory":"256Mi"},"requests":{"cpu":"100m","memory":"128Mi"}}` | Container resource requests and limits |
+| global.revisionHistoryLimit | int | `10` | Number of old ReplicaSets to retain for rollback |
 | global.service | object | `{"type":"ClusterIP"}` | Service configuration |
 | global.service.type | string | `"ClusterIP"` | Kubernetes Service type |
 | global.serviceAccount | object | `{"annotations":{},"automountServiceAccountToken":false,"create":true}` | ServiceAccount configuration |
