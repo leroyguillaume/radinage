@@ -190,6 +190,11 @@ where
                 description: Some("Compute monthly financial summaries. Returns the total expected budget, actual spending per budget type, and the amount of unbudgeted expenses for a given month.".to_string()),
                 ..Tag::default()
             },
+            Tag {
+                name: "Data".to_string(),
+                description: Some("Export and re-import a user's full data (budgets and operations) as JSON. Intended for backup and account migration.".to_string()),
+                ..Tag::default()
+            },
         ],
         ..OpenApi::default()
     };
@@ -401,6 +406,25 @@ where
                     .id("getSummary")
             }),
         )
+        // Data export / import
+        .api_route(
+            "/data/export",
+            get_with(handlers::data::export_data, |op| {
+                op.tag("Data")
+                    .summary("Export all budgets and operations")
+                    .description("Return the authenticated user's full data (budgets and operations) as a versioned JSON payload. Suitable for backup or migration.")
+                    .id("exportData")
+            }),
+        )
+        .api_route(
+            "/data/import",
+            post_with(handlers::data::import_data, |op| {
+                op.tag("Data")
+                    .summary("Import budgets and operations from a prior export")
+                    .description("Merge budgets and operations from a JSON payload previously obtained via /data/export into the authenticated user's account. Budgets are deduplicated by label, operations by (date, amount, label). Budget links on operations are remapped to existing or newly-created budgets.")
+                    .id("importData")
+            }),
+        )
         // Documentation
         .route("/docs", get(scalar_docs))
         .finish_api(&mut api)
@@ -565,6 +589,9 @@ pub(crate) mod test_util {
             )
             // Summary
             .route("/summary", routing::get(handlers::summary::get_summary))
+            // Data export / import
+            .route("/data/export", routing::get(handlers::data::export_data))
+            .route("/data/import", routing::post(handlers::data::import_data))
             .with_state(state)
     }
 

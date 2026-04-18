@@ -200,7 +200,16 @@
 		"submit": "Modifier",
 		"success": "Mot de passe modifié avec succès",
 		"errorCurrentPassword": "Le mot de passe actuel est incorrect",
-		"errorPasswordMismatch": "Les nouveaux mots de passe ne correspondent pas"
+		"errorPasswordMismatch": "Les nouveaux mots de passe ne correspondent pas",
+		"data": {
+			"title": "Données",
+			"description": "Exportez une sauvegarde complète (budgets + opérations) ou importez-la pour restaurer ou migrer votre compte.",
+			"export": "Exporter les données",
+			"exportError": "Erreur lors de l'export",
+			"import": "Importer des données",
+			"importError": "Fichier invalide ou import refusé",
+			"importSuccess": "{{budgets}} budget(s) importé(s) ({{skippedBudgets}} ignoré(s)), {{operations}} opération(s) importée(s) ({{skippedOperations}} ignorée(s))"
+		}
 	},
 	"activate": {
 		"title": "Activer votre compte",

@@ -13,9 +13,31 @@ permissions:
   packages: write
 
 jobs:
+  verify-version:
+    name: Verify Cargo.toml matches tag
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check workspace version
+        run: |
+          tag_version="${GITHUB_REF_NAME#v}"
+          versions=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[].version' | sort -u)
+          if [ "$(echo "$versions" | wc -l)" -ne 1 ]; then
+            echo "::error::workspace packages have mismatched versions:"
+            echo "$versions"
+            exit 1
+          fi
+          if [ "$versions" != "$tag_version" ]; then
+            echo "::error::workspace version ($versions) does not match tag ($tag_version)"
+            exit 1
+          fi
+          echo "workspace: $versions matches tag"
+
   build:
     name: Build ${{ matrix.target }} (${{ matrix.platform }})
     runs-on: ubuntu-latest
+    needs: verify-version
     strategy:
       fail-fast: false
       matrix:

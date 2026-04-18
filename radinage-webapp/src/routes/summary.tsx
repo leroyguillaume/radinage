@@ -84,9 +84,14 @@ function computeForecast(
 				(m) => m.year === currentYear && m.month === month,
 			);
 			if (actual) {
-				const income = Number(actual.budgeted.income);
+				// `unbudgeted` is a net sum (income + expenses on unlinked ops).
+				// Without a per-operation breakdown we attribute its positive part
+				// to income and its negative part to expenses, so the forecast
+				// stays meaningful when the user has no budgets.
+				const unbudgeted = Number(actual.unbudgeted);
+				const income = Number(actual.budgeted.income) + Math.max(0, unbudgeted);
 				const expenses =
-					Number(actual.unbudgeted) + Number(actual.budgeted.expense);
+					Number(actual.budgeted.expense) + Math.min(0, unbudgeted);
 				const savings = Number(actual.budgeted.savings);
 				const balance = income + expenses + savings;
 				cumulative += balance;
@@ -213,7 +218,11 @@ function ForecastPage() {
 	const endOfYearBalance = last?.cumulative ?? 0;
 
 	const remainingDays = daysRemainingInYear(selectedYear);
-	const dailyBudget = remainingDays > 0 ? endOfYearBalance / remainingDays : 0;
+	// A daily budget below zero is meaningless (you can't spend a negative
+	// amount per day). When the projected end-of-year balance is negative,
+	// there is simply no daily budget left.
+	const dailyBudget =
+		remainingDays > 0 ? Math.max(0, endOfYearBalance / remainingDays) : 0;
 
 	const totalIncome = forecast.reduce((sum, m) => sum + m.income, 0);
 	const totalExpenses = forecast.reduce((sum, m) => sum + m.expenses, 0);

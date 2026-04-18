@@ -21,6 +21,8 @@ pub struct ParsedRow {
     pub label: String,
     pub amount: Decimal,
     pub date: NaiveDate,
+    /// 1-based row number in the source file.
+    pub row: usize,
 }
 
 /// An error encountered on a specific row during file import.
@@ -159,6 +161,7 @@ fn parse_record(
         label,
         amount,
         date,
+        row: row_num,
     })
 }
 
@@ -192,6 +195,7 @@ fn parse_xlsx_row(
         label,
         amount,
         date,
+        row: row_num,
     })
 }
 

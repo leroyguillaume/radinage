@@ -200,7 +200,16 @@
 		"submit": "Change",
 		"success": "Password changed successfully",
 		"errorCurrentPassword": "Current password is incorrect",
-		"errorPasswordMismatch": "New passwords do not match"
+		"errorPasswordMismatch": "New passwords do not match",
+		"data": {
+			"title": "Data",
+			"description": "Export a full backup (budgets + operations) or import one to restore or migrate your account.",
+			"export": "Export data",
+			"exportError": "Export failed",
+			"import": "Import data",
+			"importError": "Invalid file or import rejected",
+			"importSuccess": "{{budgets}} budget(s) imported ({{skippedBudgets}} skipped), {{operations}} operation(s) imported ({{skippedOperations}} skipped)"
+		}
 	},
 	"activate": {
 		"title": "Activate your account",

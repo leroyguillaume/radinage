@@ -1,3 +1,6 @@
 [workspace]
 members = ["radinage-api", "radinage-mcp"]
 resolver = "2"
+
+[workspace.package]
+version = "0.1.0-rc3"

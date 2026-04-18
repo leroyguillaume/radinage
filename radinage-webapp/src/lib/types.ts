@@ -108,3 +108,17 @@ export interface CreateUserResponse {
 export interface ResetPasswordResponse {
 	resetLink: string;
 }
+
+export interface ExportDataResponse {
+	version: number;
+	exportedAt: string;
+	budgets: unknown[];
+	operations: unknown[];
+}
+
+export interface ImportDataResponse {
+	importedBudgets: number;
+	skippedBudgets: number;
+	importedOperations: number;
+	skippedOperations: number;
+}

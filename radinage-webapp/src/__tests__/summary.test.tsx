@@ -292,6 +292,100 @@ describe("SummaryPage", () => {
 		});
 	});
 
+	it("treats positive unbudgeted as income and negative as expense when no budgets exist", async () => {
+		// User has no budgets → all operations land in `unbudgeted`. One month
+		// has net positive unbudgeted (salary dominant), another has net
+		// negative (spending dominant). Totals must reflect both signs.
+		const year = new Date().getFullYear();
+		setupMocks(
+			{
+				months: [
+					{
+						year,
+						month: 1,
+						unbudgeted: "1200.00",
+						budgeted: { expense: "0.00", income: "0.00", savings: "0.00" },
+					},
+					{
+						year,
+						month: 2,
+						unbudgeted: "-800.00",
+						budgeted: { expense: "0.00", income: "0.00", savings: "0.00" },
+					},
+				],
+			},
+			[],
+		);
+
+		await renderSummaryPage(`?year=${year}`);
+
+		await waitFor(() => {
+			expect(screen.getAllByText("Revenus").length).toBeGreaterThan(0);
+		});
+
+		// The page now shows income +1200 and expenses -800. Before the fix,
+		// both unbudgeted values were bucketed into expenses and income stayed
+		// at 0, so 1200 never appeared.
+		const pageText = (document.body.textContent ?? "").replace(/\s/g, "");
+		expect(pageText).toMatch(/1200,00/);
+		expect(pageText).toMatch(/-800,00/);
+	});
+
+	it("clamps daily budget to zero when end-of-year balance is negative", async () => {
+		// Big recurring expenses → negative end-of-year balance → daily budget
+		// would be negative. It must be clamped to 0 €.
+		const heavyExpenseBudgets = [
+			{
+				id: "b1",
+				label: "Rent",
+				budgetType: "expense" as const,
+				kind: {
+					type: "recurring" as const,
+					recurrence: "monthly" as const,
+					closedPeriods: [],
+					currentPeriod: {
+						start: { year: 2025, month: 1 },
+						end: null,
+						amount: "-10000.00",
+					},
+				},
+				rules: [],
+				createdAt: "2025-01-01T00:00:00Z",
+			},
+		];
+		setupMocks(
+			{
+				months: [
+					{
+						year: new Date().getFullYear(),
+						month: 1,
+						unbudgeted: "-5000.00",
+						budgeted: {
+							expense: "-10000.00",
+							income: "0.00",
+							savings: "0.00",
+						},
+					},
+				],
+			},
+			heavyExpenseBudgets,
+		);
+
+		await renderSummaryPage();
+
+		await waitFor(() => {
+			expect(screen.getByText("Budget / jour")).toBeInTheDocument();
+		});
+
+		const dailyBudgetLabel = screen.getByText("Budget / jour");
+		const card = dailyBudgetLabel.closest("div");
+		const text = card?.textContent ?? "";
+		// Should not contain a negative sign before the € amount.
+		expect(text).not.toMatch(/-\d/);
+		// Should display zero euros.
+		expect(text).toMatch(/0,00/);
+	});
+
 	it("displays full year as actual for past years", async () => {
 		setupMocks(
 			{

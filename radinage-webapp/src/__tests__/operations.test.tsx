@@ -742,6 +742,52 @@ describe("MonthlyOperationsPage", () => {
 		expect(screen.getByText("10/04")).toBeInTheDocument();
 	});
 
+	it("counts unlinked operations in income and expense stats when no budgets exist", async () => {
+		const operations: MonthlyOperationsResponse = {
+			operations: [
+				{
+					id: "op1",
+					amount: "1500.00",
+					date: "2026-04-01",
+					effectiveDate: null,
+					label: "Salary",
+					budgetLink: { type: "unlinked" },
+				},
+				{
+					id: "op2",
+					amount: "-200.00",
+					date: "2026-04-05",
+					effectiveDate: null,
+					label: "Groceries",
+					budgetLink: { type: "unlinked" },
+				},
+				{
+					id: "op3",
+					amount: "-50.00",
+					date: "2026-04-10",
+					effectiveDate: null,
+					label: "Taxi",
+					budgetLink: { type: "unlinked" },
+				},
+			],
+		};
+
+		setupMocks({ budgets: [], operations });
+		await renderOperationsPage();
+
+		// Sum of unlinked ops must show up under Dépenses/Revenus, not 0.
+		const expensesLabel = await screen.findByText("Dépenses");
+		const expensesText =
+			expensesLabel.parentElement?.textContent?.replace(/\s/g, "") ?? "";
+		expect(expensesText).toMatch(/-250,00/);
+		expect(expensesText).not.toMatch(/Dépenses0,00/);
+
+		const incomeLabel = screen.getByText("Revenus");
+		const incomeText =
+			incomeLabel.parentElement?.textContent?.replace(/\s/g, "") ?? "";
+		expect(incomeText).toMatch(/1500,00/);
+	});
+
 	it("budget with no operations is not expandable", async () => {
 		const budgetsWithExtra = [
 			...mockBudgetsResponse,

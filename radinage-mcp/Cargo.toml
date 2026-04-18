@@ -20,4 +20,4 @@ tracing-subscriber = {version = "0.3", features = ["env-filter"]}
 [package]
 edition = "2024"
 name = "radinage-mcp"
-version = "0.1.0"
+version.workspace = true

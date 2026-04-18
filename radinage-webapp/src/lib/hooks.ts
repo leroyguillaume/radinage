@@ -4,6 +4,8 @@ import type {
 	ApplyBudgetResponse,
 	BudgetResponse,
 	CreateUserResponse,
+	ExportDataResponse,
+	ImportDataResponse,
 	MonthlyOperationsResponse,
 	OperationResponse,
 	ResetPasswordResponse,
@@ -194,6 +196,28 @@ export function useResetPassword() {
 				method: "POST",
 				body: JSON.stringify({ username }),
 			}),
+	});
+}
+
+export function useExportData() {
+	return useMutation({
+		mutationFn: () => apiFetch<ExportDataResponse>("/data/export"),
+	});
+}
+
+export function useImportData() {
+	const queryClient = useQueryClient();
+	return useMutation({
+		mutationFn: (body: ExportDataResponse) =>
+			apiFetch<ImportDataResponse>("/data/import", {
+				method: "POST",
+				body: JSON.stringify(body),
+			}),
+		onSuccess: () => {
+			queryClient.invalidateQueries({ queryKey: ["monthly-operations"] });
+			queryClient.invalidateQueries({ queryKey: ["budgets"] });
+			queryClient.invalidateQueries({ queryKey: ["summary"] });
+		},
 	});
 }
 

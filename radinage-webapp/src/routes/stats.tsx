@@ -67,21 +67,25 @@ function StatsPage() {
 
 	const months = summaryQuery.data?.months ?? [];
 
-	// Compute totals
+	// Compute totals. `unbudgeted` is a net sum (mixed income + expense on
+	// unlinked ops); without a per-operation breakdown we attribute its
+	// positive part to income and its negative part to expenses.
 	let totalExpenses = 0;
 	let totalIncome = 0;
 	let totalSavings = 0;
 	for (const m of months) {
-		totalExpenses += Number(m.unbudgeted) + Number(m.budgeted.expense);
-		totalIncome += Number(m.budgeted.income);
+		const unbudgeted = Number(m.unbudgeted);
+		totalExpenses += Number(m.budgeted.expense) + Math.min(0, unbudgeted);
+		totalIncome += Number(m.budgeted.income) + Math.max(0, unbudgeted);
 		totalSavings += Number(m.budgeted.savings);
 	}
 	const balance = totalIncome + totalExpenses + totalSavings;
 
 	// Chart data
 	const chartData = months.map((m) => {
-		const expenses = Number(m.unbudgeted) + Number(m.budgeted.expense);
-		const income = Number(m.budgeted.income);
+		const unbudgeted = Number(m.unbudgeted);
+		const expenses = Number(m.budgeted.expense) + Math.min(0, unbudgeted);
+		const income = Number(m.budgeted.income) + Math.max(0, unbudgeted);
 		const savings = Number(m.budgeted.savings);
 		return {
 			month: new Date(m.year, m.month - 1).toLocaleDateString(i18n.language, {

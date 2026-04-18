@@ -118,8 +118,22 @@ function SummaryStats({ sections }: { sections: BudgetSection[] }) {
 	const byType = new Map<string, BudgetSection>();
 	for (const s of sections) byType.set(s.type, s);
 
-	const incomeReal = byType.get("income")?.totalReal ?? 0;
-	const expenseReal = byType.get("expense")?.totalReal ?? 0;
+	// Operations not linked to a budget land in the "monthly" section — split
+	// them by sign so expenses/income stats still reflect real activity when
+	// budgets are missing or not yet wired up.
+	const monthlySection = byType.get("monthly");
+	let monthlyIncome = 0;
+	let monthlyExpense = 0;
+	for (const group of monthlySection?.groups ?? []) {
+		for (const op of group.operations) {
+			const value = Number(op.amount);
+			if (value >= 0) monthlyIncome += value;
+			else monthlyExpense += value;
+		}
+	}
+
+	const incomeReal = (byType.get("income")?.totalReal ?? 0) + monthlyIncome;
+	const expenseReal = (byType.get("expense")?.totalReal ?? 0) + monthlyExpense;
 	const savingsReal = byType.get("savings")?.totalReal ?? 0;
 	const balance = incomeReal + expenseReal + savingsReal;
 
@@ -383,18 +397,20 @@ function MonthlyOperationsPage() {
 		);
 	}
 
-	// Compute daily expense forecast from 3 previous months
+	// Compute daily expense forecast from 3 previous months. Only the negative
+	// part of `unbudgeted` is actual spending — positive unbudgeted amounts are
+	// unlinked income and must not lift the forecast.
 	const forecast = (() => {
 		const months = summaryQuery.data?.months;
 		if (!months || months.length === 0) return null;
-		let totalUnbudgeted = 0;
+		let totalUnbudgetedExpense = 0;
 		let totalDays = 0;
 		for (const m of months) {
-			totalUnbudgeted += Number(m.unbudgeted);
+			totalUnbudgetedExpense += Math.min(0, Number(m.unbudgeted));
 			totalDays += new Date(m.year, m.month, 0).getDate();
 		}
 		if (totalDays === 0) return null;
-		const dailyAvg = totalUnbudgeted / totalDays;
+		const dailyAvg = totalUnbudgetedExpense / totalDays;
 		const daysInCurrentMonth = new Date(year, month, 0).getDate();
 		return dailyAvg * daysInCurrentMonth;
 	})();

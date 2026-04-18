@@ -25,9 +25,18 @@ jobs:
       - name: Login to OCI registry
         run: echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login ghcr.io -u ${{ github.actor }} --password-stdin
 
+      - name: Verify Chart.yaml matches tag
+        run: |
+          tag_version="${GITHUB_REF_NAME#chart-}"
+          chart_version=$(yq -r '.version' helm/radinage/Chart.yaml)
+          if [ "$chart_version" != "$tag_version" ]; then
+            echo "::error::Chart.yaml version ($chart_version) does not match tag ($tag_version)"
+            exit 1
+          fi
+          echo "Chart.yaml: $chart_version matches tag"
+
       - name: Package and push
         run: |
           VERSION="${GITHUB_REF_NAME#chart-}"
-          yq -i ".version = \"$VERSION\"" helm/radinage/Chart.yaml
           helm package helm/radinage
           helm push "radinage-$VERSION.tgz" "oci://$REGISTRY"

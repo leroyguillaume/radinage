@@ -212,6 +212,41 @@ describe("StatsPage", () => {
 		expect(screen.getByText("Épargne")).toBeInTheDocument();
 	});
 
+	it("attributes positive unbudgeted to income and negative to expenses", async () => {
+		// Only unlinked operations, no budgets. Month 1 is net-positive
+		// (income-like), month 2 is net-negative (expense-like).
+		setupMocks({
+			months: [
+				{
+					year: 2026,
+					month: 1,
+					unbudgeted: "1500.00",
+					budgeted: { expense: "0.00", income: "0.00", savings: "0.00" },
+				},
+				{
+					year: 2026,
+					month: 2,
+					unbudgeted: "-400.00",
+					budgeted: { expense: "0.00", income: "0.00", savings: "0.00" },
+				},
+			],
+		});
+
+		await renderStatsPage();
+
+		await waitFor(() => {
+			expect(screen.getByText("Revenus")).toBeInTheDocument();
+		});
+
+		const pageText = (document.body.textContent ?? "").replace(/\s/g, "");
+		// Income card must show 1500, expenses card -400. Without the fix the
+		// page would show +1100 as expenses, no income, and a positive balance.
+		expect(pageText).toMatch(/Revenus1500,00/);
+		expect(pageText).toMatch(/Dépenses-400,00/);
+		// Balance = 1500 - 400 + 0 = 1100 (not 1100 on the expense side).
+		expect(pageText).toMatch(/Balance1100,00/);
+	});
+
 	it("handles empty summary response", async () => {
 		setupMocks({ months: [] });
 
