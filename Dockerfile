@@ -1,29 +1,40 @@
 # =============================================================================
-# Stage 1: Rust builder
+# Stage 1: Rust builder — uses cargo-chef to cache dependency compilation
+# independently from package version bumps.
 # =============================================================================
-FROM rust:1.94.1-alpine3.23 AS rust-builder
+FROM rust:1.94.1-alpine3.23 AS chef
 
-RUN apk add --no-cache musl-dev~=1.2.5-r23 openssl-dev~=3.5.6 openssl-libs-static~=3.5.6
+RUN apk add --no-cache musl-dev~=1.2.5-r23 openssl-dev~=3.5.6 openssl-libs-static~=3.5.6 \
+    && cargo install cargo-chef@0.1.77 --locked
 
 WORKDIR /usr/src/local/radinage
+
+# Planner: produces a recipe.json describing only the dependency graph. It
+# ignores workspace package versions, so bumping the release version does not
+# invalidate the downstream `cargo chef cook` cache.
+FROM chef AS planner
 
 COPY Cargo.toml Cargo.lock ./
 COPY radinage-api/Cargo.toml radinage-api/Cargo.toml
 COPY radinage-mcp/Cargo.toml radinage-mcp/Cargo.toml
 
-# Create dummy source files to cache dependency builds
 RUN mkdir -p radinage-api/src radinage-mcp/src \
     && echo "fn main() {}" > radinage-api/src/main.rs \
     && echo "fn main() {}" > radinage-mcp/src/main.rs \
-    && cargo build --release \
-    && rm -rf radinage-api/src radinage-mcp/src
+    && cargo chef prepare --recipe-path recipe.json
 
+# Actual build: cook dependencies from the recipe (cached until deps change),
+# then compile the real workspace sources.
+FROM chef AS rust-builder
+
+COPY --from=planner /usr/src/local/radinage/recipe.json recipe.json
+RUN cargo chef cook --release --recipe-path recipe.json
+
+COPY Cargo.toml Cargo.lock ./
 COPY radinage-api/ radinage-api/
 COPY radinage-mcp/ radinage-mcp/
 
-# Touch main.rs so cargo detects the source change
-RUN touch radinage-api/src/main.rs radinage-mcp/src/main.rs \
-    && cargo build --release
+RUN cargo build --release
 
 # =============================================================================
 # Stage 2: Node builder (webapp)
