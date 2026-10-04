@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { getBudgetedAmountForMonth } from "@/lib/budget-utils";
+import {
+	getBudgetedAmountForMonth,
+	getUnbudgetedForecastForMonth,
+} from "@/lib/budget-utils";
 import type { BudgetResponse } from "@/lib/types";
 
 function makeRecurring(
@@ -274,5 +277,17 @@ describe("getBudgetedAmountForMonth", () => {
 			// Feb: diff = 1 → hide
 			expect(getBudgetedAmountForMonth(budget, 2024, 2)).toBeNull();
 		});
+	});
+});
+
+describe("getUnbudgetedForecastForMonth", () => {
+	it.each([
+		["-10.0000", 2026, 4, -300],
+		["-10.0000", 2026, 2, -280],
+		["-10.0000", 2024, 2, -290],
+		["-11.6667", 2026, 1, -361.67],
+		["0", 2026, 5, 0],
+	])("rate %s over %i-%i gives %d", (rate, year, month, expected) => {
+		expect(getUnbudgetedForecastForMonth(rate, year, month)).toBe(expected);
 	});
 });

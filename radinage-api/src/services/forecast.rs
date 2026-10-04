@@ -5,8 +5,8 @@ use crate::{
     domain::budget::{Budget, BudgetType, YearMonth},
     repositories::{SummaryCategory, SummaryRow},
 };
-use chrono::NaiveDate;
-use rust_decimal::Decimal;
+use chrono::{Datelike, Months, NaiveDate};
+use rust_decimal::{Decimal, RoundingStrategy};
 use std::ops::AddAssign;
 
 /// Position of a month relative to today.
@@ -76,6 +76,9 @@ pub struct ForecastMonth {
     /// Part of `flows` the budgets still expect this month on top of what is already linked
     /// to them; zero outside the current month.
     pub committed: Decimal,
+    /// Unbudgeted spending expected for the rest of this month at the unbudgeted rate,
+    /// included in `flows.expenses`; zero for past months, never positive.
+    pub unbudgeted_forecast: Decimal,
     /// Running balance at the end of this month, starting from zero before the horizon.
     pub cumulative: Decimal,
 }
@@ -86,6 +89,8 @@ pub struct Forecast {
     pub totals: Flows,
     /// Cumulative balance of the last month, zero for an empty horizon.
     pub end_balance: Decimal,
+    /// Average daily unbudgeted spending over the history window, never positive.
+    pub unbudgeted_rate: Decimal,
 }
 
 /// Everything a forecast is computed from.
@@ -96,6 +101,66 @@ pub struct ForecastInput<'a> {
     pub budgets: &'a [Budget],
     /// Accounted amounts covering at least the past and current months of the horizon.
     pub rows: &'a [SummaryRow],
+    /// Accounted amounts covering at least [`unbudgeted_history`]`(today)`; rows outside it
+    /// are ignored, so the same slice as `rows` may be passed when it covers that window.
+    pub history: &'a [SummaryRow],
+}
+
+/// Complete months before the current one that the unbudgeted rate averages.
+const UNBUDGETED_HISTORY_MONTHS: u32 = 3;
+
+/// First and last days of the complete months the unbudgeted rate is averaged over: the
+/// [`UNBUDGETED_HISTORY_MONTHS`] months right before the month of `today`.
+pub fn unbudgeted_history(today: NaiveDate) -> (NaiveDate, NaiveDate) {
+    let current_start = today.with_day(1).unwrap_or(today);
+    let start = current_start
+        .checked_sub_months(Months::new(UNBUDGETED_HISTORY_MONTHS))
+        .unwrap_or(NaiveDate::MIN);
+    let end = current_start.pred_opt().unwrap_or(NaiveDate::MIN);
+    (start, end)
+}
+
+/// Average daily unbudgeted spending over [`unbudgeted_history`]`(today)`, rounded to four
+/// decimals. Only negative unbudgeted amounts count: an unlinked refund or transfer in does
+/// not lower the expected spending. Days without operations count as zero, so a shorter
+/// history dilutes the rate rather than extrapolating from a few days.
+pub fn unbudgeted_rate<'a>(
+    rows: impl IntoIterator<Item = &'a SummaryRow>,
+    today: NaiveDate,
+) -> Decimal {
+    let (start, end) = unbudgeted_history(today);
+    let days = (end - start).num_days() + 1;
+    if days <= 0 {
+        return Decimal::ZERO;
+    }
+    let spent: Decimal = rows
+        .into_iter()
+        .filter(|row| {
+            (start..=end).contains(&row.date)
+                && row.amount < Decimal::ZERO
+                && row.category() == Some(SummaryCategory::Unbudgeted)
+        })
+        .map(|row| row.amount)
+        .sum();
+    (spent / Decimal::from(days)).round_dp_with_strategy(4, RoundingStrategy::MidpointAwayFromZero)
+}
+
+/// Unbudgeted spending expected over `days` days at `rate`, rounded to the cent.
+pub fn unbudgeted_forecast(rate: Decimal, days: u32) -> Decimal {
+    (rate * Decimal::from(days)).round_dp_with_strategy(2, RoundingStrategy::MidpointAwayFromZero)
+}
+
+/// Days of `month` the unbudgeted rate still applies to: none for a past month, those
+/// after `today` for the current one, all of them for a future one.
+fn days_to_forecast(month: YearMonth, status: MonthStatus, today: NaiveDate) -> u32 {
+    let Some(last_day) = month.last_day() else {
+        return 0;
+    };
+    match status {
+        MonthStatus::Past => 0,
+        MonthStatus::Current => last_day.day() - today.day(),
+        MonthStatus::Future => last_day.day(),
+    }
 }
 
 /// The `months` consecutive months starting at `from`, in order.
@@ -104,12 +169,21 @@ pub fn horizon(from: YearMonth, months: usize) -> impl Iterator<Item = YearMonth
 }
 
 pub fn compute_forecast(input: &ForecastInput<'_>) -> Forecast {
+    let unbudgeted_rate = unbudgeted_rate(input.history, input.today);
     let mut cumulative = Decimal::ZERO;
     let mut totals = Flows::default();
     let months: Vec<ForecastMonth> = horizon(input.from, input.months)
         .map(|month| {
             let status = MonthStatus::of(month, input.today);
-            let MonthProjection { flows, committed } = project_month(input, month, status);
+            let MonthProjection {
+                mut flows,
+                committed,
+            } = project_month(input, month, status);
+            let unbudgeted_forecast = unbudgeted_forecast(
+                unbudgeted_rate,
+                days_to_forecast(month, status, input.today),
+            );
+            flows.expenses += unbudgeted_forecast;
             cumulative += flows.balance();
             totals += flows;
             ForecastMonth {
@@ -117,6 +191,7 @@ pub fn compute_forecast(input: &ForecastInput<'_>) -> Forecast {
                 status,
                 flows,
                 committed,
+                unbudgeted_forecast,
                 cumulative,
             }
         })
@@ -125,6 +200,7 @@ pub fn compute_forecast(input: &ForecastInput<'_>) -> Forecast {
         months,
         totals,
         end_balance: cumulative,
+        unbudgeted_rate,
     }
 }
 
@@ -364,6 +440,7 @@ mod tests {
             today: date(2026, 2, 10),
             budgets: &budgets,
             rows: &rows,
+            history: &[],
         });
 
         let expected = [
@@ -408,6 +485,7 @@ mod tests {
             today: date(2020, 1, 1),
             budgets: &[monthly_budget(BudgetType::Expense, dec!(-10))],
             rows: &[],
+            history: &[],
         });
         let months: Vec<_> = forecast.months.iter().map(|m| m.month).collect();
         assert_eq!(
@@ -430,6 +508,7 @@ mod tests {
             today: date(2026, 1, 1),
             budgets: &[],
             rows: &[],
+            history: &[],
         });
         assert!(forecast.months.is_empty());
         assert_eq!(forecast.totals, Flows::default());
@@ -533,6 +612,7 @@ mod tests {
                 today,
                 budgets: &budgets,
                 rows: &rows,
+                history: &[],
             });
             let month = &forecast.months[0];
             assert_eq!(month.status, MonthStatus::Current, "{case}");
@@ -552,6 +632,7 @@ mod tests {
             today: date(2026, 3, 1),
             budgets: std::slice::from_ref(&groceries),
             rows: &rows,
+            history: &[],
         });
         let actual: Vec<_> = forecast
             .months
@@ -586,5 +667,165 @@ mod tests {
                 remaining: dec!(-220),
             }
         );
+    }
+
+    #[test]
+    fn unbudgeted_history_is_the_three_complete_months_before_today() {
+        let cases = [
+            (date(2026, 3, 12), date(2025, 12, 1), date(2026, 2, 28)),
+            (date(2026, 1, 1), date(2025, 10, 1), date(2025, 12, 31)),
+            (date(2024, 5, 31), date(2024, 2, 1), date(2024, 4, 30)),
+        ];
+        for (today, start, end) in cases {
+            assert_eq!(unbudgeted_history(today), (start, end), "{today}");
+        }
+    }
+
+    #[test]
+    fn unbudgeted_rate_averages_negative_unbudgeted_amounts_over_the_window() {
+        // Window: 2026-01-01..=2026-03-31, 90 days.
+        let today = date(2026, 4, 15);
+        let budget = monthly_budget(BudgetType::Expense, dec!(-1000));
+        let full_history = vec![
+            row(date(2026, 1, 10), dec!(-300), None),
+            row(date(2026, 2, 10), dec!(-350), None),
+            row(date(2026, 3, 31), dec!(-250), None),
+        ];
+        let cases = [
+            ("three months of history", full_history.clone(), dec!(-10)),
+            (
+                "positive unbudgeted amounts do not lower the rate",
+                [
+                    full_history.clone(),
+                    vec![row(date(2026, 3, 5), dec!(500), None)],
+                ]
+                .concat(),
+                dec!(-10),
+            ),
+            (
+                "budgeted amounts are not unbudgeted spending",
+                [
+                    full_history.clone(),
+                    vec![linked(date(2026, 3, 5), dec!(-1000), &budget)],
+                ]
+                .concat(),
+                dec!(-10),
+            ),
+            (
+                "rows outside the window are ignored",
+                [
+                    full_history,
+                    vec![
+                        row(date(2025, 12, 31), dec!(-999), None),
+                        row(date(2026, 4, 1), dec!(-999), None),
+                        row(today, dec!(-999), None),
+                    ],
+                ]
+                .concat(),
+                dec!(-10),
+            ),
+            (
+                "a shorter history is averaged over the whole window",
+                vec![row(date(2026, 3, 2), dec!(-90), None)],
+                dec!(-1),
+            ),
+            (
+                "rounded to four decimals",
+                vec![row(date(2026, 2, 1), dec!(-100), None)],
+                dec!(-1.1111),
+            ),
+            (
+                "only income: never positive",
+                vec![row(date(2026, 2, 1), dec!(2000), None)],
+                dec!(0),
+            ),
+            ("no history", vec![], dec!(0)),
+        ];
+        for (case, rows, expected) in cases {
+            assert_eq!(unbudgeted_rate(&rows, today), expected, "{case}");
+        }
+    }
+
+    #[test]
+    fn unbudgeted_forecast_covers_days_left_then_whole_future_months() {
+        // Rate -10/day from 2026-01..=2026-03; March is also in the horizon.
+        let rows = [
+            row(date(2026, 1, 10), dec!(-300), None),
+            row(date(2026, 2, 10), dec!(-350), None),
+            row(date(2026, 3, 10), dec!(-250), None),
+            row(date(2026, 4, 2), dec!(-40), None),
+        ];
+        let forecast = compute_forecast(&ForecastInput {
+            from: YearMonth::new(2026, 3),
+            months: 4,
+            today: date(2026, 4, 20),
+            budgets: &[],
+            rows: &rows,
+            history: &rows,
+        });
+        assert_eq!(forecast.unbudgeted_rate, dec!(-10));
+        let actual: Vec<_> = forecast
+            .months
+            .iter()
+            .map(|m| (m.status, m.unbudgeted_forecast, m.flows.expenses))
+            .collect();
+        assert_eq!(
+            actual,
+            vec![
+                // Past: actuals only, the history rows are not counted twice.
+                (MonthStatus::Past, dec!(0), dec!(-250)),
+                // Current: 10 days left after the 20th, today excluded.
+                (MonthStatus::Current, dec!(-100), dec!(-140)),
+                (MonthStatus::Future, dec!(-310), dec!(-310)),
+                (MonthStatus::Future, dec!(-300), dec!(-300)),
+            ]
+        );
+        assert_eq!(forecast.totals.expenses, dec!(-1000));
+        assert_eq!(forecast.end_balance, dec!(-1000));
+    }
+
+    #[test]
+    fn nothing_left_to_forecast_on_the_last_day_of_the_month() {
+        let history = [row(date(2026, 2, 1), dec!(-890), None)];
+        let forecast = compute_forecast(&ForecastInput {
+            from: YearMonth::new(2026, 4),
+            months: 1,
+            today: date(2026, 4, 30),
+            budgets: &[],
+            rows: &[],
+            history: &history,
+        });
+        assert_eq!(forecast.unbudgeted_rate, dec!(-9.8889));
+        assert_eq!(forecast.months[0].unbudgeted_forecast, dec!(0));
+    }
+
+    #[test]
+    fn unbudgeted_rate_does_not_depend_on_the_horizon() {
+        let history = [row(date(2026, 2, 1), dec!(-900), None)];
+        let today = date(2026, 4, 20);
+        let forecast_from = |from: YearMonth| {
+            compute_forecast(&ForecastInput {
+                from,
+                months: 2,
+                today,
+                budgets: &[],
+                rows: &[],
+                history: &history,
+            })
+        };
+
+        let before = forecast_from(YearMonth::new(2020, 1));
+        assert_eq!(before.unbudgeted_rate, dec!(-10));
+        assert!(
+            before
+                .months
+                .iter()
+                .all(|m| m.unbudgeted_forecast.is_zero())
+        );
+
+        let later = forecast_from(YearMonth::new(2099, 2));
+        assert_eq!(later.unbudgeted_rate, dec!(-10));
+        let forecasts: Vec<_> = later.months.iter().map(|m| m.unbudgeted_forecast).collect();
+        assert_eq!(forecasts, vec![dec!(-280), dec!(-310)]);
     }
 }

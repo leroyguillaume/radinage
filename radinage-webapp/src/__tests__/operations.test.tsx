@@ -13,7 +13,7 @@ import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { i18n } from "@/i18n";
-import type { MonthlyOperationsResponse } from "@/lib/types";
+import type { ForecastResponse, MonthlyOperationsResponse } from "@/lib/types";
 import { theme } from "@/theme";
 
 vi.mock("@/lib/api", () => ({
@@ -109,6 +109,32 @@ const mockBudgetsResponse = [
 	},
 ];
 
+// −10/day: April's 30 days make a −300 forecast for the daily operations.
+const forecastResponse: ForecastResponse = {
+	months: [
+		{
+			year: 2026,
+			month: 4,
+			status: "current",
+			income: "2000.00",
+			expenses: "-480.00",
+			savings: "0",
+			balance: "1520.00",
+			committed: "0",
+			unbudgetedForecast: "-100.00",
+			cumulative: "1520.00",
+		},
+	],
+	totals: {
+		income: "2000.00",
+		expenses: "-480.00",
+		savings: "0",
+		balance: "1520.00",
+	},
+	endBalance: "1520.00",
+	unbudgetedRate: "-10.0000",
+};
+
 let apiCalls: Array<{
 	path: string;
 	options?: { method?: string; body?: string };
@@ -131,41 +157,8 @@ function setupMocks(
 		if (path.startsWith("/operations/monthly/")) {
 			return Promise.resolve(operations);
 		}
-		if (path.startsWith("/summary")) {
-			return Promise.resolve({
-				months: [
-					{
-						year: 2026,
-						month: 1,
-						unbudgeted: "-300.00",
-						budgeted: {
-							expense: "-600.00",
-							income: "2000.00",
-							savings: "-200.00",
-						},
-					},
-					{
-						year: 2026,
-						month: 2,
-						unbudgeted: "-350.00",
-						budgeted: {
-							expense: "-650.00",
-							income: "2000.00",
-							savings: "-200.00",
-						},
-					},
-					{
-						year: 2026,
-						month: 3,
-						unbudgeted: "-400.00",
-						budgeted: {
-							expense: "-700.00",
-							income: "2000.00",
-							savings: "-200.00",
-						},
-					},
-				],
-			});
+		if (path.startsWith("/forecast")) {
+			return Promise.resolve(forecastResponse);
 		}
 		// Ignore operation
 		const ignoreMatch = path.match(/^\/operations\/([^/]+)\/ignore$/);
@@ -262,6 +255,59 @@ describe("MonthlyOperationsPage", () => {
 		expect(
 			await screen.findByText("Opérations quotidiennes"),
 		).toBeInTheDocument();
+	});
+
+	it("forecasts daily operations from the server's unbudgeted rate", async () => {
+		await renderOperationsPage();
+
+		const section = await screen.findByRole("region", {
+			name: "Opérations quotidiennes",
+		});
+		await waitFor(() => {
+			expect((section.textContent ?? "").replace(/\s/g, "")).toMatch(
+				/sur300,00€prévus/,
+			);
+		});
+		const forecastCalls = apiCalls.filter((c) =>
+			c.path.startsWith("/forecast"),
+		);
+		expect(forecastCalls.map((c) => c.path)).toEqual([
+			"/forecast?fromYear=2026&fromMonth=4&months=1",
+		]);
+		expect(apiCalls.some((c) => c.path.startsWith("/summary"))).toBe(false);
+	});
+
+	it("scales the forecast to the number of days of the month shown", async () => {
+		await renderOperationsPage("2026", "2");
+
+		const section = await screen.findByRole("region", {
+			name: "Opérations quotidiennes",
+		});
+		await waitFor(() => {
+			expect((section.textContent ?? "").replace(/\s/g, "")).toMatch(
+				/sur280,00€prévus/,
+			);
+		});
+	});
+
+	it("shows no daily forecast when the forecast cannot be loaded", async () => {
+		const fallback = apiFetchMock.getMockImplementation();
+		apiFetchMock.mockImplementation((path: string, options?: RequestInit) =>
+			path.startsWith("/forecast")
+				? Promise.reject(new Error("boom"))
+				: (fallback?.(path, options) ?? Promise.reject(new Error(path))),
+		);
+		const { queryClient } = await renderOperationsPage();
+
+		const section = await screen.findByRole("region", {
+			name: "Opérations quotidiennes",
+		});
+		await waitFor(() => {
+			expect(queryClient.getQueryState(["forecast", 2026, 4, 1])?.status).toBe(
+				"error",
+			);
+		});
+		expect(section.textContent ?? "").not.toMatch(/prévus/);
 	});
 
 	it("expands a group to show individual operations", async () => {

@@ -35,6 +35,7 @@ interface MonthFlows {
 	expenses: number;
 	savings: number;
 	committed?: number;
+	unbudgetedForecast?: number;
 }
 
 function money(amount: number): string {
@@ -53,12 +54,19 @@ function statusOf(year: number, month: number): ForecastMonthStatus {
 function makeForecast(
 	year: number,
 	flowsOf: (month: number) => MonthFlows,
+	unbudgetedRate = 0,
 ): ForecastResponse {
 	let cumulative = 0;
 	const totals = { income: 0, expenses: 0, savings: 0 };
 	const months = Array.from({ length: 12 }, (_, i) => {
 		const month = i + 1;
-		const { income, expenses, savings, committed = 0 } = flowsOf(month);
+		const {
+			income,
+			expenses,
+			savings,
+			committed = 0,
+			unbudgetedForecast = 0,
+		} = flowsOf(month);
 		const balance = income + expenses + savings;
 		cumulative += balance;
 		totals.income += income;
@@ -73,6 +81,7 @@ function makeForecast(
 			savings: money(savings),
 			balance: money(balance),
 			committed: money(committed),
+			unbudgetedForecast: money(unbudgetedForecast),
 			cumulative: money(cumulative),
 		};
 	});
@@ -85,6 +94,7 @@ function makeForecast(
 			balance: money(totals.income + totals.expenses + totals.savings),
 		},
 		endBalance: money(cumulative),
+		unbudgetedRate: unbudgetedRate.toFixed(4),
 	};
 }
 
@@ -352,6 +362,46 @@ describe("SummaryPage", () => {
 
 		const table = await screen.findByRole("table");
 		expect(within(table).queryByText(/à venir/)).not.toBeInTheDocument();
+	});
+
+	it("shows the unbudgeted spending forecast in the table and the totals", async () => {
+		const year = new Date().getFullYear() + 1;
+		setupMocks((y) =>
+			makeForecast(
+				y,
+				(month) => ({
+					income: 2500,
+					expenses: -1200,
+					savings: 0,
+					unbudgetedForecast: month === 2 ? -280 : -300,
+				}),
+				-10,
+			),
+		);
+
+		await renderSummaryPage(`?year=${year}`);
+
+		const table = await screen.findByRole("table");
+		const notes = within(table).getAllByText(/hors budget estimés/);
+		expect(notes).toHaveLength(12);
+		expect((notes[1]?.textContent ?? "").replace(/\s/g, "")).toMatch(
+			/dont-280,00€horsbudgetestimés/,
+		);
+		const totals = screen.getByRole("region", { name: /Totaux/ });
+		expect((totals.textContent ?? "").replace(/\s/g, "")).toMatch(
+			/estiméesà10,00€parjour/,
+		);
+	});
+
+	it("says nothing about unbudgeted spending for a past year", async () => {
+		setupMocks((y) => makeForecast(y, typicalMonth, -10));
+
+		await renderSummaryPage("?year=2025");
+
+		const table = await screen.findByRole("table");
+		expect(within(table).queryByText(/hors budget/)).not.toBeInTheDocument();
+		const totals = screen.getByRole("region", { name: /Totaux/ });
+		expect(totals.textContent ?? "").not.toMatch(/par jour/);
 	});
 
 	it("clamps daily budget to zero when end-of-year balance is negative", async () => {

@@ -71,3 +71,18 @@ export function getBudgetedAmountForMonth(
 	// Monthly
 	return rawAmount;
 }
+
+/**
+ * Unbudgeted spending expected over the whole month at the server's daily
+ * `unbudgetedRate`, rounded to the cent like the server's `unbudgetedForecast`
+ * for a future month.
+ */
+export function getUnbudgetedForecastForMonth(
+	unbudgetedRate: string,
+	year: number,
+	month: number,
+): number {
+	return (
+		Math.round(Number(unbudgetedRate) * daysInMonth(year, month) * 100) / 100
+	);
+}

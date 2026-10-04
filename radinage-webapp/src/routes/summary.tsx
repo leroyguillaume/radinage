@@ -59,6 +59,7 @@ interface MonthForecast {
 	savings: number;
 	balance: number;
 	committed: number;
+	unbudgetedForecast: number;
 	cumulative: number;
 }
 
@@ -72,6 +73,7 @@ function toMonthForecast(m: ForecastMonth): MonthForecast {
 		savings: Number(m.savings),
 		balance: Number(m.balance),
 		committed: Number(m.committed),
+		unbudgetedForecast: Number(m.unbudgetedForecast),
 		cumulative: Number(m.cumulative),
 	};
 }
@@ -519,6 +521,13 @@ function MonthlyTable({ forecast, locale }: ForecastViewProps) {
 									</Table.Td>
 									<Table.Td ta="right" c={expense.text}>
 										{formatAmount(m.expenses)}
+										{m.unbudgetedForecast !== 0 && (
+											<Text size="xs" fw={400} c="dimmed">
+												{t("forecast.unbudgetedForecast", {
+													amount: formatAmount(m.unbudgetedForecast),
+												})}
+											</Text>
+										)}
 									</Table.Td>
 									<Table.Td ta="right" c={savings.text}>
 										{formatAmount(m.savings)}
@@ -571,6 +580,8 @@ function ForecastPage() {
 	const totalIncome = Number(totals?.income ?? 0);
 	const totalExpenses = Number(totals?.expenses ?? 0);
 	const totalSavings = Number(totals?.savings ?? 0);
+	const unbudgetedRate = Number(forecastQuery.data?.unbudgetedRate ?? 0);
+	const forecastsUnbudgeted = forecast.some((m) => m.unbudgetedForecast !== 0);
 
 	const yearProgress = monthsElapsedRatio(selectedYear) * 100;
 
@@ -685,6 +696,13 @@ function ForecastPage() {
 									ratio={shareOfIncome(totalSavings)}
 									tone={budgetTypeTones.savings}
 								/>
+								{forecastsUnbudgeted && (
+									<Text size="sm" c="dimmed" mt="auto">
+										{t("forecast.unbudgetedRate", {
+											amount: formatAmount(-unbudgetedRate),
+										})}
+									</Text>
+								)}
 							</HeroCard>
 						</SimpleGrid>
 

@@ -6,6 +6,7 @@ use crate::{
     repositories::{BudgetRepository, OperationRepository},
     services::forecast::{
         Flows, Forecast, ForecastInput, ForecastMonth, MonthStatus, compute_forecast, horizon,
+        unbudgeted_history,
     },
 };
 use axum::{
@@ -64,7 +65,7 @@ pub struct ForecastMonthResponse {
     /// Income-budget amounts plus positive unbudgeted operations.
     #[schemars(with = "String")]
     pub income: Decimal,
-    /// Expense-budget amounts plus negative unbudgeted operations.
+    /// Expense-budget amounts plus negative unbudgeted operations, plus `unbudgetedForecast`.
     #[schemars(with = "String")]
     pub expenses: Decimal,
     #[schemars(with = "String")]
@@ -77,6 +78,11 @@ pub struct ForecastMonthResponse {
     /// current month.
     #[schemars(with = "String")]
     pub committed: Decimal,
+    /// Unbudgeted spending expected at `unbudgetedRate` and included in `expenses`: over the
+    /// days after today for the current month, over every day for a future month, zero for a
+    /// past month.
+    #[schemars(with = "String")]
+    pub unbudgeted_forecast: Decimal,
     /// Sum of the balances from the first month of the horizon up to this one.
     #[schemars(with = "String")]
     pub cumulative: Decimal,
@@ -93,6 +99,7 @@ impl From<&ForecastMonth> for ForecastMonthResponse {
             savings: m.flows.savings,
             balance: m.flows.balance(),
             committed: m.committed,
+            unbudgeted_forecast: m.unbudgeted_forecast,
             cumulative: m.cumulative,
         }
     }
@@ -132,6 +139,11 @@ pub struct ForecastResponse {
     /// Cumulative balance at the end of the last month.
     #[schemars(with = "String")]
     pub end_balance: Decimal,
+    /// Average daily spending outside any budget over the three complete months before the
+    /// current one (negative operations only, days without any counted as zero), rounded to
+    /// four decimals. Zero or negative; independent of the horizon.
+    #[schemars(with = "String")]
+    pub unbudgeted_rate: Decimal,
 }
 
 impl From<Forecast> for ForecastResponse {
@@ -140,6 +152,7 @@ impl From<Forecast> for ForecastResponse {
             months: forecast.months.iter().map(Into::into).collect(),
             totals: forecast.totals.into(),
             end_balance: forecast.end_balance,
+            unbudgeted_rate: forecast.unbudgeted_rate,
         }
     }
 }
@@ -164,18 +177,31 @@ pub async fn get_forecast<U, O: OperationRepository, B: BudgetRepository>(
         .and_then(YearMonth::last_day)
         .ok_or_else(invalid)?;
 
+    let today = chrono::Local::now().date_naive();
     let rows = state
         .operation_repo
         .list_for_summary(auth_user.id, start, end)
         .await?;
+    let (history_start, history_end) = unbudgeted_history(today);
+    let extra_history = if start <= history_start && history_end <= end {
+        None
+    } else {
+        Some(
+            state
+                .operation_repo
+                .list_for_summary(auth_user.id, history_start, history_end)
+                .await?,
+        )
+    };
     let budgets = state.budget_repo.list_all_for_user(auth_user.id).await?;
 
     let forecast = compute_forecast(&ForecastInput {
         from,
         months,
-        today: chrono::Local::now().date_naive(),
+        today,
         budgets: &budgets,
         rows: &rows,
+        history: extra_history.as_deref().unwrap_or(&rows),
     });
     Ok(Json(forecast.into()))
 }
@@ -229,6 +255,22 @@ mod tests {
         }
     }
 
+    /// Expect the fetch of the unbudgeted-rate history window, answering `rows`.
+    fn expect_history(or: &mut MockOperationRepository, rows: Vec<SummaryRow>) {
+        let (start, end) = unbudgeted_history(chrono::Local::now().date_naive());
+        or.expect_list_for_summary()
+            .withf(move |_, s, e| *s == start && *e == end)
+            .times(1)
+            .returning(move |_, _, _| {
+                let rows = rows.clone();
+                Box::pin(async move { Ok(rows) })
+            });
+    }
+
+    fn expect_no_history(or: &mut MockOperationRepository) {
+        expect_history(or, vec![]);
+    }
+
     async fn get(
         operation_repo: MockOperationRepository,
         budget_repo: MockBudgetRepository,
@@ -278,6 +320,7 @@ mod tests {
                     ])
                 })
             });
+        expect_no_history(&mut or);
         let mut br = MockBudgetRepository::new();
         br.expect_list_all_for_user()
             .returning(|_| Box::pin(async { Ok(vec![]) }));
@@ -292,17 +335,18 @@ mod tests {
                 "months": [
                     {"year": 2020, "month": 11, "status": "past", "income": "1200.00",
                      "expenses": "-800.00", "savings": "0", "balance": "400.00",
-                     "committed": "0", "cumulative": "400.00"},
+                     "committed": "0", "unbudgetedForecast": "0", "cumulative": "400.00"},
                     {"year": 2020, "month": 12, "status": "past", "income": "0",
                      "expenses": "0", "savings": "0", "balance": "0", "committed": "0",
-                     "cumulative": "400.00"},
+                     "unbudgetedForecast": "0", "cumulative": "400.00"},
                     {"year": 2021, "month": 1, "status": "past", "income": "0",
                      "expenses": "0", "savings": "-300.00", "balance": "-300.00",
-                     "committed": "0", "cumulative": "100.00"},
+                     "committed": "0", "unbudgetedForecast": "0", "cumulative": "100.00"},
                 ],
                 "totals": {"income": "1200.00", "expenses": "-800.00", "savings": "-300.00",
                            "balance": "100.00"},
                 "endBalance": "100.00",
+                "unbudgetedRate": "0",
             })
         );
     }
@@ -420,5 +464,75 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn future_months_forecast_unbudgeted_spending_from_the_history_window() {
+        let user_id = Uuid::new_v4();
+        let (history_start, history_end) = unbudgeted_history(chrono::Local::now().date_naive());
+        let history_days = (history_end - history_start).num_days() + 1;
+        let mut or = MockOperationRepository::new();
+        or.expect_list_for_summary()
+            .withf(|_, start, _| *start == NaiveDate::from_ymd_opt(2099, 2, 1).unwrap())
+            .times(1)
+            .returning(|_, _, _| Box::pin(async { Ok(vec![]) }));
+        expect_history(
+            &mut or,
+            vec![
+                unlinked(history_start, Decimal::from(-10 * history_days)),
+                unlinked(history_end, dec!(5000)),
+            ],
+        );
+        let mut br = MockBudgetRepository::new();
+        br.expect_list_all_for_user()
+            .returning(|_| Box::pin(async { Ok(vec![]) }));
+
+        let resp = get(or, br, user_id, "fromYear=2099&fromMonth=2&months=2").await;
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        let json: ForecastResponse = response_json(resp).await;
+        assert_eq!(json.unbudgeted_rate, dec!(-10));
+        let months: Vec<_> = json
+            .months
+            .iter()
+            .map(|m| (m.unbudgeted_forecast, m.expenses))
+            .collect();
+        assert_eq!(
+            months,
+            vec![(dec!(-280), dec!(-280)), (dec!(-310), dec!(-310))]
+        );
+        assert_eq!(json.end_balance, dec!(-590));
+    }
+
+    #[tokio::test]
+    async fn history_inside_the_horizon_is_fetched_once() {
+        let user_id = Uuid::new_v4();
+        let today = chrono::Local::now().date_naive();
+        let (history_start, _) = unbudgeted_history(today);
+        let from = YearMonth::of(history_start);
+        let mut or = MockOperationRepository::new();
+        or.expect_list_for_summary()
+            .times(1)
+            .returning(move |_, _, _| {
+                Box::pin(async move { Ok(vec![unlinked(history_start, dec!(-50))]) })
+            });
+        let mut br = MockBudgetRepository::new();
+        br.expect_list_all_for_user()
+            .returning(|_| Box::pin(async { Ok(vec![]) }));
+
+        let resp = get(
+            or,
+            br,
+            user_id,
+            &format!("fromYear={}&fromMonth={}&months=4", from.year, from.month),
+        )
+        .await;
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        let json: ForecastResponse = response_json(resp).await;
+        assert!(json.unbudgeted_rate < Decimal::ZERO);
+        // The history row is counted once, in its own past month.
+        assert_eq!(json.months[0].expenses, dec!(-50));
+        assert_eq!(json.months[0].unbudgeted_forecast, Decimal::ZERO);
     }
 }

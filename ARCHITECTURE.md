@@ -178,7 +178,16 @@ reached yet in the budget's direction (an expense budget of −550 with −330
 linked still commits −220; one already exceeded commits nothing; an income not
 yet received commits all of it); that sum is exposed as the month's
 `committed`, so the month reads as what it will end at rather than what it is
-at today. Budget-linked amounts count under
+at today. Spending outside any budget is forecast too, at `unbudgetedRate`:
+the negative unbudgeted operations of the three complete months before the
+current one, divided by the days of those months. It covers the days after
+today in the current month and every day of a future month, and is exposed
+per month as `unbudgetedForecast` (part of `expenses`). Days without
+operations count as zero, so a short history lowers the rate rather than
+extrapolating from a few weeks, and unbudgeted income never offsets it. The
+window is anchored on today, not on the horizon, so every horizon and the
+operations page, which shows `unbudgetedRate` × the days of the month as the
+daily operations' forecast, use the same rate. Budget-linked amounts count under
 their budget's type; an operation outside any budget counts as income or as an
 expense by its own sign, so a salary and a grocery run in the same month never
 cancel each other out. The running balance starts at zero before the first
