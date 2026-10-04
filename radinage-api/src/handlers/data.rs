@@ -3,9 +3,9 @@ use crate::{
     auth::middleware::AuthUser,
     domain::{
         budget::{Budget, BudgetKind, BudgetType, Rule},
-        operation::{BudgetLink, Operation},
+        operation::{BudgetLink, NewOperationSplit, Operation, OperationSplit, validate_splits},
     },
-    error::AppResult,
+    error::{AppError, AppResult},
     repositories::{BudgetRepository, OperationRepository},
 };
 use axum::{Json, extract::State, http::StatusCode};
@@ -58,6 +58,36 @@ pub struct ExportOperation {
     pub label: String,
     pub budget_link: BudgetLink,
     pub ignored: bool,
+    /// Parts of a split operation, in order; absent from exports made before splits existed.
+    #[serde(default)]
+    pub splits: Vec<ExportOperationSplit>,
+}
+
+/// One part of a split operation inside an export payload.
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ExportOperationSplit {
+    #[schemars(with = "String")]
+    pub amount: Decimal,
+    pub budget_id: Option<Uuid>,
+}
+
+impl From<OperationSplit> for ExportOperationSplit {
+    fn from(split: OperationSplit) -> Self {
+        Self {
+            amount: split.amount,
+            budget_id: split.budget_id,
+        }
+    }
+}
+
+impl From<&ExportOperationSplit> for NewOperationSplit {
+    fn from(split: &ExportOperationSplit) -> Self {
+        Self {
+            amount: split.amount,
+            budget_id: split.budget_id,
+        }
+    }
 }
 
 impl From<Operation> for ExportOperation {
@@ -70,6 +100,11 @@ impl From<Operation> for ExportOperation {
             label: op.label,
             budget_link: op.budget_link,
             ignored: op.ignored,
+            splits: op
+                .splits
+                .into_iter()
+                .map(ExportOperationSplit::from)
+                .collect(),
         }
     }
 }
@@ -132,10 +167,16 @@ pub async fn import_data<U, O: OperationRepository, B: BudgetRepository>(
     Json(body): Json<ImportDataRequest>,
 ) -> AppResult<(StatusCode, Json<ImportDataResponse>)> {
     if body.version != EXPORT_VERSION {
-        return Err(crate::error::AppError::BadRequest(format!(
+        return Err(AppError::BadRequest(format!(
             "unsupported export version {} (expected {EXPORT_VERSION})",
             body.version
         )));
+    }
+    for op in body.operations.iter().filter(|op| !op.splits.is_empty()) {
+        let parts: Vec<NewOperationSplit> = op.splits.iter().map(Into::into).collect();
+        validate_splits(op.amount, &parts).map_err(|e| {
+            AppError::BadRequest(format!("operation {}: invalid splits: {e}", op.id))
+        })?;
     }
 
     let user_id = auth_user.id;
@@ -191,6 +232,21 @@ pub async fn import_data<U, O: OperationRepository, B: BudgetRepository>(
             )
             .await?;
 
+        if !op.splits.is_empty() {
+            let splits: Vec<NewOperationSplit> = op
+                .splits
+                .iter()
+                .map(|s| NewOperationSplit {
+                    budget_id: s.budget_id.and_then(|bid| budget_id_map.get(&bid).copied()),
+                    ..s.into()
+                })
+                .collect();
+            state
+                .operation_repo
+                .replace_splits(new_id, user_id, &splits)
+                .await?;
+        }
+
         let remapped_link = match &op.budget_link {
             BudgetLink::Unlinked => BudgetLink::Unlinked,
             BudgetLink::Manual { budget_id } => match budget_id_map.get(budget_id) {
@@ -206,7 +262,7 @@ pub async fn import_data<U, O: OperationRepository, B: BudgetRepository>(
                 None => BudgetLink::Unlinked,
             },
         };
-        if !matches!(remapped_link, BudgetLink::Unlinked) {
+        if op.splits.is_empty() && !matches!(remapped_link, BudgetLink::Unlinked) {
             state
                 .operation_repo
                 .set_budget_link(new_id, user_id, &remapped_link)
@@ -275,6 +331,7 @@ mod tests {
             label: label.to_string(),
             budget_link,
             ignored: false,
+            splits: vec![],
         }
     }
 
@@ -666,6 +723,192 @@ mod tests {
         assert_eq!(resp.status(), StatusCode::OK);
         let json: ImportDataResponse = response_json(resp).await;
         assert_eq!(json.imported_operations, 1);
+    }
+
+    #[tokio::test]
+    async fn export_includes_splits() {
+        let user_id = Uuid::new_v4();
+        let budget_id = Uuid::new_v4();
+        let op = Operation {
+            splits: vec![
+                OperationSplit {
+                    id: Uuid::new_v4(),
+                    amount: Decimal::new(-234, 2),
+                    budget_id: Some(budget_id),
+                },
+                OperationSplit {
+                    id: Uuid::new_v4(),
+                    amount: Decimal::new(-1000, 2),
+                    budget_id: None,
+                },
+            ],
+            ..make_operation(user_id, "Cash", BudgetLink::Unlinked)
+        };
+
+        let mut op_repo = MockOperationRepository::new();
+        let mut budget_repo = MockBudgetRepository::new();
+        budget_repo
+            .expect_list_all_for_user()
+            .returning(|_| Box::pin(async { Ok(vec![]) }));
+        op_repo.expect_list_all_for_user().returning(move |_| {
+            let op = op.clone();
+            Box::pin(async { Ok(vec![op]) })
+        });
+
+        let app = build_test_router(make_test_state(
+            MockUserRepository::new(),
+            op_repo,
+            budget_repo,
+        ));
+        let auth = auth_header(user_id, UserRole::User);
+        let resp = app
+            .oneshot(json_request("GET", "/data/export", None, Some(&auth)))
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        let json: serde_json::Value = response_json(resp).await;
+        let splits = &json["operations"][0]["splits"];
+        assert_eq!(splits[0]["amount"], "-2.34");
+        assert_eq!(splits[0]["budgetId"], budget_id.to_string());
+        assert!(splits[1]["budgetId"].is_null());
+    }
+
+    #[tokio::test]
+    async fn import_restores_splits_with_remapped_budgets() {
+        let user_id = Uuid::new_v4();
+        let existing_id = Uuid::new_v4();
+        let existing = Budget {
+            id: existing_id,
+            ..make_budget(user_id, "Groceries")
+        };
+
+        let mut op_repo = MockOperationRepository::new();
+        let mut budget_repo = MockBudgetRepository::new();
+        budget_repo
+            .expect_list_all_for_user()
+            .once()
+            .returning(move |_| {
+                let existing = existing.clone();
+                Box::pin(async { Ok(vec![existing]) })
+            });
+        op_repo
+            .expect_exists_by_fields()
+            .once()
+            .returning(|_, _, _, _| Box::pin(async { Ok(false) }));
+        op_repo
+            .expect_insert()
+            .once()
+            .returning(|_, _, _, _, _, _| Box::pin(async { Ok(()) }));
+        op_repo
+            .expect_replace_splits()
+            .withf(move |_, uid, splits| {
+                *uid == user_id
+                    && splits
+                        == [
+                            NewOperationSplit {
+                                amount: Decimal::new(-30, 0),
+                                budget_id: Some(existing_id),
+                            },
+                            NewOperationSplit {
+                                amount: Decimal::new(-70, 0),
+                                budget_id: None,
+                            },
+                        ]
+            })
+            .once()
+            .returning(|_, _, _| Box::pin(async { Ok(true) }));
+        op_repo.expect_set_budget_link().never();
+
+        let app = build_test_router(make_test_state(
+            MockUserRepository::new(),
+            op_repo,
+            budget_repo,
+        ));
+
+        let auth = auth_header(user_id, UserRole::User);
+        let body = r#"{
+            "version": 1,
+            "budgets": [
+                {
+                    "id": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+                    "label": "Groceries",
+                    "budgetType": "expense",
+                    "kind": {"type":"occasional","month":1,"year":2024,"amount":"100"},
+                    "rules": [],
+                    "createdAt": "2024-01-01T00:00:00Z"
+                }
+            ],
+            "operations": [
+                {
+                    "id": "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+                    "amount": "-100",
+                    "date": "2024-03-15",
+                    "effectiveDate": null,
+                    "label": "Cash",
+                    "budgetLink": {"type":"manual","budgetId":"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"},
+                    "ignored": false,
+                    "splits": [
+                        {"amount": "-30", "budgetId": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"},
+                        {"amount": "-70", "budgetId": "ffffffff-ffff-ffff-ffff-ffffffffffff"}
+                    ]
+                }
+            ]
+        }"#;
+        let resp = app
+            .oneshot(json_request(
+                "POST",
+                "/data/import",
+                Some(body),
+                Some(&auth),
+            ))
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        let json: ImportDataResponse = response_json(resp).await;
+        assert_eq!(json.imported_operations, 1);
+    }
+
+    #[tokio::test]
+    async fn import_rejects_invalid_splits_before_writing() {
+        let user_id = Uuid::new_v4();
+        let app = build_test_router(make_test_state(
+            MockUserRepository::new(),
+            MockOperationRepository::new(),
+            MockBudgetRepository::new(),
+        ));
+
+        let auth = auth_header(user_id, UserRole::User);
+        let body = r#"{
+            "version": 1,
+            "operations": [
+                {
+                    "id": "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+                    "amount": "-100",
+                    "date": "2024-03-15",
+                    "effectiveDate": null,
+                    "label": "Cash",
+                    "budgetLink": {"type":"unlinked"},
+                    "ignored": false,
+                    "splits": [
+                        {"amount": "-30", "budgetId": null},
+                        {"amount": "-60", "budgetId": null}
+                    ]
+                }
+            ]
+        }"#;
+        let resp = app
+            .oneshot(json_request(
+                "POST",
+                "/data/import",
+                Some(body),
+                Some(&auth),
+            ))
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
     }
 
     #[tokio::test]

@@ -170,7 +170,7 @@ pub struct ApplyBudgetRequest {
 pub struct ApplyBudgetResponse {
     /// Number of operations that were newly linked to the budget.
     pub updated: usize,
-    /// Number of operations skipped (e.g. already manually linked).
+    /// Number of operations skipped (already manually linked without `force`, or split).
     pub skipped: usize,
 }
 
@@ -273,7 +273,7 @@ pub async fn apply_budget<U, O: OperationRepository, B: BudgetRepository>(
     let mut skipped = 0usize;
 
     for op in ops {
-        if !body.force && op.budget_link.is_manual() {
+        if op.is_split() || (!body.force && op.budget_link.is_manual()) {
             skipped += 1;
             continue;
         }
@@ -346,7 +346,7 @@ mod tests {
     use crate::{
         domain::{
             budget::BudgetKind,
-            operation::{BudgetLink, Operation},
+            operation::{BudgetLink, Operation, OperationSplit},
             user::UserRole,
         },
         error::AppError,
@@ -389,6 +389,7 @@ mod tests {
             effective_date: None,
             budget_link: BudgetLink::Unlinked,
             ignored: false,
+            splits: vec![],
         }
     }
 
@@ -598,6 +599,73 @@ mod tests {
             "POST",
             &format!("/budgets/{budget_id}/apply"),
             Some(body),
+            Some(&auth),
+        );
+        let resp = app.oneshot(req).await.unwrap();
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        let json: ApplyBudgetResponse = response_json(resp).await;
+        assert_eq!(json.skipped, 1);
+        assert_eq!(json.updated, 0);
+    }
+
+    #[tokio::test]
+    async fn apply_budget_never_touches_split_operations() {
+        let user_id = Uuid::new_v4();
+        let budget_id = Uuid::new_v4();
+        let budget = Budget {
+            rules: vec![Rule {
+                label_pattern: LabelPattern::Contains("Op".to_string()),
+                match_amount: false,
+            }],
+            ..make_budget(budget_id, user_id)
+        };
+
+        let mut op_repo = MockOperationRepository::new();
+        let mut budget_repo = MockBudgetRepository::new();
+
+        budget_repo
+            .expect_find_by_id()
+            .once()
+            .returning(move |_, _| {
+                let budget = budget.clone();
+                Box::pin(async { Ok(budget) })
+            });
+        let split_op = Operation {
+            splits: vec![
+                OperationSplit {
+                    id: Uuid::new_v4(),
+                    amount: Decimal::new(-20, 0),
+                    budget_id: None,
+                },
+                OperationSplit {
+                    id: Uuid::new_v4(),
+                    amount: Decimal::new(-30, 0),
+                    budget_id: None,
+                },
+            ],
+            ..make_op_unlinked(user_id)
+        };
+        op_repo
+            .expect_list_all_for_user()
+            .once()
+            .returning(move |_| {
+                let op = split_op.clone();
+                Box::pin(async { Ok(vec![op]) })
+            });
+        op_repo.expect_set_auto_link().never();
+
+        let app = build_test_router(make_test_state(
+            MockUserRepository::new(),
+            op_repo,
+            budget_repo,
+        ));
+
+        let auth = auth_header(user_id, UserRole::User);
+        let req = json_request(
+            "POST",
+            &format!("/budgets/{budget_id}/apply"),
+            Some(r#"{"force": true}"#),
             Some(&auth),
         );
         let resp = app.oneshot(req).await.unwrap();

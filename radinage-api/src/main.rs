@@ -300,7 +300,7 @@ where
             .put_with(handlers::operations::update_operation, |op| {
                 op.tag("Operations")
                     .summary("Update an operation")
-                    .description("Update the amount, date, or label of an existing bank operation. All fields in the request body are required and will replace the current values.")
+                    .description("Update the amount, date, or label of an existing bank operation. All fields in the request body are required and will replace the current values. Returns 409 when the amount of a split operation changes.")
                     .id("updateOperation")
             })
             .delete_with(handlers::operations::delete_operation, |op| {
@@ -315,14 +315,29 @@ where
             put_with(handlers::operations::link_budget, |op| {
                 op.tag("Operations")
                     .summary("Link an operation to a budget")
-                    .description("Associate a bank operation with a budget category. If the operation is already linked to a different budget, the link is updated to the new budget.")
+                    .description("Associate a bank operation with a budget category. If the operation is already linked to a different budget, the link is updated to the new budget. Returns 409 if the operation is split.")
                     .id("linkBudget")
             })
             .delete_with(handlers::operations::unlink_budget, |op| {
                 op.tag("Operations")
                     .summary("Unlink an operation from its budget")
-                    .description("Remove the budget association from a bank operation. The operation itself is not deleted.")
+                    .description("Remove the budget association from a bank operation. The operation itself is not deleted. Returns 409 if the operation is split.")
                     .id("unlinkBudget")
+            }),
+        )
+        .api_route(
+            "/operations/{id}/splits",
+            put_with(handlers::operations::replace_splits, |op| {
+                op.tag("Operations")
+                    .summary("Split an operation")
+                    .description("Replace the parts an operation is split into, e.g. a cash withdrawal spread over several budgets. Requires at least 2 parts whose amounts are non-zero, share the operation's sign and sum exactly to the operation amount; each part may reference one of the caller's budgets or none. The operation's own budget link is reset to unlinked, and summaries count each part under its own budget instead of the operation. Returns 400 on invalid parts or unknown budgets, 404 if the operation does not exist.")
+                    .id("replaceOperationSplits")
+            })
+            .delete_with(handlers::operations::clear_splits, |op| {
+                op.tag("Operations")
+                    .summary("Remove an operation's splits")
+                    .description("Remove all parts of a split operation so that it is accounted as a whole again, unlinked. Idempotent: an operation that is not split is returned unchanged.")
+                    .id("clearOperationSplits")
             }),
         )
         .api_route(
@@ -382,7 +397,7 @@ where
             post_with(handlers::budgets::apply_budget, |op| {
                 op.tag("Budgets")
                     .summary("Apply budget rules to operations")
-                    .description("Run the matcher rules of a budget against all unlinked operations of the authenticated user. Operations whose label matches the budget's rules are automatically linked to it. Returns the number of newly linked operations.")
+                    .description("Run the matcher rules of a budget against all unlinked operations of the authenticated user. Operations whose label matches the budget's rules are automatically linked to it. Split operations are never touched. Returns the number of newly linked operations.")
                     .id("applyBudget")
             }),
         )
@@ -402,7 +417,7 @@ where
             get_with(handlers::summary::get_summary, |op| {
                 op.tag("Summary")
                     .summary("Get financial summary over a month range")
-                    .description("Compute monthly expense and income totals for each month in the given range (inclusive). Ignored operations are excluded.")
+                    .description("Compute monthly expense and income totals for each month in the given range (inclusive). Ignored operations are excluded. A split operation counts through its parts, each under its own budget.")
                     .id("getSummary")
             }),
         )
@@ -562,6 +577,11 @@ pub(crate) mod test_util {
                     .delete(handlers::operations::unlink_budget),
             )
             .route(
+                "/operations/{id}/splits",
+                routing::put(handlers::operations::replace_splits)
+                    .delete(handlers::operations::clear_splits),
+            )
+            .route(
                 "/operations/{id}/ignore",
                 routing::put(handlers::operations::ignore_operation)
                     .delete(handlers::operations::unignore_operation),
@@ -628,5 +648,46 @@ pub(crate) mod test_util {
             .await
             .unwrap();
         serde_json::from_slice(&bytes).unwrap()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{
+        build_router,
+        repositories::{MockBudgetRepository, MockOperationRepository, MockUserRepository},
+        test_util::{json_request, make_test_state, response_json},
+    };
+    use axum::http::StatusCode;
+    use tower::ServiceExt;
+
+    #[tokio::test]
+    async fn openapi_documents_operation_splits() {
+        let app = build_router(make_test_state(
+            MockUserRepository::new(),
+            MockOperationRepository::new(),
+            MockBudgetRepository::new(),
+        ));
+        let resp = app
+            .oneshot(json_request("GET", "/openapi.json", None, None))
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let doc: serde_json::Value = response_json(resp).await;
+
+        let splits_path = &doc["paths"]["/operations/{id}/splits"];
+        assert_eq!(splits_path["put"]["summary"], "Split an operation");
+        assert_eq!(
+            splits_path["delete"]["summary"],
+            "Remove an operation's splits"
+        );
+
+        let schemas = &doc["components"]["schemas"];
+        assert!(schemas["OperationResponse"]["properties"]["splits"].is_object());
+        let split_props = &schemas["OperationSplitResponse"]["properties"];
+        for field in ["id", "amount", "budgetId"] {
+            assert!(split_props[field].is_object(), "missing {field}");
+        }
+        assert!(schemas["ReplaceOperationSplitsRequest"]["properties"]["splits"].is_object());
     }
 }

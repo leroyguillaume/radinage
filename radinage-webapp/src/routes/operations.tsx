@@ -33,6 +33,7 @@ import {
 	IconLink,
 	IconLinkOff,
 	IconPlus,
+	IconScissors,
 	IconSortAscending,
 	IconSortDescending,
 	IconUpload,
@@ -46,6 +47,7 @@ import type { BudgetInitialValues } from "@/components/BudgetModal";
 import { BudgetModal } from "@/components/BudgetModal";
 import type { ImportResult } from "@/components/ImportModal";
 import { ImportModal } from "@/components/ImportModal";
+import { SplitOperationModal } from "@/components/SplitOperationModal";
 import { StatTile } from "@/components/StatTile";
 import { getBudgetedAmountForMonth } from "@/lib/budget-utils";
 import { formatAmount, formatSignedAmount } from "@/lib/format";
@@ -58,6 +60,11 @@ import {
 	useUnlinkBudget,
 	useUpdateEffectiveDate,
 } from "@/lib/hooks";
+import {
+	isSplit,
+	type OperationEntry,
+	operationEntries,
+} from "@/lib/operation-parts";
 import {
 	balanceTextColor,
 	budgetTypeTones,
@@ -96,7 +103,7 @@ interface BudgetGroup {
 	budgetType: SectionType;
 	realAmount: number;
 	budgetedAmount: number | null;
-	operations: OperationResponse[];
+	entries: OperationEntry[];
 }
 
 type BudgetSection = {
@@ -168,10 +175,9 @@ function SummaryStats({ sections }: { sections: BudgetSection[] }) {
 	let monthlyIncome = 0;
 	let monthlyExpense = 0;
 	for (const group of monthlySection?.groups ?? []) {
-		for (const op of group.operations) {
-			const value = Number(op.amount);
-			if (value >= 0) monthlyIncome += value;
-			else monthlyExpense += value;
+		for (const entry of group.entries) {
+			if (entry.amount >= 0) monthlyIncome += entry.amount;
+			else monthlyExpense += entry.amount;
 		}
 	}
 
@@ -273,23 +279,21 @@ function groupOperationsByBudget(
 		budgetMap.set(b.id, b);
 	}
 
-	const groups = new Map<string | null, OperationResponse[]>();
+	const groups = new Map<string | null, OperationEntry[]>();
 
-	for (const op of operations) {
-		const budgetId =
-			op.budgetLink.type === "unlinked" ? null : op.budgetLink.budgetId;
-		const existing = groups.get(budgetId);
+	for (const entry of operations.flatMap(operationEntries)) {
+		const existing = groups.get(entry.budgetId);
 		if (existing) {
-			existing.push(op);
+			existing.push(entry);
 		} else {
-			groups.set(budgetId, [op]);
+			groups.set(entry.budgetId, [entry]);
 		}
 	}
 
 	const result: BudgetGroup[] = [];
 
-	for (const [budgetId, ops] of groups) {
-		const realAmount = ops.reduce((sum, op) => sum + Number(op.amount), 0);
+	for (const [budgetId, entries] of groups) {
+		const realAmount = entries.reduce((sum, e) => sum + e.amount, 0);
 
 		if (budgetId === null) {
 			result.push({
@@ -299,7 +303,7 @@ function groupOperationsByBudget(
 				budgetType: "monthly",
 				realAmount,
 				budgetedAmount: forecast,
-				operations: ops,
+				entries,
 			});
 		} else {
 			const budget = budgetMap.get(budgetId);
@@ -313,7 +317,7 @@ function groupOperationsByBudget(
 				budgetType: budget?.budgetType ?? "expense",
 				realAmount,
 				budgetedAmount,
-				operations: ops,
+				entries,
 			});
 		}
 	}
@@ -330,7 +334,7 @@ function groupOperationsByBudget(
 				budgetType: budget.budgetType,
 				realAmount: 0,
 				budgetedAmount,
-				operations: [],
+				entries: [],
 			});
 		}
 	}
@@ -358,6 +362,7 @@ interface OperationHandlers {
 	onLink: (opId: string, budgetId: string) => void;
 	onUnlink: (opId: string) => void;
 	onIgnore: (opId: string) => void;
+	onSplit: (op: OperationResponse) => void;
 	onEditEffectiveDate: (
 		op: OperationResponse,
 		effectiveDate: string | null,
@@ -375,6 +380,9 @@ function MonthlyOperationsPage() {
 	const [budgetInitial, setBudgetInitial] = useState<
 		BudgetInitialValues | undefined
 	>();
+	const [splitTarget, setSplitTarget] = useState<OperationResponse | null>(
+		null,
+	);
 	const operationsQuery = useMonthlyOperations(year, month);
 	const budgetsQuery = useBudgets();
 
@@ -482,6 +490,7 @@ function MonthlyOperationsPage() {
 		onLink: (opId, budgetId) => linkBudget.mutate({ opId, budgetId }),
 		onUnlink: (opId) => unlinkBudget.mutate(opId),
 		onIgnore: (opId) => ignoreOperation.mutate(opId),
+		onSplit: setSplitTarget,
 		onEditEffectiveDate: (op, effectiveDate) =>
 			updateEffectiveDate.mutate({ op, effectiveDate }),
 	};
@@ -493,6 +502,11 @@ function MonthlyOperationsPage() {
 				onClose={() => setBudgetModalOpened(false)}
 				budget={null}
 				initialValues={budgetInitial}
+			/>
+			<SplitOperationModal
+				operation={splitTarget}
+				budgets={handlers.budgets}
+				onClose={() => setSplitTarget(null)}
 			/>
 			<ImportModal
 				opened={importOpened}
@@ -827,9 +841,7 @@ function groupMeta(group: BudgetGroup, t: TFunction): string {
 			parts.push(t(`budgets.recurrences.${kind.recurrence}`).toLowerCase());
 		}
 	}
-	parts.push(
-		t("operations.operationsCount", { count: group.operations.length }),
-	);
+	parts.push(t("operations.operationsCount", { count: group.entries.length }));
 	if (group.budgetId === null && group.budgetedAmount !== null) {
 		parts.push(t("operations.forecastHint"));
 	}
@@ -853,7 +865,7 @@ function BudgetGroupRow({
 
 	const label =
 		group.budgetId === null ? t(group.budgetLabel) : group.budgetLabel;
-	const hasOps = group.operations.length > 0;
+	const hasOps = group.entries.length > 0;
 	const real = normalize(group.budgetType, group.realAmount);
 	const budgeted =
 		group.budgetedAmount !== null
@@ -955,7 +967,7 @@ function BudgetGroupRow({
 			)}
 			{opened && hasOps && (
 				<OperationList
-					operations={group.operations}
+					entries={group.entries}
 					locale={locale}
 					handlers={handlers}
 				/>
@@ -971,11 +983,11 @@ function useOperationActionSize(): number {
 }
 
 function OperationList({
-	operations,
+	entries,
 	locale,
 	handlers,
 }: {
-	operations: OperationResponse[];
+	entries: OperationEntry[];
 	locale: string;
 	handlers: OperationHandlers;
 }) {
@@ -988,10 +1000,10 @@ function OperationList({
 			className="list-none px-4 pt-1 pb-3 sm:pr-5 sm:pl-14"
 			style={{ borderTop: `1px solid ${palette.divider}` }}
 		>
-			{operations.map((op) => (
+			{entries.map((entry) => (
 				<OperationRow
-					key={op.id}
-					op={op}
+					key={entry.key}
+					entry={entry}
 					locale={locale}
 					handlers={handlers}
 					actionSize={actionSize}
@@ -1087,19 +1099,20 @@ function LinkBudgetMenu({
 }
 
 function OperationRow({
-	op,
+	entry,
 	locale,
 	handlers,
 	actionSize,
 }: {
-	op: OperationResponse;
+	entry: OperationEntry;
 	locale: string;
 	handlers: OperationHandlers;
 	actionSize: number;
 }) {
 	const { t, i18n } = useTranslation();
 	const [datePopoverOpened, setDatePopoverOpened] = useState(false);
-	const amount = Number(op.amount);
+	const { operation: op, amount, part } = entry;
+	const split = isSplit(op);
 
 	return (
 		<Box
@@ -1118,6 +1131,15 @@ function OperationRow({
 					<Badge size="sm" color="leaf" c="leaf.9" tt="none" flex="none">
 						{t("operations.auto")}
 					</Badge>
+				)}
+				{part && (
+					<Tooltip
+						label={t("operations.split.splitInto", { count: part.count })}
+					>
+						<Badge size="sm" color="forest" c="forest.8" tt="none" flex="none">
+							{t("operations.split.partBadge", part)}
+						</Badge>
+					</Tooltip>
 				)}
 			</Group>
 			<Text
@@ -1184,7 +1206,7 @@ function OperationRow({
 						</Stack>
 					</Popover.Dropdown>
 				</Popover>
-				{op.budgetLink.type === "unlinked" ? (
+				{split ? null : op.budgetLink.type === "unlinked" ? (
 					<>
 						<LinkBudgetMenu
 							budgets={handlers.budgets.filter((b) =>
@@ -1210,6 +1232,16 @@ function OperationRow({
 						onClick={() => handlers.onUnlink(op.id)}
 					/>
 				)}
+				<OperationAction
+					label={
+						split
+							? t("operations.split.editAction")
+							: t("operations.split.action")
+					}
+					icon={<IconScissors size={18} />}
+					size={actionSize}
+					onClick={() => handlers.onSplit(op)}
+				/>
 				<OperationAction
 					label={t("operations.ignoreOperation")}
 					icon={<IconEyeOff size={18} />}

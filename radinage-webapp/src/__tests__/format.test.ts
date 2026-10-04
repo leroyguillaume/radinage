@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { formatAmount, formatSignedAmount } from "@/lib/format";
+import {
+	centsToDecimal,
+	decimalToCents,
+	formatAmount,
+	formatSignedAmount,
+	parseCents,
+} from "@/lib/format";
 import { balanceTextColor, budgetTypeTones } from "@/lib/tones";
 
 // Intl uses narrow no-break spaces in fr-FR; normalise them for readability.
@@ -31,5 +37,27 @@ describe("balanceTextColor", () => {
 		expect(balanceTextColor(1)).toBe(budgetTypeTones.income.text);
 		expect(balanceTextColor(-1)).toBe(budgetTypeTones.expense.text);
 		expect(balanceTextColor(0)).toBe("var(--mantine-color-dimmed)");
+	});
+});
+
+describe("cents helpers", () => {
+	it("parses typed amounts with either decimal separator", () => {
+		expect(parseCents("30")).toBe(3000);
+		expect(parseCents("30,5")).toBe(3050);
+		expect(parseCents(" 0.07 ")).toBe(7);
+		expect(parseCents("-12,34")).toBe(1234);
+	});
+
+	it("rejects what is not an amount", () => {
+		expect(parseCents("")).toBeNull();
+		expect(parseCents("12,345")).toBeNull();
+		expect(parseCents("abc")).toBeNull();
+	});
+
+	it("round-trips API decimals without float drift", () => {
+		expect(decimalToCents("-0.30")).toBe(-30);
+		expect(decimalToCents("1234.56")).toBe(123456);
+		expect(centsToDecimal(-3005)).toBe("-30.05");
+		expect(centsToDecimal(7)).toBe("0.07");
 	});
 });

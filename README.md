@@ -12,7 +12,7 @@ A self-hosted personal bank account tracker: import your bank statements, sort t
 
 Radinage keeps a record of your bank operations and compares them with the budgets you plan, month by month, so the end-of-year balance is never a surprise. It does not connect to your bank: operations come from the CSV or Excel exports banks already provide.
 
-- **Operations**: import bank statements (CSV/XLSX) or link operations to budgets by hand.
+- **Operations**: import bank statements (CSV/XLSX), link operations to budgets by hand, or split one operation (a cash withdrawal, say) across several budgets.
 - **Budgets**: recurring (weekly, monthly, quarterly, yearly) or one-off, for expenses, income or savings, with matching rules that categorise operations automatically.
 - **Forecast**: actuals up to the current month, budgets beyond it, and the daily amount you can still spend.
 - **Statistics**: income, expenses, savings and balance over any range of months.

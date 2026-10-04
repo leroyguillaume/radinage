@@ -15,7 +15,18 @@ export interface OperationResponse {
 	effectiveDate: string | null;
 	label: string;
 	budgetLink: BudgetLink;
+	/** Parts of a split operation, in order; empty when the operation is whole. */
+	splits: OperationSplitResponse[];
 }
+
+export interface OperationSplitResponse {
+	id: string;
+	/** Signed decimal, same sign as the parent operation's amount. */
+	amount: string;
+	budgetId: string | null;
+}
+
+export type OperationSplitRequest = Omit<OperationSplitResponse, "id">;
 
 export type BudgetLink =
 	| { type: "unlinked" }

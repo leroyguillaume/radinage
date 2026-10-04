@@ -1,5 +1,5 @@
 use crate::{
-    domain::operation::{BudgetLink, Operation},
+    domain::operation::{BudgetLink, NewOperationSplit, Operation, OperationSplit},
     error::{AppError, AppResult},
     repositories::SortOrder,
 };
@@ -8,6 +8,7 @@ use rust_decimal::Decimal;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use sqlx::{PgPool, Row};
+use std::collections::HashMap;
 use uuid::Uuid;
 
 /// Sort field for operation listings.
@@ -49,7 +50,8 @@ pub struct ListOperationsParams {
     pub include_ignored: bool,
 }
 
-/// A single row returned by the monthly-summary query.
+/// A single row returned by the monthly-summary query: an unsplit operation, or one split
+/// part reported as `manual` when it has a budget and `unlinked` otherwise.
 pub struct SummaryRow {
     pub amount: Decimal,
     pub budget_link_type: String,
@@ -112,6 +114,7 @@ pub trait OperationRepository: Send + Sync + 'static {
     ) -> impl std::future::Future<Output = AppResult<bool>> + Send;
 
     /// Set an auto budget link without a user-id check (used internally by the matcher).
+    /// Split operations are left untouched.
     fn set_auto_link(
         &self,
         op_id: Uuid,
@@ -141,7 +144,24 @@ pub trait OperationRepository: Send + Sync + 'static {
         label: &str,
     ) -> impl std::future::Future<Output = AppResult<bool>> + Send;
 
-    /// Fetch operation rows for the monthly summary, joining budget type from the budgets table.
+    /// Atomically replace an operation's splits and reset its own budget link to unlinked.
+    /// Returns `true` if found, `false` if not.
+    fn replace_splits(
+        &self,
+        id: Uuid,
+        user_id: Uuid,
+        splits: &[NewOperationSplit],
+    ) -> impl std::future::Future<Output = AppResult<bool>> + Send;
+
+    /// Remove all splits of an operation. Returns `true` if found, `false` if not.
+    fn clear_splits(
+        &self,
+        id: Uuid,
+        user_id: Uuid,
+    ) -> impl std::future::Future<Output = AppResult<bool>> + Send;
+
+    /// Fetch amounts for the monthly summary, joining budget type from the budgets table.
+    /// A split operation yields one row per split instead of a row for itself.
     fn list_for_summary(
         &self,
         user_id: Uuid,
@@ -188,7 +208,41 @@ fn row_to_operation(row: &sqlx::postgres::PgRow) -> AppResult<Operation> {
         label: row.try_get("label")?,
         budget_link: budget_link_from_cols(link_type, link_id),
         ignored: row.try_get("ignored").unwrap_or(false),
+        splits: Vec::new(),
     })
+}
+
+/// Fill in the splits of the given operations with a single query.
+async fn attach_splits(pool: &PgPool, ops: &mut [Operation]) -> AppResult<()> {
+    if ops.is_empty() {
+        return Ok(());
+    }
+    let ids: Vec<Uuid> = ops.iter().map(|op| op.id).collect();
+    let rows = sqlx::query(
+        "SELECT id, operation_id, amount, budget_id FROM operation_splits
+         WHERE operation_id = ANY($1) ORDER BY operation_id, position",
+    )
+    .bind(&ids)
+    .fetch_all(pool)
+    .await?;
+
+    let mut by_operation: HashMap<Uuid, Vec<OperationSplit>> = HashMap::new();
+    for row in &rows {
+        by_operation
+            .entry(row.try_get("operation_id")?)
+            .or_default()
+            .push(OperationSplit {
+                id: row.try_get("id")?,
+                amount: row.try_get("amount")?,
+                budget_id: row.try_get("budget_id")?,
+            });
+    }
+    for op in ops {
+        if let Some(splits) = by_operation.remove(&op.id) {
+            op.splits = splits;
+        }
+    }
+    Ok(())
 }
 
 impl OperationRepository for PgOperationRepository {
@@ -203,7 +257,10 @@ impl OperationRepository for PgOperationRepository {
         .await?
         .ok_or(AppError::NotFound)?;
 
-        row_to_operation(&row)
+        let mut ops = [row_to_operation(&row)?];
+        attach_splits(&self.pool, &mut ops).await?;
+        let [op] = ops;
+        Ok(op)
     }
 
     async fn list(
@@ -262,10 +319,11 @@ impl OperationRepository for PgOperationRepository {
             .await?;
 
         let total: i64 = count_row.try_get("count")?;
-        let ops = rows
+        let mut ops = rows
             .iter()
             .map(row_to_operation)
             .collect::<AppResult<Vec<_>>>()?;
+        attach_splits(&self.pool, &mut ops).await?;
 
         Ok((ops, total))
     }
@@ -346,7 +404,9 @@ impl OperationRepository for PgOperationRepository {
 
     async fn set_auto_link(&self, op_id: Uuid, budget_id: Uuid) -> AppResult<()> {
         sqlx::query(
-            "UPDATE operations SET budget_link_type = 'auto', budget_link_id = $1 WHERE id = $2",
+            "UPDATE operations SET budget_link_type = 'auto', budget_link_id = $1
+             WHERE id = $2
+               AND NOT EXISTS (SELECT 1 FROM operation_splits WHERE operation_id = $2)",
         )
         .bind(budget_id)
         .bind(op_id)
@@ -364,7 +424,12 @@ impl OperationRepository for PgOperationRepository {
         .fetch_all(&self.pool)
         .await?;
 
-        rows.iter().map(row_to_operation).collect()
+        let mut ops = rows
+            .iter()
+            .map(row_to_operation)
+            .collect::<AppResult<Vec<_>>>()?;
+        attach_splits(&self.pool, &mut ops).await?;
+        Ok(ops)
     }
 
     async fn set_ignored(&self, id: Uuid, user_id: Uuid, ignored: bool) -> AppResult<bool> {
@@ -398,6 +463,64 @@ impl OperationRepository for PgOperationRepository {
         Ok(row.try_get("found")?)
     }
 
+    async fn replace_splits(
+        &self,
+        id: Uuid,
+        user_id: Uuid,
+        splits: &[NewOperationSplit],
+    ) -> AppResult<bool> {
+        let mut tx = self.pool.begin().await?;
+        // Locking the row serialises concurrent replacements of the same operation's splits.
+        let found = sqlx::query(
+            "UPDATE operations SET budget_link_type = 'unlinked', budget_link_id = NULL
+             WHERE id = $1 AND user_id = $2",
+        )
+        .bind(id)
+        .bind(user_id)
+        .execute(&mut *tx)
+        .await?
+        .rows_affected()
+            > 0;
+        if !found {
+            return Ok(false);
+        }
+
+        sqlx::query("DELETE FROM operation_splits WHERE operation_id = $1")
+            .bind(id)
+            .execute(&mut *tx)
+            .await?;
+        for (position, split) in (0_i32..).zip(splits) {
+            sqlx::query(
+                "INSERT INTO operation_splits (operation_id, position, amount, budget_id)
+                 VALUES ($1, $2, $3, $4)",
+            )
+            .bind(id)
+            .bind(position)
+            .bind(split.amount)
+            .bind(split.budget_id)
+            .execute(&mut *tx)
+            .await?;
+        }
+        tx.commit().await?;
+        Ok(true)
+    }
+
+    async fn clear_splits(&self, id: Uuid, user_id: Uuid) -> AppResult<bool> {
+        let row = sqlx::query(
+            "WITH owned AS (SELECT id FROM operations WHERE id = $1 AND user_id = $2),
+                  removed AS (
+                      DELETE FROM operation_splits
+                      WHERE operation_id IN (SELECT id FROM owned)
+                  )
+             SELECT EXISTS(SELECT 1 FROM owned) AS found",
+        )
+        .bind(id)
+        .bind(user_id)
+        .fetch_one(&self.pool)
+        .await?;
+        Ok(row.try_get("found")?)
+    }
+
     async fn list_for_summary(
         &self,
         user_id: Uuid,
@@ -408,6 +531,18 @@ impl OperationRepository for PgOperationRepository {
             r#"SELECT o.amount, o.budget_link_type, b.budget_type
                FROM operations o
                LEFT JOIN budgets b ON b.id = o.budget_link_id
+               WHERE o.user_id = $1
+                 AND COALESCE(o.effective_date, o.date) >= $2
+                 AND COALESCE(o.effective_date, o.date) <= $3
+                 AND o.ignored = FALSE
+                 AND NOT EXISTS (SELECT 1 FROM operation_splits s WHERE s.operation_id = o.id)
+               UNION ALL
+               SELECT s.amount,
+                      CASE WHEN s.budget_id IS NULL THEN 'unlinked' ELSE 'manual' END,
+                      b.budget_type
+               FROM operation_splits s
+               JOIN operations o ON o.id = s.operation_id
+               LEFT JOIN budgets b ON b.id = s.budget_id
                WHERE o.user_id = $1
                  AND COALESCE(o.effective_date, o.date) >= $2
                  AND COALESCE(o.effective_date, o.date) <= $3
@@ -717,6 +852,266 @@ mod integration_tests {
         assert_eq!(ops[0].id, id_a);
         assert_eq!(ops[1].id, id_c);
         assert_eq!(ops[2].id, id_b);
+    }
+
+    async fn setup_budget(pool: &PgPool, user_id: Uuid, budget_type: &str) -> Uuid {
+        let budget_id = Uuid::new_v4();
+        sqlx::query(
+            "INSERT INTO budgets (id, user_id, label, budget_type, kind_type) VALUES ($1, $2, $3, $4, 'occasional')",
+        )
+        .bind(budget_id)
+        .bind(user_id)
+        .bind(format!("budget_{budget_id}"))
+        .bind(budget_type)
+        .execute(pool)
+        .await
+        .unwrap();
+        budget_id
+    }
+
+    async fn insert_op(repo: &PgOperationRepository, user_id: Uuid, amount: Decimal) -> Uuid {
+        let op_id = Uuid::new_v4();
+        repo.insert(
+            op_id,
+            user_id,
+            amount,
+            NaiveDate::from_ymd_opt(2024, 3, 10).unwrap(),
+            None,
+            "Cash withdrawal",
+        )
+        .await
+        .unwrap();
+        op_id
+    }
+
+    fn part(amount: Decimal, budget_id: Option<Uuid>) -> NewOperationSplit {
+        NewOperationSplit { amount, budget_id }
+    }
+
+    fn split_amounts(op: &Operation) -> Vec<(Decimal, Option<Uuid>)> {
+        op.splits.iter().map(|s| (s.amount, s.budget_id)).collect()
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn replace_splits_stores_parts_in_order_and_unlinks(pool: PgPool) {
+        let repo = PgOperationRepository::new(pool.clone());
+        let user_id = setup_user(&pool).await;
+        let budget_id = setup_budget(&pool, user_id, "expense").await;
+        let op_id = insert_op(&repo, user_id, dec!(-100)).await;
+        repo.set_budget_link(op_id, user_id, &BudgetLink::Manual { budget_id })
+            .await
+            .unwrap();
+
+        let parts = [
+            part(dec!(-30), Some(budget_id)),
+            part(dec!(-30), None),
+            part(dec!(-40), Some(budget_id)),
+        ];
+        assert!(repo.replace_splits(op_id, user_id, &parts).await.unwrap());
+
+        let op = repo.find_by_id(op_id, user_id).await.unwrap();
+        assert_eq!(op.budget_link, BudgetLink::Unlinked);
+        assert_eq!(
+            split_amounts(&op),
+            vec![
+                (dec!(-30), Some(budget_id)),
+                (dec!(-30), None),
+                (dec!(-40), Some(budget_id)),
+            ]
+        );
+
+        let replacement = [part(dec!(-99.5), None), part(dec!(-0.5), Some(budget_id))];
+        assert!(
+            repo.replace_splits(op_id, user_id, &replacement)
+                .await
+                .unwrap()
+        );
+        let op = repo.find_by_id(op_id, user_id).await.unwrap();
+        assert_eq!(
+            split_amounts(&op),
+            vec![(dec!(-99.5), None), (dec!(-0.5), Some(budget_id))]
+        );
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn replace_splits_of_other_users_operation_returns_false(pool: PgPool) {
+        let repo = PgOperationRepository::new(pool.clone());
+        let user_id = setup_user(&pool).await;
+        let other_user_id = setup_user(&pool).await;
+        let op_id = insert_op(&repo, user_id, dec!(-100)).await;
+
+        let parts = [part(dec!(-50), None), part(dec!(-50), None)];
+        assert!(
+            !repo
+                .replace_splits(op_id, other_user_id, &parts)
+                .await
+                .unwrap()
+        );
+        assert!(
+            repo.find_by_id(op_id, user_id)
+                .await
+                .unwrap()
+                .splits
+                .is_empty()
+        );
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn clear_splits_removes_parts_and_is_idempotent(pool: PgPool) {
+        let repo = PgOperationRepository::new(pool.clone());
+        let user_id = setup_user(&pool).await;
+        let other_user_id = setup_user(&pool).await;
+        let op_id = insert_op(&repo, user_id, dec!(-100)).await;
+        let parts = [part(dec!(-50), None), part(dec!(-50), None)];
+        repo.replace_splits(op_id, user_id, &parts).await.unwrap();
+
+        assert!(!repo.clear_splits(op_id, other_user_id).await.unwrap());
+        assert!(repo.find_by_id(op_id, user_id).await.unwrap().is_split());
+
+        assert!(repo.clear_splits(op_id, user_id).await.unwrap());
+        assert!(!repo.find_by_id(op_id, user_id).await.unwrap().is_split());
+        assert!(repo.clear_splits(op_id, user_id).await.unwrap());
+        assert!(!repo.clear_splits(Uuid::new_v4(), user_id).await.unwrap());
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn splits_are_listed_with_their_operations(pool: PgPool) {
+        let repo = PgOperationRepository::new(pool.clone());
+        let user_id = setup_user(&pool).await;
+        let split_id = insert_op(&repo, user_id, dec!(-100)).await;
+        let plain_id = insert_op(&repo, user_id, dec!(-5)).await;
+        let parts = [part(dec!(-60), None), part(dec!(-40), None)];
+        repo.replace_splits(split_id, user_id, &parts)
+            .await
+            .unwrap();
+
+        let all = repo.list_all_for_user(user_id).await.unwrap();
+        let split = all.iter().find(|op| op.id == split_id).unwrap();
+        let plain = all.iter().find(|op| op.id == plain_id).unwrap();
+        assert_eq!(
+            split_amounts(split),
+            vec![(dec!(-60), None), (dec!(-40), None)]
+        );
+        assert!(plain.splits.is_empty());
+
+        let params = ListOperationsParams {
+            date_from: None,
+            date_to: None,
+            label_filter: None,
+            amount: Some(dec!(-100)),
+            sort: OperationSortField::Date,
+            order: SortOrder::Asc,
+            limit: 10,
+            offset: 0,
+            include_ignored: false,
+        };
+        let (ops, _) = repo.list(user_id, &params).await.unwrap();
+        assert_eq!(ops.len(), 1);
+        assert_eq!(ops[0].splits.len(), 2);
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn deleting_a_budget_unassigns_its_split_parts(pool: PgPool) {
+        let repo = PgOperationRepository::new(pool.clone());
+        let user_id = setup_user(&pool).await;
+        let budget_id = setup_budget(&pool, user_id, "expense").await;
+        let op_id = insert_op(&repo, user_id, dec!(-100)).await;
+        let parts = [part(dec!(-60), Some(budget_id)), part(dec!(-40), None)];
+        repo.replace_splits(op_id, user_id, &parts).await.unwrap();
+
+        sqlx::query("DELETE FROM budgets WHERE id = $1")
+            .bind(budget_id)
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let op = repo.find_by_id(op_id, user_id).await.unwrap();
+        assert_eq!(
+            split_amounts(&op),
+            vec![(dec!(-60), None), (dec!(-40), None)]
+        );
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn set_auto_link_leaves_split_operations_alone(pool: PgPool) {
+        let repo = PgOperationRepository::new(pool.clone());
+        let user_id = setup_user(&pool).await;
+        let budget_id = setup_budget(&pool, user_id, "expense").await;
+        let op_id = insert_op(&repo, user_id, dec!(-100)).await;
+        let parts = [part(dec!(-50), None), part(dec!(-50), None)];
+        repo.replace_splits(op_id, user_id, &parts).await.unwrap();
+
+        repo.set_auto_link(op_id, budget_id).await.unwrap();
+
+        let op = repo.find_by_id(op_id, user_id).await.unwrap();
+        assert_eq!(op.budget_link, BudgetLink::Unlinked);
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn list_for_summary_counts_split_parts_instead_of_their_operation(pool: PgPool) {
+        let repo = PgOperationRepository::new(pool.clone());
+        let user_id = setup_user(&pool).await;
+        let expense_id = setup_budget(&pool, user_id, "expense").await;
+        let savings_id = setup_budget(&pool, user_id, "savings").await;
+
+        let plain_id = insert_op(&repo, user_id, dec!(-7)).await;
+        repo.set_budget_link(
+            plain_id,
+            user_id,
+            &BudgetLink::Manual {
+                budget_id: expense_id,
+            },
+        )
+        .await
+        .unwrap();
+        let split_id = insert_op(&repo, user_id, dec!(-100)).await;
+        let parts = [
+            part(dec!(-30), Some(expense_id)),
+            part(dec!(-25), Some(savings_id)),
+            part(dec!(-45), None),
+        ];
+        repo.replace_splits(split_id, user_id, &parts)
+            .await
+            .unwrap();
+        let ignored_id = insert_op(&repo, user_id, dec!(-80)).await;
+        let ignored_parts = [part(dec!(-40), Some(expense_id)), part(dec!(-40), None)];
+        repo.replace_splits(ignored_id, user_id, &ignored_parts)
+            .await
+            .unwrap();
+        repo.set_ignored(ignored_id, user_id, true).await.unwrap();
+
+        let mut rows: Vec<(Decimal, String, Option<String>)> = repo
+            .list_for_summary(
+                user_id,
+                NaiveDate::from_ymd_opt(2024, 3, 1).unwrap(),
+                NaiveDate::from_ymd_opt(2024, 3, 31).unwrap(),
+            )
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|r| (r.amount, r.budget_link_type, r.budget_type))
+            .collect();
+        rows.sort();
+
+        assert_eq!(
+            rows,
+            vec![
+                (dec!(-45), "unlinked".to_string(), None),
+                (dec!(-30), "manual".to_string(), Some("expense".to_string())),
+                (dec!(-25), "manual".to_string(), Some("savings".to_string())),
+                (dec!(-7), "manual".to_string(), Some("expense".to_string())),
+            ]
+        );
+
+        let outside = repo
+            .list_for_summary(
+                user_id,
+                NaiveDate::from_ymd_opt(2024, 4, 1).unwrap(),
+                NaiveDate::from_ymd_opt(2024, 4, 30).unwrap(),
+            )
+            .await
+            .unwrap();
+        assert!(outside.is_empty());
     }
 
     #[sqlx::test(migrations = "./migrations")]

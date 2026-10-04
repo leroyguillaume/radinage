@@ -78,6 +78,7 @@ mod tests {
             effective_date: None,
             budget_link: BudgetLink::Unlinked,
             ignored: false,
+            splits: vec![],
         }
     }
 

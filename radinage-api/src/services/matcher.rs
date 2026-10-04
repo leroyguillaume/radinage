@@ -127,6 +127,7 @@ mod tests {
             effective_date: None,
             budget_link: crate::domain::operation::BudgetLink::Unlinked,
             ignored: false,
+            splits: vec![],
         }
     }
 

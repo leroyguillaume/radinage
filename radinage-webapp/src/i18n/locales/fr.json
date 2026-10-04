@@ -59,6 +59,25 @@
 			"income": "Revenus",
 			"savings": "Épargne",
 			"balance": "Balance"
+		},
+		"split": {
+			"title": "Diviser l'opération",
+			"action": "Diviser",
+			"editAction": "Modifier la division",
+			"splitInto": "Divisée en {{count}} parts",
+			"partBadge": "part {{index}}/{{count}}",
+			"partLabel": "Part {{n}}",
+			"amount": "Montant",
+			"budget": "Budget",
+			"noBudget": "Aucun budget",
+			"addPart": "Ajouter une part",
+			"removePart": "Retirer la part",
+			"remainder": "Reste à répartir : {{amount}}",
+			"fillRemainder": "Répartir le reste",
+			"unsplit": "Annuler la division",
+			"invalidAmount": "Montant invalide",
+			"saveError": "Impossible d'enregistrer la division",
+			"unsplitError": "Impossible d'annuler la division"
 		}
 	},
 	"import": {

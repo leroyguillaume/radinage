@@ -2,3 +2,6 @@
 dialect = postgres
 templater = raw
 max_line_length = 100
+# Ordered children use a `position` column (budget_periods, budget_rules,
+# operation_splits): a keyword, but valid unquoted in Postgres.
+exclude_rules = RF04
