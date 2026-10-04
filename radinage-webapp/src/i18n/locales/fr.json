@@ -28,6 +28,22 @@
 		"clearEffectiveDate": "Supprimer la date effective",
 		"previousMonth": "Mois précédent",
 		"nextMonth": "Mois suivant",
+		"unbudgeted": "Non budgétées",
+		"operationsCount": "{{count}} opération(s)",
+		"forecastHint": "prévision sur 3 mois",
+		"ofBudgeted": "sur {{amount}} budgétés",
+		"ofForecast": "sur {{amount}} prévus",
+		"link": "Lier",
+		"auto": "auto",
+		"sortBy": "Trier par",
+		"sortAscending": "Ordre croissant",
+		"sortDescending": "Ordre décroissant",
+		"status": {
+			"remaining": "Reste {{amount}}",
+			"overBy": "Dépassé de {{amount}}",
+			"reached": "Atteint",
+			"missing": "Manque {{amount}}"
+		},
 		"columns": {
 			"budget": "Budget",
 			"date": "Date",
@@ -117,7 +133,25 @@
 		"applyForceManual": "Tout remplacer",
 		"applyRules": "Appliquer",
 		"applyError": "Erreur lors de l'application des règles",
-		"applyResult": "{{updated}} opération(s) liée(s), {{skipped}} ignorée(s)"
+		"applyResult": "{{updated}} opération(s) liée(s), {{skipped}} ignorée(s)",
+		"subtitle": "Avancement sur {{month}}",
+		"filterByType": "Filtrer par type",
+		"sortBy": "Trier par",
+		"filters": {
+			"all": "Tous",
+			"expense": "Dépenses",
+			"income": "Revenus",
+			"savings": "Épargne"
+		},
+		"progress": {
+			"amounts": "{{real}} sur {{planned}}",
+			"percent": "{{percent}} %",
+			"reached": "Atteint",
+			"over": "Dépassé",
+			"noDue": "Pas d'échéance ce mois-ci"
+		},
+		"noRules": "Aucune règle de correspondance",
+		"deleteConfirmMessage": "Le budget « {{label}} » sera supprimé définitivement."
 	},
 	"stats": {
 		"title": "Statistiques",
@@ -130,15 +164,27 @@
 		"balance": "Balance",
 		"fetchError": "Impossible de charger les statistiques",
 		"monthlyEvolution": "Revenus, dépenses et épargne",
-		"balanceEvolution": "Évolution de la balance"
+		"balanceEvolution": "Évolution de la balance",
+		"cumulative": "Cumul sur la période"
 	},
 	"forecast": {
 		"title": "Résumé",
 		"fetchError": "Impossible de charger le prévisionnel",
 		"yearProgress": "Progression de l'année : {{percent}} %",
 		"dailyBudget": "Budget / jour",
-		"remainingDays": "{{count}} jour(s) restant(s)",
+		"remainingDays_one": "{{count}} jour restant",
+		"remainingDays_other": "{{count}} jours restants",
+		"subtitle": "Réel jusqu'au mois en cours, prévision ensuite à partir de tes budgets.",
+		"previousYear": "Année précédente",
+		"nextYear": "Année suivante",
 		"endOfYearBalance": "Balance fin d'année",
+		"endOfYearHint": "Ce qu'il devrait te rester au 31 décembre si tes budgets tiennent.",
+		"totalsTitle": "Totaux {{year}}",
+		"monthlyChart": "Balance mois par mois",
+		"surplus": "Excédent",
+		"deficit": "Déficit",
+		"monthlyDetail": "Détail mensuel",
+		"current": "En cours",
 		"totalIncome": "Revenus",
 		"totalExpenses": "Dépenses",
 		"totalSavings": "Épargne",
@@ -148,7 +194,7 @@
 		"savings": "Épargne",
 		"balance": "Balance",
 		"cumulative": "Cumulé",
-		"projected": "prév."
+		"projected": "Prévision"
 	},
 	"nav": {
 		"operations": "Opérations",
@@ -160,8 +206,19 @@
 		"logout": "Se déconnecter",
 		"menu": "Menu"
 	},
+	"auth": {
+		"features": {
+			"importTitle": "Import de relevés",
+			"importText": "CSV ou Excel, directement depuis ta banque.",
+			"rulesTitle": "Catégorisation automatique",
+			"rulesText": "Des règles rangent tes opérations dans le bon budget.",
+			"forecastTitle": "Prévision de fin d'année",
+			"forecastText": "Ce que tu peux dépenser par jour sans finir dans le rouge."
+		}
+	},
 	"login": {
 		"title": "Connexion",
+		"welcome": "Content de te revoir.",
 		"username": "Nom d'utilisateur",
 		"password": "Mot de passe",
 		"submit": "Se connecter",

@@ -21,6 +21,7 @@ import {
 import { createFileRoute } from "@tanstack/react-router";
 import { type FormEvent, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { PageHeader } from "@/components/PageHeader";
 import { ApiError } from "@/lib/api";
 import {
 	useCreateUser,
@@ -62,7 +63,7 @@ function AdminPage() {
 	if (role !== "admin") {
 		return (
 			<div className="flex h-full items-center justify-center p-4">
-				<Alert color="red" icon={<IconLock size={16} />}>
+				<Alert color="tangerine" icon={<IconLock size={16} />}>
 					{t("admin.forbidden")}
 				</Alert>
 			</div>
@@ -145,25 +146,31 @@ function AdminPage() {
 	}
 
 	return (
-		<div className="h-full overflow-y-auto p-4">
-			<Stack className="mx-auto max-w-lg" gap="lg">
-				<Title order={2} c="white">
-					{t("admin.title")}
-				</Title>
+		<div className="h-full overflow-auto">
+			<Stack
+				maw={720}
+				mx="auto"
+				px={{ base: "md", sm: "lg" }}
+				py={{ base: "md", sm: "xl" }}
+				gap="lg"
+			>
+				<PageHeader title={t("admin.title")} />
 
-				<Paper shadow="md" p="md" radius="md">
+				<Paper>
 					<form onSubmit={handleSubmit}>
 						<Stack>
-							<Title order={4}>{t("admin.createUser")}</Title>
+							<Title order={3} fz={20}>
+								{t("admin.createUser")}
+							</Title>
 
 							{error && (
-								<Alert color="red" icon={<IconAlertCircle size={16} />}>
+								<Alert color="tangerine" icon={<IconAlertCircle size={16} />}>
 									{error}
 								</Alert>
 							)}
 
 							{result && (
-								<Alert color="green" icon={<IconCheck size={16} />}>
+								<Alert color="leaf" icon={<IconCheck size={16} />}>
 									<Stack gap="xs">
 										<Text size="sm">
 											{t("admin.success")} — <strong>{result.username}</strong>
@@ -196,7 +203,7 @@ function AdminPage() {
 																}
 															>
 																<ActionIcon
-																	color={copied ? "teal" : "gray"}
+																	color={copied ? "forest" : "gray"}
 																	variant="subtle"
 																	onClick={copy}
 																	aria-label={t("admin.copyLink")}
@@ -239,19 +246,21 @@ function AdminPage() {
 					</form>
 				</Paper>
 
-				<Paper shadow="md" p="md" radius="md">
+				<Paper>
 					<form onSubmit={handleReset}>
 						<Stack>
-							<Title order={4}>{t("admin.resetPassword")}</Title>
+							<Title order={3} fz={20}>
+								{t("admin.resetPassword")}
+							</Title>
 
 							{resetError && (
-								<Alert color="red" icon={<IconAlertCircle size={16} />}>
+								<Alert color="tangerine" icon={<IconAlertCircle size={16} />}>
 									{resetError}
 								</Alert>
 							)}
 
 							{resetLink && (
-								<Alert color="green" icon={<IconCheck size={16} />}>
+								<Alert color="leaf" icon={<IconCheck size={16} />}>
 									<Stack gap="xs">
 										<Text size="sm" fw={500}>
 											{t("admin.resetLinkLabel")}
@@ -279,7 +288,7 @@ function AdminPage() {
 														}
 													>
 														<ActionIcon
-															color={copied ? "teal" : "gray"}
+															color={copied ? "forest" : "gray"}
 															variant="subtle"
 															onClick={copy}
 															aria-label={t("admin.copyLink")}
@@ -310,7 +319,7 @@ function AdminPage() {
 								type="submit"
 								loading={resetPassword.isPending}
 								size="md"
-								color="orange"
+								color="tangerine"
 							>
 								{t("admin.resetSubmit")}
 							</Button>
@@ -318,19 +327,21 @@ function AdminPage() {
 					</form>
 				</Paper>
 
-				<Paper shadow="md" p="md" radius="md">
+				<Paper>
 					<form onSubmit={handleDelete}>
 						<Stack>
-							<Title order={4}>{t("admin.deleteUser")}</Title>
+							<Title order={3} fz={20}>
+								{t("admin.deleteUser")}
+							</Title>
 
 							{deleteError && (
-								<Alert color="red" icon={<IconAlertCircle size={16} />}>
+								<Alert color="tangerine" icon={<IconAlertCircle size={16} />}>
 									{deleteError}
 								</Alert>
 							)}
 
 							{deleteSuccess && (
-								<Alert color="green" icon={<IconCheck size={16} />}>
+								<Alert color="leaf" icon={<IconCheck size={16} />}>
 									{t("admin.deleteSuccess", { username: deleteSuccess })}
 								</Alert>
 							)}

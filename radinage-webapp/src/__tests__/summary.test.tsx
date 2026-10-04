@@ -8,7 +8,7 @@ import {
 	Outlet,
 	RouterProvider,
 } from "@tanstack/react-router";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { i18n } from "@/i18n";
@@ -224,16 +224,34 @@ describe("SummaryPage", () => {
 		expect(rows.length).toBe(12);
 	});
 
-	it("marks projected months with label", async () => {
-		await renderSummaryPage();
+	it("marks forecast months with a pill and the current month as in progress", async () => {
+		const year = new Date().getFullYear();
+		const currentMonth = new Date().getMonth() + 1;
+		await renderSummaryPage(`?year=${year}`);
 
 		await waitFor(() => {
 			expect(screen.getByText("Budget / jour")).toBeInTheDocument();
 		});
 
-		// Future months should have "(prév.)" suffix
-		const projectedCells = screen.getAllByText(/\(prév\.\)/);
-		expect(projectedCells.length).toBeGreaterThan(0);
+		const table = screen.getByRole("table");
+		expect(within(table).queryAllByText("Prévision")).toHaveLength(
+			12 - currentMonth,
+		);
+		expect(within(table).getAllByText("En cours")).toHaveLength(1);
+		expect(within(table).queryByText(/\(prév\.\)/)).not.toBeInTheDocument();
+	});
+
+	it("renders the month-by-month balance chart with its legend", async () => {
+		await renderSummaryPage(`?year=${new Date().getFullYear()}`);
+
+		const chart = await screen.findByRole("heading", {
+			name: "Balance mois par mois",
+		});
+		const section = chart.closest("section");
+		expect(section).not.toBeNull();
+		const scope = within(section as HTMLElement);
+		expect(scope.getByText("Excédent")).toBeInTheDocument();
+		expect(scope.getByText("Déficit")).toBeInTheDocument();
 	});
 
 	it("shows error alert on API failure", async () => {
@@ -271,24 +289,23 @@ describe("SummaryPage", () => {
 			expect(screen.getByText("2026")).toBeInTheDocument();
 		});
 
-		// Click next year arrow
-		const arrows = document.querySelectorAll('[data-variant="subtle"]');
-		// The right arrow should be the second one in the year selector group
-		const rightArrow = Array.from(arrows).find(
-			(el) =>
-				el.closest("[class*='group']") !== null || el.querySelector("svg"),
-		);
+		await user.click(screen.getByRole("button", { name: "Année suivante" }));
+		await waitFor(() => {
+			expect(screen.getByText("2027")).toBeInTheDocument();
+		});
 
-		if (rightArrow) {
-			await user.click(rightArrow);
-		}
+		await user.click(screen.getByRole("button", { name: "Année précédente" }));
+		await user.click(screen.getByRole("button", { name: "Année précédente" }));
+		await waitFor(() => {
+			expect(screen.getByText("2025")).toBeInTheDocument();
+		});
 	});
 
 	it("shows remaining days count", async () => {
 		await renderSummaryPage();
 
 		await waitFor(() => {
-			expect(screen.getByText(/jour\(s\) restant\(s\)/)).toBeInTheDocument();
+			expect(screen.getByText(/\d+ jours? restants?/)).toBeInTheDocument();
 		});
 	});
 
@@ -377,9 +394,8 @@ describe("SummaryPage", () => {
 			expect(screen.getByText("Budget / jour")).toBeInTheDocument();
 		});
 
-		const dailyBudgetLabel = screen.getByText("Budget / jour");
-		const card = dailyBudgetLabel.closest("div");
-		const text = card?.textContent ?? "";
+		const card = screen.getByRole("region", { name: "Budget / jour" });
+		const text = card.textContent ?? "";
 		// Should not contain a negative sign before the € amount.
 		expect(text).not.toMatch(/-\d/);
 		// Should display zero euros.
@@ -409,8 +425,9 @@ describe("SummaryPage", () => {
 			expect(screen.getByText("2025")).toBeInTheDocument();
 		});
 
-		// Past year = no projected months
-		const projectedCells = screen.queryAllByText(/\(prév\.\)/);
-		expect(projectedCells.length).toBe(0);
+		// Past year = no forecast months and no month in progress
+		const table = await screen.findByRole("table");
+		expect(within(table).queryAllByText("Prévision")).toHaveLength(0);
+		expect(within(table).queryByText("En cours")).not.toBeInTheDocument();
 	});
 });

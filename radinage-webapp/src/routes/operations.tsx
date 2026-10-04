@@ -1,45 +1,54 @@
 import {
 	ActionIcon,
 	Alert,
+	Badge,
+	Box,
 	Button,
-	Grid,
 	Group,
 	Loader,
 	Menu,
+	Paper,
 	Popover,
+	Progress,
+	Select,
+	SimpleGrid,
 	Stack,
-	Table,
 	Text,
 	TextInput,
+	Title,
 	Tooltip,
+	UnstyledButton,
+	useMantineTheme,
 } from "@mantine/core";
 import { DatePicker, MonthPickerInput } from "@mantine/dates";
+import { useMediaQuery } from "@mantine/hooks";
 import {
 	IconAlertCircle,
-	IconArrowDown,
-	IconArrowsSort,
-	IconArrowUp,
 	IconCalendar,
 	IconCheck,
 	IconChevronDown,
 	IconChevronLeft,
 	IconChevronRight,
-	IconChevronUp,
 	IconEyeOff,
 	IconLink,
 	IconLinkOff,
 	IconPlus,
+	IconSortAscending,
+	IconSortDescending,
 	IconUpload,
 	IconX,
 } from "@tabler/icons-react";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useState } from "react";
+import type { TFunction } from "i18next";
+import { type ReactNode, useId, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { BudgetInitialValues } from "@/components/BudgetModal";
 import { BudgetModal } from "@/components/BudgetModal";
 import type { ImportResult } from "@/components/ImportModal";
 import { ImportModal } from "@/components/ImportModal";
+import { StatTile } from "@/components/StatTile";
 import { getBudgetedAmountForMonth } from "@/lib/budget-utils";
+import { formatAmount, formatSignedAmount } from "@/lib/format";
 import {
 	useBudgets,
 	useIgnoreOperation,
@@ -49,7 +58,18 @@ import {
 	useUnlinkBudget,
 	useUpdateEffectiveDate,
 } from "@/lib/hooks";
-import type { BudgetResponse, OperationResponse } from "@/lib/types";
+import {
+	balanceTextColor,
+	budgetTypeTones,
+	neutralTone,
+	type Tone,
+} from "@/lib/tones";
+import type {
+	BudgetResponse,
+	BudgetType,
+	OperationResponse,
+} from "@/lib/types";
+import { headingFont, palette } from "@/theme";
 
 interface OperationsSearch {
 	year: number;
@@ -67,31 +87,54 @@ export const Route = createFileRoute("/operations")({
 	},
 });
 
+type SectionType = BudgetType | "monthly";
+
 interface BudgetGroup {
 	budgetId: string | null;
+	budget: BudgetResponse | null;
 	budgetLabel: string;
-	budgetType: "expense" | "income" | "savings" | "monthly";
+	budgetType: SectionType;
 	realAmount: number;
 	budgetedAmount: number | null;
 	operations: OperationResponse[];
 }
 
 type BudgetSection = {
-	type: "expense" | "income" | "savings" | "monthly";
+	type: SectionType;
 	groups: BudgetGroup[];
 	totalReal: number;
 	totalBudgeted: number | null;
 };
 
-const SECTION_ORDER: BudgetSection["type"][] = [
+const SECTION_ORDER: SectionType[] = [
 	"income",
 	"expense",
 	"savings",
 	"monthly",
 ];
 
+const dailyTone: Tone = {
+	color: "forest",
+	fill: "var(--mantine-color-forest-3)",
+	text: "var(--mantine-color-text)",
+};
+
+function sectionTone(type: SectionType): Tone {
+	return type === "monthly" ? dailyTone : budgetTypeTones[type];
+}
+
+/**
+ * Expenses, savings and the daily forecast are stored as negative amounts;
+ * flipping them lets every progress bar and status read "spent vs. planned"
+ * with positive numbers.
+ */
+function normalize(type: SectionType, amount: number): number {
+	if (amount === 0 || type === "income") return amount;
+	return -amount;
+}
+
 function buildSections(groups: BudgetGroup[]): BudgetSection[] {
-	const byType = new Map<BudgetSection["type"], BudgetGroup[]>();
+	const byType = new Map<SectionType, BudgetGroup[]>();
 	for (const g of groups) {
 		const existing = byType.get(g.budgetType);
 		if (existing) {
@@ -137,51 +180,48 @@ function SummaryStats({ sections }: { sections: BudgetSection[] }) {
 	const savingsReal = byType.get("savings")?.totalReal ?? 0;
 	const balance = incomeReal + expenseReal + savingsReal;
 
-	const cells: { label: string; value: number; isSavings?: boolean }[] = [
-		{ label: t("operations.stats.income"), value: incomeReal },
-		{ label: t("operations.stats.expenses"), value: expenseReal },
+	const typedTiles: { type: BudgetType; label: string; value: number }[] = [
+		{ type: "income", label: t("operations.stats.income"), value: incomeReal },
 		{
+			type: "expense",
+			label: t("operations.stats.expenses"),
+			value: expenseReal,
+		},
+		{
+			type: "savings",
 			label: t("operations.stats.savings"),
 			value: savingsReal,
-			isSavings: true,
 		},
-		{ label: t("operations.stats.balance"), value: balance },
 	];
 
 	return (
-		<Grid gap="xs" mb="md">
-			{cells.map((cell) => (
-				<Grid.Col key={cell.label} span={{ base: 6, sm: 3 }}>
-					<Stack
-						gap={2}
-						p="xs"
-						style={{
-							borderRadius: 8,
-							backgroundColor: "rgba(255,255,255,0.03)",
-						}}
-					>
-						<Text size="xs" c="dimmed" ta="center">
-							{cell.label}
-						</Text>
-						<Text
-							size="sm"
-							fw={700}
-							ta="center"
-							c={amountColor(
-								cell.value,
-								cell.isSavings ? "savings" : undefined,
-							)}
-						>
-							{formatAmount(cell.value)}
-						</Text>
-					</Stack>
-				</Grid.Col>
+		<SimpleGrid cols={{ base: 2, sm: 4 }} spacing="sm">
+			{typedTiles.map((tile) => (
+				<StatTile
+					key={tile.type}
+					label={tile.label}
+					value={formatAmount(tile.value)}
+					dotColor={budgetTypeTones[tile.type].fill}
+					valueColor={budgetTypeTones[tile.type].text}
+				/>
 			))}
-		</Grid>
+			<StatTile
+				label={t("operations.stats.balance")}
+				value={formatSignedAmount(balance)}
+				dotColor={neutralTone.fill}
+				valueColor={balanceTextColor(balance)}
+			/>
+		</SimpleGrid>
 	);
 }
 
-type SortColumn = "budget" | "realAmount" | "budgetedAmount" | "difference";
+const SORT_COLUMNS = [
+	"budget",
+	"realAmount",
+	"budgetedAmount",
+	"difference",
+] as const;
+type SortColumn = (typeof SORT_COLUMNS)[number];
 type SortDirection = "asc" | "desc";
 
 interface SortState {
@@ -254,7 +294,8 @@ function groupOperationsByBudget(
 		if (budgetId === null) {
 			result.push({
 				budgetId: null,
-				budgetLabel: "operations.dailyOperations",
+				budget: null,
+				budgetLabel: "operations.unbudgeted",
 				budgetType: "monthly",
 				realAmount,
 				budgetedAmount: forecast,
@@ -267,6 +308,7 @@ function groupOperationsByBudget(
 				: 0;
 			result.push({
 				budgetId,
+				budget: budget ?? null,
 				budgetLabel: budget?.label ?? "?",
 				budgetType: budget?.budgetType ?? "expense",
 				realAmount,
@@ -283,6 +325,7 @@ function groupOperationsByBudget(
 		if (budgetedAmount !== null) {
 			result.push({
 				budgetId: budget.id,
+				budget,
 				budgetLabel: budget.label,
 				budgetType: budget.budgetType,
 				realAmount: 0,
@@ -301,29 +344,24 @@ function groupOperationsByBudget(
 	return result;
 }
 
-function formatAmount(amount: number): string {
-	return new Intl.NumberFormat("fr-FR", {
-		style: "currency",
-		currency: "EUR",
-	}).format(amount);
-}
-
-function amountColor(
-	amount: number,
-	budgetType?: "expense" | "income" | "savings" | "monthly",
-): string {
-	if (budgetType === "savings") return "blue";
-	if (amount > 0) return "green";
-	if (amount < 0) return "red";
-	return "white";
-}
-
 function formatDate(dateStr: string, locale: string): string {
 	const date = new Date(dateStr);
 	return new Intl.DateTimeFormat(locale, {
 		day: "2-digit",
 		month: "2-digit",
 	}).format(date);
+}
+
+interface OperationHandlers {
+	budgets: BudgetResponse[];
+	onCreateBudget: (op: OperationResponse) => void;
+	onLink: (opId: string, budgetId: string) => void;
+	onUnlink: (opId: string) => void;
+	onIgnore: (opId: string) => void;
+	onEditEffectiveDate: (
+		op: OperationResponse,
+		effectiveDate: string | null,
+	) => void;
 }
 
 function MonthlyOperationsPage() {
@@ -369,7 +407,6 @@ function MonthlyOperationsPage() {
 	const unlinkBudget = useUnlinkBudget();
 	const ignoreOperation = useIgnoreOperation();
 	const updateEffectiveDate = useUpdateEffectiveDate();
-	const budgets = budgetsQuery.data ?? [];
 
 	function navigateMonth(delta: number) {
 		navigateToDate(new Date(year, month - 1 + delta));
@@ -378,7 +415,7 @@ function MonthlyOperationsPage() {
 	if (isLoading) {
 		return (
 			<div className="flex h-full items-center justify-center">
-				<Loader color="green" />
+				<Loader />
 			</div>
 		);
 	}
@@ -388,7 +425,7 @@ function MonthlyOperationsPage() {
 			<div className="flex h-full items-center justify-center p-4">
 				<Alert
 					icon={<IconAlertCircle size={16} />}
-					color="red"
+					color="tangerine"
 					title={t("common.error")}
 				>
 					{t("operations.fetchError")}
@@ -439,8 +476,18 @@ function MonthlyOperationsPage() {
 		setBudgetModalOpened(true);
 	}
 
+	const handlers: OperationHandlers = {
+		budgets: budgetsQuery.data ?? [],
+		onCreateBudget: handleCreateBudgetFromOp,
+		onLink: (opId, budgetId) => linkBudget.mutate({ opId, budgetId }),
+		onUnlink: (opId) => unlinkBudget.mutate(opId),
+		onIgnore: (opId) => ignoreOperation.mutate(opId),
+		onEditEffectiveDate: (op, effectiveDate) =>
+			updateEffectiveDate.mutate({ op, effectiveDate }),
+	};
+
 	return (
-		<div className="mx-auto flex h-full max-w-4xl flex-col p-3 sm:p-6">
+		<div className="h-full overflow-auto">
 			<BudgetModal
 				opened={budgetModalOpened}
 				onClose={() => setBudgetModalOpened(false)}
@@ -455,116 +502,540 @@ function MonthlyOperationsPage() {
 					setImportResult(result);
 				}}
 			/>
-			<Group justify="space-between" mb="lg">
-				<ActionIcon
-					variant="subtle"
-					color="white"
-					onClick={() => navigateMonth(-1)}
-					aria-label={t("operations.previousMonth")}
-				>
-					<IconChevronLeft size={20} />
-				</ActionIcon>
-				<MonthPickerInput
-					value={currentDate}
-					onChange={(date) => {
-						if (date) navigateToDate(new Date(date));
-					}}
-					locale={i18n.language}
-					variant="unstyled"
-					styles={{
-						input: {
-							color: "white",
-							fontSize: "1.5rem",
-							fontWeight: 700,
-							textAlign: "center",
-							textTransform: "capitalize",
-							cursor: "pointer",
-						},
-					}}
-				/>
-				<ActionIcon
-					variant="subtle"
-					color="white"
-					onClick={() => navigateMonth(1)}
-					aria-label={t("operations.nextMonth")}
-				>
-					<IconChevronRight size={20} />
-				</ActionIcon>
-			</Group>
-			<Group justify="center" mb="md">
-				<Button
-					leftSection={<IconUpload size={16} />}
-					onClick={() => setImportOpened(true)}
-				>
-					{t("import.title")}
-				</Button>
-			</Group>
+			<Stack
+				maw={1240}
+				mx="auto"
+				px={{ base: "md", sm: "lg" }}
+				py={{ base: "md", sm: "xl" }}
+				gap="lg"
+			>
+				<Group justify="space-between" align="center" gap="md" wrap="wrap">
+					<Group gap={8} wrap="nowrap" miw={0}>
+						<ActionIcon
+							variant="default"
+							size={44}
+							radius="md"
+							onClick={() => navigateMonth(-1)}
+							aria-label={t("operations.previousMonth")}
+						>
+							<IconChevronLeft size={20} />
+						</ActionIcon>
+						<MonthPickerInput
+							value={currentDate}
+							onChange={(date) => {
+								if (date) navigateToDate(new Date(date));
+							}}
+							locale={i18n.language}
+							variant="unstyled"
+							miw={0}
+							rightSection={
+								<IconChevronDown size={20} color={palette.dimmed} />
+							}
+							rightSectionPointerEvents="none"
+							styles={{
+								input: {
+									fontFamily: headingFont,
+									fontSize: "clamp(1.5rem, 5vw, 2.5rem)",
+									fontWeight: 800,
+									letterSpacing: "-0.02em",
+									height: "auto",
+									minHeight: 44,
+									lineHeight: 1.15,
+									textTransform: "capitalize",
+									cursor: "pointer",
+								},
+							}}
+						/>
+						<ActionIcon
+							variant="default"
+							size={44}
+							radius="md"
+							onClick={() => navigateMonth(1)}
+							aria-label={t("operations.nextMonth")}
+						>
+							<IconChevronRight size={20} />
+						</ActionIcon>
+					</Group>
+					<Button
+						leftSection={<IconUpload size={18} />}
+						onClick={() => setImportOpened(true)}
+					>
+						{t("import.title")}
+					</Button>
+				</Group>
 
-			{importResult && (
-				<Alert
-					variant="filled"
-					color="green"
-					icon={<IconCheck size={16} />}
-					mb="md"
-					withCloseButton
-					onClose={() => setImportResult(null)}
-				>
-					<Text size="sm" c="white">
-						{t("import.resultImported", { count: importResult.imported })}
+				{importResult && (
+					<Alert
+						variant="light"
+						color="leaf"
+						icon={<IconCheck size={18} />}
+						withCloseButton
+						closeButtonLabel={t("common.close")}
+						onClose={() => setImportResult(null)}
+					>
+						<Text size="sm" fw={600}>
+							{t("import.resultImported", { count: importResult.imported })}
+						</Text>
+						{importResult.skipped > 0 && (
+							<Text size="sm">
+								{t("import.resultSkipped", { count: importResult.skipped })}
+							</Text>
+						)}
+						{importResult.errors.length > 0 && (
+							<Text size="sm" c={budgetTypeTones.expense.text}>
+								{t("import.resultErrors", {
+									count: importResult.errors.length,
+								})}
+							</Text>
+						)}
+					</Alert>
+				)}
+
+				{groups.length === 0 ? (
+					<Text c="dimmed" ta="center" mt="xl">
+						{t("common.noResults")}
 					</Text>
-					{importResult.skipped > 0 && (
-						<Text size="sm" c="white">
-							{t("import.resultSkipped", { count: importResult.skipped })}
-						</Text>
-					)}
-					{importResult.errors.length > 0 && (
-						<Text size="sm" c="red.2">
-							{t("import.resultErrors", {
-								count: importResult.errors.length,
-							})}
-						</Text>
-					)}
-				</Alert>
-			)}
-
-			{groups.length === 0 ? (
-				<Text c="dimmed" ta="center" mt="xl">
-					{t("common.noResults")}
-				</Text>
-			) : (
-				<div className="min-h-0 flex-1 overflow-auto">
-					<SummaryStats sections={sections} />
-					<Stack gap="lg">
+				) : (
+					<>
+						<SummaryStats sections={sections} />
 						{sections.map((section) => (
-							<SectionTable
+							<SectionCard
 								key={section.type}
 								section={section}
 								locale={i18n.language}
-								budgets={budgets}
-								onCreateBudget={handleCreateBudgetFromOp}
-								onLink={(opId: string, budgetId: string) =>
-									linkBudget.mutate({ opId, budgetId })
-								}
-								onUnlink={(opId: string) => unlinkBudget.mutate(opId)}
-								onIgnore={(opId: string) => ignoreOperation.mutate(opId)}
-								onEditEffectiveDate={(
-									op: OperationResponse,
-									effectiveDate: string | null,
-								) => updateEffectiveDate.mutate({ op, effectiveDate })}
+								handlers={handlers}
 							/>
 						))}
-					</Stack>
-				</div>
-			)}
+					</>
+				)}
+			</Stack>
 		</div>
+	);
+}
+
+function SortControl({
+	sort,
+	onChange,
+	budgetedLabel,
+}: {
+	sort: SortState;
+	onChange: (sort: SortState) => void;
+	budgetedLabel: string;
+}) {
+	const { t } = useTranslation();
+	const labels: Record<SortColumn, string> = {
+		budget: t("operations.columns.budget"),
+		realAmount: t("operations.columns.realAmount"),
+		budgetedAmount: budgetedLabel,
+		difference: t("operations.columns.difference"),
+	};
+	const directionLabel =
+		sort.direction === "asc"
+			? t("operations.sortAscending")
+			: t("operations.sortDescending");
+
+	return (
+		<Group gap={6} wrap="nowrap">
+			<Select
+				aria-label={t("operations.sortBy")}
+				data={SORT_COLUMNS.map((column) => ({
+					value: column,
+					label: labels[column],
+				}))}
+				value={sort.column}
+				onChange={(value) => {
+					const column = SORT_COLUMNS.find((c) => c === value);
+					if (column && column !== sort.column) {
+						onChange({ column, direction: "asc" });
+					}
+				}}
+				allowDeselect={false}
+				w={{ base: "100%", sm: 210 }}
+				styles={{ input: { minHeight: 44 } }}
+				comboboxProps={{ withinPortal: true }}
+			/>
+			<Tooltip label={directionLabel}>
+				<ActionIcon
+					variant="default"
+					size={44}
+					radius="md"
+					aria-label={directionLabel}
+					onClick={() =>
+						onChange({
+							column: sort.column,
+							direction: sort.direction === "asc" ? "desc" : "asc",
+						})
+					}
+				>
+					{sort.direction === "asc" ? (
+						<IconSortAscending size={20} />
+					) : (
+						<IconSortDescending size={20} />
+					)}
+				</ActionIcon>
+			</Tooltip>
+		</Group>
+	);
+}
+
+function SectionCard({
+	section,
+	locale,
+	handlers,
+}: {
+	section: BudgetSection;
+	locale: string;
+	handlers: OperationHandlers;
+}) {
+	const { t } = useTranslation();
+	const titleId = useId();
+	const [sort, setSort] = useState<SortState>({
+		column: "budget",
+		direction: "asc",
+	});
+
+	const isMonthly = section.type === "monthly";
+	const tone = sectionTone(section.type);
+	const title = isMonthly
+		? t("operations.dailyOperations")
+		: t(
+				`operations.stats.${section.type === "expense" ? "expenses" : section.type}`,
+			);
+	const sortedGroups = sortGroups(section.groups, sort);
+	const sortable = section.groups.filter((g) => g.budgetId !== null).length > 1;
+
+	return (
+		<Paper
+			component="section"
+			p={0}
+			style={{ overflow: "hidden" }}
+			aria-labelledby={titleId}
+		>
+			<Group
+				justify="space-between"
+				align="center"
+				gap="sm"
+				wrap="wrap"
+				px={{ base: "md", sm: 20 }}
+				py="md"
+			>
+				<Stack gap={2} miw={0}>
+					<Group gap={10} wrap="nowrap">
+						<Box
+							w={12}
+							h={12}
+							bg={tone.fill}
+							style={{ borderRadius: 4, flexShrink: 0 }}
+						/>
+						<Title
+							id={titleId}
+							order={2}
+							fz={{ base: 19, sm: 22 }}
+							fw={700}
+							lh={1.2}
+						>
+							{title}
+						</Title>
+					</Group>
+					<Text size="sm" c="dimmed" className="tabular-nums">
+						<Text span fw={700} fz="md" c="var(--mantine-color-text)">
+							{formatAmount(normalize(section.type, section.totalReal))}
+						</Text>
+						{section.totalBudgeted !== null &&
+							` ${t(
+								isMonthly ? "operations.ofForecast" : "operations.ofBudgeted",
+								{
+									amount: formatAmount(
+										normalize(section.type, section.totalBudgeted),
+									),
+								},
+							)}`}
+					</Text>
+				</Stack>
+				{sortable && (
+					<SortControl
+						sort={sort}
+						onChange={setSort}
+						budgetedLabel={
+							isMonthly
+								? t("operations.columns.forecastAmount")
+								: t("operations.columns.budgetedAmount")
+						}
+					/>
+				)}
+			</Group>
+			<Box component="ul" m={0} p={0} style={{ listStyle: "none" }}>
+				{sortedGroups.map((group) => (
+					<BudgetGroupRow
+						key={group.budgetId ?? "__unlinked"}
+						group={group}
+						tone={tone}
+						locale={locale}
+						handlers={handlers}
+					/>
+				))}
+			</Box>
+		</Paper>
+	);
+}
+
+interface GroupStatus {
+	label: string;
+	color: string;
+}
+
+function groupStatus(
+	type: SectionType,
+	real: number,
+	budgeted: number,
+	t: TFunction,
+): GroupStatus {
+	if (type === "income" || type === "savings") {
+		return real >= budgeted
+			? { label: t("operations.status.reached"), color: "leaf" }
+			: {
+					label: t("operations.status.missing", {
+						amount: formatAmount(budgeted - real),
+					}),
+					color: "gold",
+				};
+	}
+	return real > budgeted
+		? {
+				label: t("operations.status.overBy", {
+					amount: formatAmount(real - budgeted),
+				}),
+				color: "tangerine",
+			}
+		: {
+				label: t("operations.status.remaining", {
+					amount: formatAmount(budgeted - real),
+				}),
+				color: "leaf",
+			};
+}
+
+const GROUP_ROW_CLASS =
+	"grid w-full grid-cols-[20px_minmax(0,1fr)_auto] items-center gap-x-3 gap-y-2 px-4 py-3 text-left sm:grid-cols-[20px_minmax(0,1.6fr)_minmax(0,2fr)_170px] sm:gap-x-4 sm:px-5";
+
+function groupMeta(group: BudgetGroup, t: TFunction): string {
+	const parts: string[] = [];
+	const kind = group.budget?.kind;
+	if (kind) {
+		parts.push(t(`budgets.kinds.${kind.type}`));
+		if (kind.type === "recurring") {
+			parts.push(t(`budgets.recurrences.${kind.recurrence}`).toLowerCase());
+		}
+	}
+	parts.push(
+		t("operations.operationsCount", { count: group.operations.length }),
+	);
+	if (group.budgetId === null && group.budgetedAmount !== null) {
+		parts.push(t("operations.forecastHint"));
+	}
+	return parts.join(" · ");
+}
+
+function BudgetGroupRow({
+	group,
+	tone,
+	locale,
+	handlers,
+}: {
+	group: BudgetGroup;
+	tone: Tone;
+	locale: string;
+	handlers: OperationHandlers;
+}) {
+	const { t } = useTranslation();
+	// The daily group starts open: its operations are the ones waiting to be sorted.
+	const [opened, setOpened] = useState(group.budgetId === null);
+
+	const label =
+		group.budgetId === null ? t(group.budgetLabel) : group.budgetLabel;
+	const hasOps = group.operations.length > 0;
+	const real = normalize(group.budgetType, group.realAmount);
+	const budgeted =
+		group.budgetedAmount !== null
+			? normalize(group.budgetType, group.budgetedAmount)
+			: null;
+	const status =
+		budgeted !== null ? groupStatus(group.budgetType, real, budgeted, t) : null;
+	const ratio =
+		budgeted !== null && budgeted > 0 ? Math.max(0, real / budgeted) : null;
+	const isOver =
+		group.budgetType !== "income" &&
+		group.budgetType !== "savings" &&
+		ratio !== null &&
+		ratio > 1;
+
+	const cells: ReactNode = (
+		<>
+			<Box c="dimmed" style={{ display: "flex" }}>
+				{hasOps && (
+					<IconChevronRight
+						size={18}
+						style={{
+							transform: opened ? "rotate(90deg)" : undefined,
+							transition: "transform 150ms ease",
+						}}
+					/>
+				)}
+			</Box>
+			<Stack gap={2} miw={0}>
+				<Text fw={700} truncate>
+					{label}
+				</Text>
+				<Text size="sm" c="dimmed" truncate>
+					{groupMeta(group, t)}
+				</Text>
+			</Stack>
+			<Stack
+				gap={6}
+				className="col-span-2 col-start-2 row-start-2 sm:col-auto sm:row-auto"
+			>
+				<Group
+					justify="space-between"
+					gap="xs"
+					wrap="nowrap"
+					className="tabular-nums"
+				>
+					<Text size="sm" c="dimmed">
+						<Text span fw={700} c="var(--mantine-color-text)" inherit>
+							{formatAmount(real)}
+						</Text>
+						{budgeted !== null && ` / ${formatAmount(budgeted)}`}
+					</Text>
+					{ratio !== null && (
+						<Text size="sm" c="dimmed">
+							{`${Math.round(ratio * 100)} %`}
+						</Text>
+					)}
+				</Group>
+				{ratio !== null && (
+					<Progress
+						value={Math.min(100, ratio * 100)}
+						color={isOver ? "tangerine.6" : tone.fill}
+						bg={palette.track}
+						size="md"
+						aria-label={label}
+					/>
+				)}
+			</Stack>
+			<Box className="justify-self-end">
+				{status && (
+					<Badge
+						size="lg"
+						tt="none"
+						bg={`${status.color}.1`}
+						c={`${status.color}.8`}
+						className="tabular-nums"
+						styles={{ root: { whiteSpace: "nowrap" } }}
+					>
+						{status.label}
+					</Badge>
+				)}
+			</Box>
+		</>
+	);
+
+	return (
+		<Box component="li" style={{ borderTop: `1px solid ${palette.divider}` }}>
+			{hasOps ? (
+				<UnstyledButton
+					className={`${GROUP_ROW_CLASS} hover:bg-(--row-hover)`}
+					style={{ "--row-hover": palette.surfaceMuted }}
+					aria-expanded={opened}
+					onClick={() => setOpened((o) => !o)}
+				>
+					{cells}
+				</UnstyledButton>
+			) : (
+				<Box className={GROUP_ROW_CLASS}>{cells}</Box>
+			)}
+			{opened && hasOps && (
+				<OperationList
+					operations={group.operations}
+					locale={locale}
+					handlers={handlers}
+				/>
+			)}
+		</Box>
+	);
+}
+
+function useOperationActionSize(): number {
+	const theme = useMantineTheme();
+	const isDesktop = useMediaQuery(`(min-width: ${theme.breakpoints.sm})`);
+	return isDesktop ? 36 : 44;
+}
+
+function OperationList({
+	operations,
+	locale,
+	handlers,
+}: {
+	operations: OperationResponse[];
+	locale: string;
+	handlers: OperationHandlers;
+}) {
+	const actionSize = useOperationActionSize();
+	return (
+		<Box
+			component="ul"
+			m={0}
+			bg={palette.surfaceMuted}
+			className="list-none px-4 pt-1 pb-3 sm:pr-5 sm:pl-14"
+			style={{ borderTop: `1px solid ${palette.divider}` }}
+		>
+			{operations.map((op) => (
+				<OperationRow
+					key={op.id}
+					op={op}
+					locale={locale}
+					handlers={handlers}
+					actionSize={actionSize}
+				/>
+			))}
+		</Box>
+	);
+}
+
+function OperationAction({
+	label,
+	icon,
+	size,
+	onClick,
+}: {
+	label: string;
+	icon: ReactNode;
+	size: number;
+	onClick: () => void;
+}) {
+	return (
+		<Tooltip label={label}>
+			<ActionIcon
+				variant="subtle"
+				color="gray"
+				c="dimmed"
+				size={size}
+				radius="md"
+				onClick={onClick}
+				aria-label={label}
+			>
+				{icon}
+			</ActionIcon>
+		</Tooltip>
 	);
 }
 
 function LinkBudgetMenu({
 	budgets,
+	height,
 	onSelect,
 }: {
 	budgets: BudgetResponse[];
+	height: number;
 	onSelect: (budgetId: string) => void;
 }) {
 	const { t } = useTranslation();
@@ -579,16 +1050,17 @@ function LinkBudgetMenu({
 	return (
 		<Menu position="bottom-end" withinPortal onClose={() => setSearch("")}>
 			<Menu.Target>
-				<Tooltip label={t("operations.linkBudget")}>
-					<ActionIcon
-						variant="subtle"
-						color="blue"
-						size="sm"
-						aria-label={t("operations.linkBudget")}
-					>
-						<IconLink size={14} />
-					</ActionIcon>
-				</Tooltip>
+				<Button
+					variant="default"
+					size="xs"
+					h={height}
+					radius="md"
+					c="forest.8"
+					leftSection={<IconLink size={16} />}
+					aria-label={t("operations.linkBudget")}
+				>
+					{t("operations.link")}
+				</Button>
 			</Menu.Target>
 			<Menu.Dropdown>
 				<TextInput
@@ -614,504 +1086,137 @@ function LinkBudgetMenu({
 	);
 }
 
-function sectionColor(type: BudgetSection["type"]): string {
-	switch (type) {
-		case "income":
-			return "green";
-		case "expense":
-			return "red";
-		case "savings":
-			return "blue";
-		default:
-			return "gray";
-	}
-}
-
-function SectionTable({
-	section,
-	locale,
-	budgets,
-	onCreateBudget,
-	onLink,
-	onUnlink,
-	onIgnore,
-	onEditEffectiveDate,
-}: {
-	section: BudgetSection;
-	locale: string;
-	budgets: BudgetResponse[];
-	onCreateBudget: (op: OperationResponse) => void;
-	onLink: (opId: string, budgetId: string) => void;
-	onUnlink: (opId: string) => void;
-	onIgnore: (opId: string) => void;
-	onEditEffectiveDate: (
-		op: OperationResponse,
-		effectiveDate: string | null,
-	) => void;
-}) {
-	const { t } = useTranslation();
-	const [sort, setSort] = useState<SortState>({
-		column: "budget",
-		direction: "asc",
-	});
-
-	function toggleSort(column: SortColumn) {
-		setSort((prev) =>
-			prev.column === column
-				? { column, direction: prev.direction === "asc" ? "desc" : "asc" }
-				: { column, direction: "asc" },
-		);
-	}
-
-	function sortIcon(column: SortColumn) {
-		if (sort.column !== column) return <IconArrowsSort size={14} />;
-		return sort.direction === "asc" ? (
-			<IconArrowUp size={14} />
-		) : (
-			<IconArrowDown size={14} />
-		);
-	}
-
-	const sortedGroups = sortGroups(section.groups, sort);
-	const label =
-		section.type === "monthly"
-			? t("operations.dailyOperations")
-			: t(`budgets.types.${section.type}`);
-	const color = sectionColor(section.type);
-	const difference =
-		section.totalBudgeted !== null
-			? section.totalReal - section.totalBudgeted
-			: null;
-	const isMonthly = section.type === "monthly";
-	const typ = section.type;
-
-	return (
-		<div style={{ overflowX: "auto" }}>
-			<Table
-				highlightOnHover
-				highlightOnHoverColor="rgba(255,255,255,0.05)"
-				layout="fixed"
-				style={{ minWidth: 600 }}
-			>
-				<Table.Thead>
-					<Table.Tr style={{ borderColor: "rgba(255,255,255,0.15)" }}>
-						<Table.Th
-							c="dimmed"
-							style={{ width: "35%", cursor: "pointer" }}
-							onClick={() => toggleSort("budget")}
-						>
-							<Group gap={4} wrap="nowrap">
-								{t("operations.columns.budget")}
-								{sortIcon("budget")}
-							</Group>
-						</Table.Th>
-						<Table.Th c="dimmed" style={{ width: "10%" }}>
-							{t("operations.columns.date")}
-						</Table.Th>
-						<Table.Th
-							c="dimmed"
-							style={{ textAlign: "right", width: "18%", cursor: "pointer" }}
-							onClick={() => toggleSort("realAmount")}
-						>
-							<Group gap={4} wrap="nowrap" justify="flex-end">
-								{t("operations.columns.realAmount")}
-								{sortIcon("realAmount")}
-							</Group>
-						</Table.Th>
-						<Table.Th
-							c="dimmed"
-							style={{ textAlign: "right", width: "19%", cursor: "pointer" }}
-							onClick={() => toggleSort("budgetedAmount")}
-						>
-							<Group gap={4} wrap="nowrap" justify="flex-end">
-								{isMonthly
-									? t("operations.columns.forecastAmount")
-									: t("operations.columns.budgetedAmount")}
-								{sortIcon("budgetedAmount")}
-							</Group>
-						</Table.Th>
-						<Table.Th
-							c="dimmed"
-							style={{ textAlign: "right", width: "18%", cursor: "pointer" }}
-							onClick={() => toggleSort("difference")}
-						>
-							<Group gap={4} wrap="nowrap" justify="flex-end">
-								{t("operations.columns.difference")}
-								{sortIcon("difference")}
-							</Group>
-						</Table.Th>
-					</Table.Tr>
-				</Table.Thead>
-				<Table.Tbody>
-					{/* Section total row */}
-					<Table.Tr
-						style={{
-							borderColor: "rgba(255,255,255,0.1)",
-							backgroundColor: "rgba(255,255,255,0.03)",
-						}}
-					>
-						<Table.Td colSpan={2}>
-							<Text fw={700} size="sm" c={color} tt="uppercase">
-								{label}
-							</Text>
-						</Table.Td>
-						<Table.Td style={{ textAlign: "right" }}>
-							<Text fw={700} size="sm" c={amountColor(section.totalReal, typ)}>
-								{formatAmount(section.totalReal)}
-							</Text>
-						</Table.Td>
-						<Table.Td style={{ textAlign: "right" }}>
-							<Text
-								fw={700}
-								size="sm"
-								c={
-									section.totalBudgeted !== null
-										? amountColor(section.totalBudgeted, typ)
-										: "dimmed"
-								}
-							>
-								{section.totalBudgeted !== null
-									? formatAmount(section.totalBudgeted)
-									: "-"}
-							</Text>
-						</Table.Td>
-						<Table.Td style={{ textAlign: "right" }}>
-							<Text
-								fw={700}
-								size="sm"
-								c={
-									difference !== null ? amountColor(difference, typ) : "dimmed"
-								}
-							>
-								{difference !== null ? formatAmount(difference) : "-"}
-							</Text>
-						</Table.Td>
-					</Table.Tr>
-					{/* Budget groups or inline operations */}
-					{isMonthly
-						? sortedGroups.flatMap((group) =>
-								group.operations.map((op) => (
-									<OperationRow
-										key={op.id}
-										op={op}
-										locale={locale}
-										budgets={budgets}
-										onCreateBudget={onCreateBudget}
-										onLink={onLink}
-										onUnlink={onUnlink}
-										onIgnore={onIgnore}
-										onEditEffectiveDate={onEditEffectiveDate}
-									/>
-								)),
-							)
-						: sortedGroups.map((group) => (
-								<BudgetGroupRow
-									key={group.budgetId ?? "__unlinked"}
-									group={group}
-									locale={locale}
-									budgets={budgets}
-									sectionType={typ}
-									onCreateBudget={onCreateBudget}
-									onLink={onLink}
-									onUnlink={onUnlink}
-									onIgnore={onIgnore}
-									onEditEffectiveDate={onEditEffectiveDate}
-								/>
-							))}
-				</Table.Tbody>
-			</Table>
-		</div>
-	);
-}
-
 function OperationRow({
 	op,
 	locale,
-	budgets,
-	onCreateBudget,
-	onLink,
-	onUnlink,
-	onIgnore,
-	onEditEffectiveDate,
+	handlers,
+	actionSize,
 }: {
 	op: OperationResponse;
 	locale: string;
-	budgets: BudgetResponse[];
-	onCreateBudget: (op: OperationResponse) => void;
-	onLink: (opId: string, budgetId: string) => void;
-	onUnlink: (opId: string) => void;
-	onIgnore: (opId: string) => void;
-	onEditEffectiveDate: (
-		op: OperationResponse,
-		effectiveDate: string | null,
-	) => void;
+	handlers: OperationHandlers;
+	actionSize: number;
 }) {
 	const { t, i18n } = useTranslation();
 	const [datePopoverOpened, setDatePopoverOpened] = useState(false);
-	const borderStyle = { borderColor: "rgba(255,255,255,0.1)" };
+	const amount = Number(op.amount);
 
 	return (
-		<Table.Tr
-			style={{
-				backgroundColor: "rgba(255,255,255,0.03)",
-				...borderStyle,
-			}}
+		<Box
+			component="li"
+			className="grid grid-cols-[48px_minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1 py-2 sm:grid-cols-[56px_minmax(0,1fr)_auto_auto] sm:gap-x-4"
+			style={{ borderBottom: `1px dashed ${palette.border}` }}
 		>
-			<Table.Td pl="xl">
-				<Text
-					size="sm"
-					c="rgba(255,255,255,0.6)"
-					style={{ wordBreak: "break-word" }}
-				>
+			<Text size="sm" c="dimmed" className="tabular-nums">
+				{formatDate(op.effectiveDate ?? op.date, locale)}
+			</Text>
+			<Group gap={8} wrap="nowrap" miw={0}>
+				<Text fw={500} truncate title={op.label}>
 					{op.label}
 				</Text>
-			</Table.Td>
-			<Table.Td onClick={(e: React.MouseEvent) => e.stopPropagation()}>
-				<Group gap={4} wrap="nowrap">
-					<Text size="sm" c="rgba(255,255,255,0.6)">
-						{formatDate(op.effectiveDate ?? op.date, locale)}
-					</Text>
-					<Popover
-						opened={datePopoverOpened}
-						onChange={setDatePopoverOpened}
-						position="bottom"
-						withArrow
-					>
-						<Popover.Target>
-							<Tooltip label={t("operations.editEffectiveDate")}>
-								<ActionIcon
-									variant="subtle"
-									color={op.effectiveDate ? "yellow" : "rgba(255,255,255,0.5)"}
-									size="sm"
-									onClick={(e: React.MouseEvent) => {
-										e.stopPropagation();
-										setDatePopoverOpened((o) => !o);
-									}}
-									aria-label={t("operations.editEffectiveDate")}
-								>
-									<IconCalendar size={14} />
-								</ActionIcon>
-							</Tooltip>
-						</Popover.Target>
-						<Popover.Dropdown
-							onClick={(e: React.MouseEvent) => e.stopPropagation()}
-						>
-							<Stack gap="xs" align="center">
-								<DatePicker
-									locale={i18n.language}
-									value={op.effectiveDate}
-									onChange={(date) => {
-										if (date) {
-											onEditEffectiveDate(op, date);
-										}
-										setDatePopoverOpened(false);
-									}}
-								/>
-								{op.effectiveDate && (
-									<Button
-										variant="subtle"
-										color="red"
-										size="xs"
-										leftSection={<IconX size={14} />}
-										onClick={() => {
-											onEditEffectiveDate(op, null);
-											setDatePopoverOpened(false);
-										}}
-									>
-										{t("operations.clearEffectiveDate")}
-									</Button>
-								)}
-							</Stack>
-						</Popover.Dropdown>
-					</Popover>
-				</Group>
-			</Table.Td>
-			<Table.Td style={{ textAlign: "right" }}>
-				<Text size="sm" c={amountColor(Number(op.amount))}>
-					{formatAmount(Number(op.amount))}
-				</Text>
-			</Table.Td>
-			<Table.Td />
-			<Table.Td onClick={(e: React.MouseEvent) => e.stopPropagation()}>
-				<Group gap={4} justify="flex-end" wrap="nowrap">
-					{op.budgetLink.type === "unlinked" ? (
-						<>
-							<LinkBudgetMenu
-								budgets={budgets.filter((b) =>
-									Number(op.amount) >= 0
-										? b.budgetType === "income"
-										: b.budgetType !== "income",
-								)}
-								onSelect={(budgetId) => onLink(op.id, budgetId)}
-							/>
-							<Tooltip label={t("operations.createBudget")}>
-								<ActionIcon
-									variant="subtle"
-									color="green"
-									size="sm"
-									onClick={(e: React.MouseEvent) => {
-										e.stopPropagation();
-										onCreateBudget(op);
-									}}
-									aria-label={t("operations.createBudget")}
-								>
-									<IconPlus size={14} />
-								</ActionIcon>
-							</Tooltip>
-						</>
-					) : (
-						<Tooltip label={t("operations.unlinkBudget")}>
+				{op.budgetLink.type === "auto" && (
+					<Badge size="sm" color="leaf" c="leaf.9" tt="none" flex="none">
+						{t("operations.auto")}
+					</Badge>
+				)}
+			</Group>
+			<Text
+				fw={700}
+				className="tabular-nums"
+				c={amount > 0 ? budgetTypeTones.income.text : undefined}
+				style={{ whiteSpace: "nowrap" }}
+			>
+				{formatSignedAmount(amount)}
+			</Text>
+			<Group
+				gap={2}
+				wrap="nowrap"
+				justify="flex-end"
+				className="col-span-full sm:col-auto"
+			>
+				<Popover
+					opened={datePopoverOpened}
+					onChange={setDatePopoverOpened}
+					position="bottom"
+					withArrow
+				>
+					<Popover.Target>
+						<Tooltip label={t("operations.editEffectiveDate")}>
 							<ActionIcon
-								variant="subtle"
-								color="red"
-								size="sm"
-								onClick={(e: React.MouseEvent) => {
-									e.stopPropagation();
-									onUnlink(op.id);
-								}}
-								aria-label={t("operations.unlinkBudget")}
+								variant={op.effectiveDate ? "light" : "subtle"}
+								color={op.effectiveDate ? "gold" : "gray"}
+								c={op.effectiveDate ? "gold.8" : "dimmed"}
+								size={actionSize}
+								radius="md"
+								onClick={() => setDatePopoverOpened((o) => !o)}
+								aria-label={t("operations.editEffectiveDate")}
 							>
-								<IconLinkOff size={14} />
+								<IconCalendar size={18} />
 							</ActionIcon>
 						</Tooltip>
-					)}
-					<Tooltip label={t("operations.ignoreOperation")}>
-						<ActionIcon
-							variant="subtle"
-							color="rgba(255,255,255,0.5)"
-							size="sm"
-							onClick={(e: React.MouseEvent) => {
-								e.stopPropagation();
-								onIgnore(op.id);
-							}}
-							aria-label={t("operations.ignoreOperation")}
-						>
-							<IconEyeOff size={14} />
-						</ActionIcon>
-					</Tooltip>
-				</Group>
-			</Table.Td>
-		</Table.Tr>
-	);
-}
-
-function BudgetGroupRow({
-	group,
-	locale,
-	budgets,
-	sectionType,
-	onCreateBudget,
-	onLink,
-	onUnlink,
-	onIgnore,
-	onEditEffectiveDate,
-}: {
-	group: BudgetGroup;
-	locale: string;
-	budgets: BudgetResponse[];
-	sectionType: BudgetSection["type"];
-	onCreateBudget: (op: OperationResponse) => void;
-	onLink: (opId: string, budgetId: string) => void;
-	onUnlink: (opId: string) => void;
-	onIgnore: (opId: string) => void;
-	onEditEffectiveDate: (
-		op: OperationResponse,
-		effectiveDate: string | null,
-	) => void;
-}) {
-	const [opened, setOpened] = useState(false);
-	const { t } = useTranslation();
-
-	const label =
-		group.budgetId === null ? t(group.budgetLabel) : group.budgetLabel;
-	const difference =
-		group.budgetedAmount !== null
-			? group.realAmount - group.budgetedAmount
-			: null;
-	const hasOps = group.operations.length > 0;
-
-	const borderStyle = { borderColor: "rgba(255,255,255,0.1)" };
-
-	return (
-		<>
-			<Table.Tr
-				style={{
-					cursor: hasOps ? "pointer" : "default",
-					...borderStyle,
-				}}
-				onClick={() => {
-					if (hasOps) setOpened((o) => !o);
-				}}
-			>
-				<Table.Td>
-					<Group gap="xs" wrap="nowrap" align="flex-start">
-						{!hasOps ? (
-							<span style={{ width: 16, flexShrink: 0 }} />
-						) : opened ? (
-							<IconChevronUp
-								size={16}
-								color="white"
-								style={{ flexShrink: 0, marginTop: 3 }}
+					</Popover.Target>
+					<Popover.Dropdown>
+						<Stack gap="xs" align="center">
+							<DatePicker
+								locale={i18n.language}
+								value={op.effectiveDate}
+								onChange={(date) => {
+									if (date) {
+										handlers.onEditEffectiveDate(op, date);
+									}
+									setDatePopoverOpened(false);
+								}}
 							/>
-						) : (
-							<IconChevronDown
-								size={16}
-								color="white"
-								style={{ flexShrink: 0, marginTop: 3 }}
-							/>
-						)}
-						<Text fw={600} c="white" style={{ wordBreak: "break-word" }}>
-							{label}
-						</Text>
-					</Group>
-				</Table.Td>
-				<Table.Td />
-				<Table.Td style={{ textAlign: "right" }}>
-					<Text fw={600} c={amountColor(group.realAmount, sectionType)}>
-						{formatAmount(group.realAmount)}
-					</Text>
-				</Table.Td>
-				<Table.Td style={{ textAlign: "right" }}>
-					<Text
-						fw={600}
-						c={
-							group.budgetedAmount !== null
-								? amountColor(group.budgetedAmount, sectionType)
-								: "white"
-						}
-					>
-						{group.budgetedAmount !== null
-							? formatAmount(group.budgetedAmount)
-							: "-"}
-					</Text>
-				</Table.Td>
-				<Table.Td style={{ textAlign: "right" }}>
-					<Text
-						fw={600}
-						c={
-							difference !== null
-								? amountColor(difference, sectionType)
-								: "white"
-						}
-					>
-						{difference !== null ? formatAmount(difference) : "-"}
-					</Text>
-				</Table.Td>
-			</Table.Tr>
-			{opened &&
-				group.operations.map((op) => (
-					<OperationRow
-						key={op.id}
-						op={op}
-						locale={locale}
-						budgets={budgets}
-						onCreateBudget={onCreateBudget}
-						onLink={onLink}
-						onUnlink={onUnlink}
-						onIgnore={onIgnore}
-						onEditEffectiveDate={onEditEffectiveDate}
+							{op.effectiveDate && (
+								<Button
+									variant="subtle"
+									color="tangerine"
+									size="xs"
+									leftSection={<IconX size={14} />}
+									onClick={() => {
+										handlers.onEditEffectiveDate(op, null);
+										setDatePopoverOpened(false);
+									}}
+								>
+									{t("operations.clearEffectiveDate")}
+								</Button>
+							)}
+						</Stack>
+					</Popover.Dropdown>
+				</Popover>
+				{op.budgetLink.type === "unlinked" ? (
+					<>
+						<LinkBudgetMenu
+							budgets={handlers.budgets.filter((b) =>
+								amount >= 0
+									? b.budgetType === "income"
+									: b.budgetType !== "income",
+							)}
+							height={actionSize}
+							onSelect={(budgetId) => handlers.onLink(op.id, budgetId)}
+						/>
+						<OperationAction
+							label={t("operations.createBudget")}
+							icon={<IconPlus size={18} />}
+							size={actionSize}
+							onClick={() => handlers.onCreateBudget(op)}
+						/>
+					</>
+				) : (
+					<OperationAction
+						label={t("operations.unlinkBudget")}
+						icon={<IconLinkOff size={18} />}
+						size={actionSize}
+						onClick={() => handlers.onUnlink(op.id)}
 					/>
-				))}
-		</>
+				)}
+				<OperationAction
+					label={t("operations.ignoreOperation")}
+					icon={<IconEyeOff size={18} />}
+					size={actionSize}
+					onClick={() => handlers.onIgnore(op.id)}
+				/>
+			</Group>
+		</Box>
 	);
 }

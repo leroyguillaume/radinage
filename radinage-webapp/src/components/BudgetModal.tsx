@@ -2,16 +2,18 @@ import {
 	ActionIcon,
 	Alert,
 	Button,
-	Card,
 	Group,
 	Modal,
+	Paper,
 	Select,
 	Stack,
 	Text,
 	TextInput,
+	Title,
 	Tooltip,
 } from "@mantine/core";
 import { MonthPickerInput } from "@mantine/dates";
+import { useMediaQuery } from "@mantine/hooks";
 import {
 	IconAlertCircle,
 	IconCurrencyEuro,
@@ -24,11 +26,11 @@ import { useApplyBudget, useCreateBudget, useUpdateBudget } from "@/lib/hooks";
 import type {
 	ApplyBudgetResponse,
 	BudgetResponse,
+	BudgetType,
 	Recurrence,
 	YearMonth,
 } from "@/lib/types";
-
-// ── YearMonth helpers ───────────────────────────────────────────────────────
+import { palette } from "@/theme";
 
 function ymToDate(ym: YearMonth): Date {
 	return new Date(ym.year, ym.month - 1);
@@ -37,8 +39,6 @@ function ymToDate(ym: YearMonth): Date {
 function dateToYm(d: Date): YearMonth {
 	return { year: d.getFullYear(), month: d.getMonth() + 1 };
 }
-
-// ── Amount formatting ───────────────────────────────────────────────────────
 
 function getDecimalSeparator(locale: string): string {
 	return locale.startsWith("fr") ? "," : ".";
@@ -57,12 +57,8 @@ function toRawAmount(display: string, locale: string): string {
 	return display.replace(sep, ".");
 }
 
-// ── ID counters ─────────────────────────────────────────────────────────────
-
 let ruleIdCounter = 0;
 let periodIdCounter = 0;
-
-// ── Rule form ───────────────────────────────────────────────────────────────
 
 interface RuleForm {
 	id: number;
@@ -80,8 +76,6 @@ function createRule(
 ): RuleForm {
 	return { ...partial, id: ++ruleIdCounter };
 }
-
-// ── Period form ─────────────────────────────────────────────────────────────
 
 interface PeriodForm {
 	id: number;
@@ -106,11 +100,9 @@ function createPeriod(partial?: {
 	};
 }
 
-// ── Budget form ─────────────────────────────────────────────────────────────
-
 interface BudgetForm {
 	label: string;
-	budgetType: "expense" | "income" | "savings";
+	budgetType: BudgetType;
 	kindType: "recurring" | "occasional";
 	recurrence: Recurrence;
 	periods: PeriodForm[];
@@ -234,8 +226,6 @@ function formToPayload(form: BudgetForm) {
 	};
 }
 
-// ── Period overlap validation ───────────────────────────────────────────────
-
 function periodsOverlap(periods: PeriodForm[]): boolean {
 	if (periods.length < 2) return false;
 
@@ -261,8 +251,6 @@ function periodsOverlap(periods: PeriodForm[]): boolean {
 	}
 	return false;
 }
-
-// ── Locale-aware amount input ───────────────────────────────────────────────
 
 function AmountInput({
 	label,
@@ -297,8 +285,6 @@ function AmountInput({
 	);
 }
 
-// ── Date input ──────────────────────────────────────────────────────────────
-
 function MonthInput({
 	label,
 	value,
@@ -320,7 +306,51 @@ function MonthInput({
 	);
 }
 
-// ── Main component ──────────────────────────────────────────────────────────
+function SectionHeader({
+	title,
+	addLabel,
+	onAdd,
+}: {
+	title: string;
+	addLabel: string;
+	onAdd: () => void;
+}) {
+	return (
+		<Group justify="space-between" mt="xs">
+			<Title order={4}>{title}</Title>
+			<Tooltip label={addLabel}>
+				<ActionIcon
+					variant="light"
+					size="xl"
+					onClick={onAdd}
+					aria-label={addLabel}
+				>
+					<IconPlus size={20} />
+				</ActionIcon>
+			</Tooltip>
+		</Group>
+	);
+}
+
+function RemoveButton({
+	label,
+	onClick,
+}: {
+	label: string;
+	onClick: () => void;
+}) {
+	return (
+		<ActionIcon
+			variant="subtle"
+			color="gray"
+			size="xl"
+			onClick={onClick}
+			aria-label={label}
+		>
+			<IconTrash size={18} />
+		</ActionIcon>
+	);
+}
 
 export interface BudgetInitialValues {
 	amount?: string;
@@ -355,6 +385,7 @@ export function BudgetModal({
 	} | null>(null);
 
 	const isEdit = budget !== null;
+	const isMobile = useMediaQuery("(max-width: 36em)") ?? false;
 
 	const initForm = useCallback(() => {
 		if (budget) {
@@ -397,8 +428,6 @@ export function BudgetModal({
 		setForm((prev) => ({ ...prev, ...patch }));
 	}
 
-	// ── Period management ─────────────────────────────────────────────────
-
 	function updatePeriod(index: number, patch: Partial<PeriodForm>) {
 		setForm((prev) => ({
 			...prev,
@@ -422,8 +451,6 @@ export function BudgetModal({
 		}));
 	}
 
-	// ── Rule management ───────────────────────────────────────────────────
-
 	function updateRule(index: number, patch: Partial<RuleForm>) {
 		setForm((prev) => ({
 			...prev,
@@ -444,8 +471,6 @@ export function BudgetModal({
 			rules: prev.rules.filter((_, i) => i !== index),
 		}));
 	}
-
-	// ── Submit ─────────────────────────────────────────────────────────────
 
 	async function handleSubmit() {
 		setError(null);
@@ -504,7 +529,7 @@ export function BudgetModal({
 				<Stack>
 					{applyPrompt.result ? (
 						<>
-							<Alert color="green" icon={<IconAlertCircle size={16} />}>
+							<Alert color="leaf" icon={<IconAlertCircle size={18} />}>
 								{t("budgets.applyResult", {
 									updated: applyPrompt.result.updated,
 									skipped: applyPrompt.result.skipped,
@@ -518,12 +543,12 @@ export function BudgetModal({
 						<>
 							<Text>{t("budgets.applyForcePrompt")}</Text>
 							{error && (
-								<Alert color="red" icon={<IconAlertCircle size={16} />}>
+								<Alert color="tangerine" icon={<IconAlertCircle size={18} />}>
 									{error}
 								</Alert>
 							)}
-							<Group justify="flex-end">
-								<Button variant="subtle" onClick={onClose}>
+							<Group justify="flex-end" gap="sm">
+								<Button variant="default" onClick={onClose}>
 									{t("common.skip")}
 								</Button>
 								<Button
@@ -553,9 +578,9 @@ export function BudgetModal({
 			onClose={onClose}
 			title={modalTitle}
 			size="lg"
-			fullScreen={false}
+			fullScreen={isMobile}
 		>
-			<Stack>
+			<Stack gap="md">
 				<TextInput
 					label={t("budgets.fields.label")}
 					value={form.label}
@@ -568,7 +593,7 @@ export function BudgetModal({
 					value={form.budgetType}
 					onChange={(v) =>
 						update({
-							budgetType: (v as "expense" | "income" | "savings") ?? "expense",
+							budgetType: (v as BudgetType | null) ?? "expense",
 						})
 					}
 					data={[
@@ -598,9 +623,7 @@ export function BudgetModal({
 						value={form.recurrence}
 						onChange={(v) =>
 							update({
-								recurrence:
-									(v as "weekly" | "monthly" | "quarterly" | "yearly") ??
-									"monthly",
+								recurrence: (v as Recurrence | null) ?? "monthly",
 							})
 						}
 						data={[
@@ -620,22 +643,21 @@ export function BudgetModal({
 
 				{form.kindType === "recurring" && (
 					<>
-						<Group justify="space-between">
-							<Text fw={600}>{t("budgets.fields.periods")}</Text>
-							<ActionIcon
-								variant="subtle"
-								color="green"
-								onClick={addPeriod}
-								aria-label={t("budgets.addPeriod")}
-							>
-								<IconPlus size={16} />
-							</ActionIcon>
-						</Group>
+						<SectionHeader
+							title={t("budgets.fields.periods")}
+							addLabel={t("budgets.addPeriod")}
+							onAdd={addPeriod}
+						/>
 
 						{form.periods.map((period, index) => {
 							const isLast = index === form.periods.length - 1;
 							return (
-								<Card key={period.id} padding="sm" radius="sm" withBorder>
+								<Paper
+									key={period.id}
+									radius="lg"
+									p="md"
+									bg={palette.surfaceMuted}
+								>
 									<Stack gap="xs">
 										<Group justify="space-between" align="center">
 											<Text size="sm" fw={500} c="dimmed">
@@ -644,15 +666,10 @@ export function BudgetModal({
 													: t("budgets.periodClosed", { n: index + 1 })}
 											</Text>
 											{form.periods.length > 1 && (
-												<ActionIcon
-													variant="subtle"
-													color="red"
-													size="sm"
+												<RemoveButton
+													label={t("common.delete")}
 													onClick={() => removePeriod(index)}
-													aria-label={t("common.delete")}
-												>
-													<IconTrash size={14} />
-												</ActionIcon>
+												/>
 											)}
 										</Group>
 
@@ -685,7 +702,7 @@ export function BudgetModal({
 											required
 										/>
 									</Stack>
-								</Card>
+								</Paper>
 							);
 						})}
 					</>
@@ -715,17 +732,11 @@ export function BudgetModal({
 					</>
 				)}
 
-				<Group justify="space-between">
-					<Text fw={600}>{t("budgets.fields.rules")}</Text>
-					<ActionIcon
-						variant="subtle"
-						color="green"
-						onClick={addRule}
-						aria-label={t("budgets.addRule")}
-					>
-						<IconPlus size={16} />
-					</ActionIcon>
-				</Group>
+				<SectionHeader
+					title={t("budgets.fields.rules")}
+					addLabel={t("budgets.addRule")}
+					onAdd={addRule}
+				/>
 
 				{form.rules.map((rule, index) => (
 					<Group key={rule.id} align="flex-end" wrap="wrap" gap="xs">
@@ -766,8 +777,9 @@ export function BudgetModal({
 						/>
 						<Tooltip label={t("budgets.fields.matchAmountTooltip")}>
 							<ActionIcon
-								variant={rule.matchAmount ? "filled" : "subtle"}
-								color={rule.matchAmount ? "green" : "gray"}
+								variant={rule.matchAmount ? "filled" : "default"}
+								size="xl"
+								aria-pressed={rule.matchAmount}
 								onClick={() =>
 									updateRule(index, {
 										matchAmount: !rule.matchAmount,
@@ -775,34 +787,30 @@ export function BudgetModal({
 								}
 								aria-label={t("budgets.fields.matchAmountTooltip")}
 							>
-								<IconCurrencyEuro size={16} />
+								<IconCurrencyEuro size={20} />
 							</ActionIcon>
 						</Tooltip>
-						<ActionIcon
-							variant="subtle"
-							color="red"
+						<RemoveButton
+							label={t("common.delete")}
 							onClick={() => removeRule(index)}
-							aria-label={t("common.delete")}
-						>
-							<IconTrash size={16} />
-						</ActionIcon>
+						/>
 					</Group>
 				))}
 
 				{hasOverlap && (
-					<Alert color="orange" icon={<IconAlertCircle size={16} />}>
+					<Alert color="gold" icon={<IconAlertCircle size={18} />}>
 						{t("budgets.periodsOverlap")}
 					</Alert>
 				)}
 
 				{error && (
-					<Alert color="red" icon={<IconAlertCircle size={16} />}>
+					<Alert color="tangerine" icon={<IconAlertCircle size={18} />}>
 						{error}
 					</Alert>
 				)}
 
-				<Group justify="flex-end">
-					<Button variant="subtle" onClick={onClose}>
+				<Group justify="flex-end" gap="sm" mt="xs">
+					<Button variant="default" onClick={onClose}>
 						{t("common.cancel")}
 					</Button>
 					<Button

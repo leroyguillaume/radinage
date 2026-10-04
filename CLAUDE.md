@@ -27,7 +27,7 @@ radinage-webapp/       React 19 + TypeScript SPA
   src/lib/types.ts     Shared TypeScript types
   src/lib/hooks.ts     Custom hooks
   src/stores/          Zustand stores
-  src/theme.ts         Mantine theme (primary: green #33c463)
+  src/theme.ts         Mantine theme (primary: forest #296e4f, from the logo)
   src/i18n/            i18next translations
 ```
 
@@ -88,7 +88,7 @@ Violating any of these is a bug.
 
 | # | Rule | Detail |
 |---|------|--------|
-| 1 | **Stack** | React 19, Vite, Mantine v7, Tailwind v4, TanStack Query + Router, Zustand, Vitest, Biome |
+| 1 | **Stack** | React 19, Vite, Mantine v9, Tailwind v4, TanStack Query + Router, Zustand, Vitest, Biome |
 | 2 | **Strict TS** | No `any`, no `@ts-ignore`, no non-null `!` — narrow types properly |
 | 3 | **Functional only** | No class components |
 | 4 | **No duplication** | Extract to hooks or utilities |
@@ -98,5 +98,5 @@ Violating any of these is a bug.
 | 8 | **biome format** | All code formatted |
 | 9 | **Imports** | `@/` alias → `src/`. Named exports only (except route components) |
 | 10 | **No console.log** | `console.error` / `console.warn` OK for real error paths |
-| 11 | **Logo colors** | Respect the theme (green palette in `theme.ts`) |
+| 11 | **Logo colors** | Respect the theme: forest/leaf/tangerine/gold from `theme.ts`, money tones from `lib/tones.ts` |
 | 12 | **Mobile-first** | Design for small screens first. Mantine responsive props + Tailwind `sm:`/`md:`/`lg:`. Touch targets ≥ 44×44px |

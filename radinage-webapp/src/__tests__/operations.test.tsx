@@ -9,7 +9,7 @@ import {
 	Outlet,
 	RouterProvider,
 } from "@tanstack/react-router";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { i18n } from "@/i18n";
@@ -263,9 +263,7 @@ describe("MonthlyOperationsPage", () => {
 		await renderOperationsPage();
 		const user = userEvent.setup();
 
-		const foodText = await screen.findByText("Food");
-		const foodRow = foodText.closest("tr");
-		if (foodRow) await user.click(foodRow);
+		await user.click(await screen.findByRole("button", { name: /Food/ }));
 
 		await waitFor(() => {
 			expect(screen.getByText("Groceries")).toBeInTheDocument();
@@ -276,17 +274,17 @@ describe("MonthlyOperationsPage", () => {
 	it("displays section headers for budget types", async () => {
 		await renderOperationsPage();
 
-		// Should have section headers
-		expect(await screen.findByText("Revenu")).toBeInTheDocument();
-		expect(screen.getByText("Dépense")).toBeInTheDocument();
+		await screen.findByText("Food");
 
-		// Income section comes first (section order: income, expense, savings, monthly)
-		// First non-empty row should be the income section header
-		const rows = document.querySelectorAll("tbody tr");
-		const sectionRow = Array.from(rows).find(
-			(r) => (r.textContent ?? "").trim().length > 0,
-		);
-		expect(sectionRow?.textContent).toContain("Revenu");
+		// Section order: income, expense, savings, monthly
+		const headings = screen
+			.getAllByRole("heading", { level: 2 })
+			.map((h) => h.textContent);
+		expect(headings).toEqual([
+			"Revenus",
+			"Dépenses",
+			"Opérations quotidiennes",
+		]);
 	});
 
 	it("renders month navigation arrows", async () => {
@@ -309,9 +307,7 @@ describe("MonthlyOperationsPage", () => {
 		const user = userEvent.setup();
 
 		// Expand the Food group (has linked operations)
-		const foodText = await screen.findByText("Food");
-		const foodRow = foodText.closest("tr");
-		if (foodRow) await user.click(foodRow);
+		await user.click(await screen.findByRole("button", { name: /Food/ }));
 
 		await waitFor(() => {
 			expect(screen.getByText("Groceries")).toBeInTheDocument();
@@ -327,9 +323,7 @@ describe("MonthlyOperationsPage", () => {
 		const user = userEvent.setup();
 
 		// Expand Food group
-		const foodText = await screen.findByText("Food");
-		const foodRow = foodText.closest("tr");
-		if (foodRow) await user.click(foodRow);
+		await user.click(await screen.findByRole("button", { name: /Food/ }));
 
 		await waitFor(() => {
 			expect(screen.getByText("Groceries")).toBeInTheDocument();
@@ -353,9 +347,7 @@ describe("MonthlyOperationsPage", () => {
 		const user = userEvent.setup();
 
 		// Expand the Food group (has linked operations)
-		const foodText = await screen.findByText("Food");
-		const foodRow = foodText.closest("tr");
-		if (foodRow) await user.click(foodRow);
+		await user.click(await screen.findByRole("button", { name: /Food/ }));
 
 		await waitFor(() => {
 			expect(screen.getByText("Groceries")).toBeInTheDocument();
@@ -380,12 +372,9 @@ describe("MonthlyOperationsPage", () => {
 
 	it("shows link button on unlinked operations", async () => {
 		await renderOperationsPage();
-		const user = userEvent.setup();
 
-		// Expand the monthly budget group (has unlinked operations)
-		const monthlyText = await screen.findByText("Opérations quotidiennes");
-		const monthlyRow = monthlyText.closest("tr");
-		if (monthlyRow) await user.click(monthlyRow);
+		// The daily group is expanded by default
+		await screen.findByText("Opérations quotidiennes");
 
 		await waitFor(() => {
 			expect(screen.getByText("Electricity")).toBeInTheDocument();
@@ -400,10 +389,8 @@ describe("MonthlyOperationsPage", () => {
 		await renderOperationsPage();
 		const user = userEvent.setup();
 
-		// Expand the monthly budget group
-		const monthlyText = await screen.findByText("Opérations quotidiennes");
-		const monthlyRow = monthlyText.closest("tr");
-		if (monthlyRow) await user.click(monthlyRow);
+		// The daily group is expanded by default
+		await screen.findByText("Opérations quotidiennes");
 
 		await waitFor(() => {
 			expect(screen.getByText("Electricity")).toBeInTheDocument();
@@ -436,10 +423,8 @@ describe("MonthlyOperationsPage", () => {
 		await renderOperationsPage();
 		const user = userEvent.setup();
 
-		// Expand the monthly budget group
-		const monthlyText = await screen.findByText("Opérations quotidiennes");
-		const monthlyRow = monthlyText.closest("tr");
-		if (monthlyRow) await user.click(monthlyRow);
+		// The daily group is expanded by default
+		await screen.findByText("Opérations quotidiennes");
 
 		await waitFor(() => {
 			expect(screen.getByText("Electricity")).toBeInTheDocument();
@@ -469,21 +454,13 @@ describe("MonthlyOperationsPage", () => {
 			expect(screen.getByText("Food")).toBeInTheDocument();
 		});
 
-		const allRows = document.querySelectorAll("tbody tr");
+		// Food: real = -80, budgeted = -200 → 120 left
+		const foodRow = screen.getByRole("button", { name: /Food/ });
+		expect(within(foodRow).getByText(/^Reste 120,00/)).toBeInTheDocument();
 
-		// Food: real = -80, budgeted = -200 → diff = (-80) - (-200) = +120
-		const foodRow = Array.from(allRows).find((r) =>
-			r.textContent?.includes("Food"),
-		);
-		const foodDiffCell = foodRow?.querySelectorAll("td")[4];
-		expect(foodDiffCell?.textContent).toContain("120");
-
-		// Income: real = 2000, budgeted = 2500 → diff = 2000 - 2500 = -500
-		const incomeRow = Array.from(allRows).find((r) =>
-			r.textContent?.includes("Income"),
-		);
-		const incomeDiffCell = incomeRow?.querySelectorAll("td")[4];
-		expect(incomeDiffCell?.textContent).toContain("500");
+		// Income: real = 2000, budgeted = 2500 → 500 short
+		const incomeRow = screen.getByRole("button", { name: /Income/ });
+		expect(within(incomeRow).getByText(/^Manque 500,00/)).toBeInTheDocument();
 	});
 
 	it("shows budgets with no linked operations", async () => {
@@ -515,18 +492,11 @@ describe("MonthlyOperationsPage", () => {
 		// Rent should appear even without linked operations
 		expect(await screen.findByText("Rent")).toBeInTheDocument();
 
-		// Rent row should show 0 real amount and the budgeted amount
-		const table = screen.getByText("Rent").closest("table");
-		const rows = table?.querySelectorAll("tbody tr") ?? [];
-		const rentRow = Array.from(rows).find((r) =>
-			r.textContent?.includes("Rent"),
-		);
-		// Real amount = 0
-		const realCell = rentRow?.querySelectorAll("td")[2];
-		expect(realCell?.textContent).toContain("0");
-		// Budgeted amount = -900
-		const budgetedCell = rentRow?.querySelectorAll("td")[3];
-		expect(budgetedCell?.textContent).toContain("900");
+		// Rent row shows 0 spent out of 900 budgeted
+		const rentRow = screen.getByText("Rent").closest("li");
+		const rentText = rentRow?.textContent?.replace(/\s/g, "") ?? "";
+		expect(rentText).toContain("0,00€/900,00€");
+		expect(rentText).toContain("Reste900,00€");
 	});
 
 	it("sorting one table does not affect another table", async () => {
@@ -651,55 +621,97 @@ describe("MonthlyOperationsPage", () => {
 			expect(screen.getByText("Alimentation")).toBeInTheDocument();
 		});
 
-		// There are two tables (income and expense). Each has its own "Budget" column header.
-		const tables = document.querySelectorAll("table");
-		expect(tables.length).toBe(2);
+		const incomeSection = screen.getByRole("region", { name: "Revenus" });
+		const expenseSection = screen.getByRole("region", { name: "Dépenses" });
 
-		// Record initial order for income table (second section = expense, first = income per SECTION_ORDER)
-		// SECTION_ORDER = income, expense, savings, monthly
-		const incomeTable = tables[0];
-		const expenseTable = tables[1];
-
-		// Get budget group rows in each table (skip the section header row)
-		function getBudgetLabels(table: Element): string[] {
-			const rows = table.querySelectorAll("tbody tr");
-			const labels: string[] = [];
-			for (const row of rows) {
-				const firstCell = row.querySelector("td");
-				const text = firstCell?.textContent?.trim() ?? "";
-				// Section header rows have uppercase text, budget rows have normal text
-				if (
-					text &&
-					!["Revenu", "Dépense", "Épargne", "Opérations quotidiennes"].includes(
-						text,
-					)
-				) {
-					labels.push(text);
-				}
-			}
-			return labels;
+		function getBudgetLabels(section: HTMLElement): string[] {
+			return within(section)
+				.getAllByText(/^(Alimentation|Transport|Freelance|Salaire)$/)
+				.map((el) => el.textContent ?? "");
 		}
 
 		// Default order is alphabetical (asc by budget label)
-		const incomeLabelsInitial = getBudgetLabels(incomeTable);
-		expect(incomeLabelsInitial).toEqual(["Freelance", "Salaire"]);
+		expect(getBudgetLabels(incomeSection)).toEqual(["Freelance", "Salaire"]);
+		expect(getBudgetLabels(expenseSection)).toEqual([
+			"Alimentation",
+			"Transport",
+		]);
 
-		const expenseLabelsInitial = getBudgetLabels(expenseTable);
-		expect(expenseLabelsInitial).toEqual(["Alimentation", "Transport"]);
-
-		// Click "Budget" sort header in the expense table to toggle to desc
-		// Default is budget/asc, so one click toggles to budget/desc
-		const expenseBudgetHeader = expenseTable.querySelector("th");
-		if (expenseBudgetHeader) await user.click(expenseBudgetHeader);
+		// Toggle the expense section's direction: budget/asc → budget/desc
+		await user.click(
+			within(expenseSection).getByRole("button", { name: "Ordre croissant" }),
+		);
 
 		await waitFor(() => {
-			const expenseLabelsAfter = getBudgetLabels(expenseTable);
-			expect(expenseLabelsAfter).toEqual(["Transport", "Alimentation"]);
+			expect(getBudgetLabels(expenseSection)).toEqual([
+				"Transport",
+				"Alimentation",
+			]);
 		});
 
-		// Income table should NOT have changed
-		const incomeLabelsAfter = getBudgetLabels(incomeTable);
-		expect(incomeLabelsAfter).toEqual(["Freelance", "Salaire"]);
+		// Income section should NOT have changed
+		expect(getBudgetLabels(incomeSection)).toEqual(["Freelance", "Salaire"]);
+	});
+
+	it("sorts a section by the column picked in the sort control", async () => {
+		const sortBudgets = [
+			{ id: "b1", label: "Alimentation", amount: "-200.00" },
+			{ id: "b4", label: "Transport", amount: "-100.00" },
+		].map(({ id, label, amount }) => ({
+			id,
+			label,
+			budgetType: "expense",
+			kind: {
+				type: "recurring",
+				recurrence: "monthly",
+				closedPeriods: [],
+				currentPeriod: { start: { year: 2026, month: 1 }, end: null, amount },
+			},
+			rules: [],
+			createdAt: "2026-01-01T00:00:00Z",
+		}));
+		const sortOperations: MonthlyOperationsResponse = {
+			operations: [
+				{
+					id: "op1",
+					amount: "-50.00",
+					date: "2026-04-05",
+					effectiveDate: null,
+					label: "Groceries",
+					budgetLink: { type: "manual", budgetId: "b1" },
+				},
+				{
+					id: "op5",
+					amount: "-20.00",
+					date: "2026-04-06",
+					effectiveDate: null,
+					label: "Bus ticket",
+					budgetLink: { type: "manual", budgetId: "b4" },
+				},
+			],
+		};
+
+		setupMocks({ budgets: sortBudgets, operations: sortOperations });
+		await renderOperationsPage();
+		const user = userEvent.setup();
+
+		const expenseSection = await screen.findByRole("region", {
+			name: "Dépenses",
+		});
+
+		// Difference = real - budgeted: Alimentation 150, Transport 80
+		await user.click(
+			within(expenseSection).getByRole("combobox", { name: "Trier par" }),
+		);
+		await user.click(await screen.findByRole("option", { name: "Différence" }));
+
+		await waitFor(() => {
+			expect(
+				within(expenseSection)
+					.getAllByText(/^(Alimentation|Transport)$/)
+					.map((el) => el.textContent),
+			).toEqual(["Transport", "Alimentation"]);
+		});
 	});
 
 	it("displays effective date instead of date when present", async () => {
@@ -778,13 +790,17 @@ describe("MonthlyOperationsPage", () => {
 		// Sum of unlinked ops must show up under Dépenses/Revenus, not 0.
 		const expensesLabel = await screen.findByText("Dépenses");
 		const expensesText =
-			expensesLabel.parentElement?.textContent?.replace(/\s/g, "") ?? "";
+			expensesLabel
+				.closest(".mantine-Paper-root")
+				?.textContent?.replace(/\s/g, "") ?? "";
 		expect(expensesText).toMatch(/-250,00/);
 		expect(expensesText).not.toMatch(/Dépenses0,00/);
 
 		const incomeLabel = screen.getByText("Revenus");
 		const incomeText =
-			incomeLabel.parentElement?.textContent?.replace(/\s/g, "") ?? "";
+			incomeLabel
+				.closest(".mantine-Paper-root")
+				?.textContent?.replace(/\s/g, "") ?? "";
 		expect(incomeText).toMatch(/1500,00/);
 	});
 
@@ -812,31 +828,76 @@ describe("MonthlyOperationsPage", () => {
 
 		setupMocks({ budgets: budgetsWithExtra });
 		await renderOperationsPage();
-		const user = userEvent.setup();
 
 		const rentText = await screen.findByText("Rent");
-		const rentRow = rentText.closest("tr");
+		const rentRow = rentText.closest("li");
+		if (!rentRow) throw new Error("Rent row not found");
 
-		// Row should not have pointer cursor (not expandable)
-		expect(rentRow?.style.cursor).toBe("default");
-
-		// No chevron icon in the Rent row
-		const chevrons = rentRow?.querySelectorAll("svg");
-		const chevronIcons = Array.from(chevrons ?? []).filter(
-			(svg) =>
-				svg.classList.contains("tabler-icon-chevron-down") ||
-				svg.classList.contains("tabler-icon-chevron-up"),
+		// No toggle button: the row cannot be expanded
+		expect(within(rentRow).queryByRole("button")).not.toBeInTheDocument();
+		expect(screen.getByRole("button", { name: /Food/ })).toHaveAttribute(
+			"aria-expanded",
+			"false",
 		);
-		expect(chevronIcons.length).toBe(0);
+	});
 
-		// Clicking the row should not expand anything
-		if (rentRow) await user.click(rentRow);
+	it("toggles a group open and closed with aria-expanded", async () => {
+		await renderOperationsPage();
+		const user = userEvent.setup();
 
-		// The table should still have the same number of rows (no sub-rows appeared)
-		const table = rentText.closest("table");
-		const rowsBefore = table?.querySelectorAll("tbody tr").length ?? 0;
-		if (rentRow) await user.click(rentRow);
-		const rowsAfter = table?.querySelectorAll("tbody tr").length ?? 0;
-		expect(rowsAfter).toBe(rowsBefore);
+		const foodRow = await screen.findByRole("button", { name: /Food/ });
+		expect(foodRow).toHaveAttribute("aria-expanded", "false");
+		expect(screen.queryByText("Groceries")).not.toBeInTheDocument();
+
+		await user.click(foodRow);
+		expect(foodRow).toHaveAttribute("aria-expanded", "true");
+		expect(screen.getByText("Groceries")).toBeInTheDocument();
+
+		await user.click(foodRow);
+		expect(foodRow).toHaveAttribute("aria-expanded", "false");
+		expect(screen.queryByText("Groceries")).not.toBeInTheDocument();
+	});
+
+	it("flags an expense budget that is over budget", async () => {
+		const operations: MonthlyOperationsResponse = {
+			operations: [
+				{
+					id: "op1",
+					amount: "-260.00",
+					date: "2026-04-05",
+					effectiveDate: null,
+					label: "Groceries",
+					budgetLink: { type: "manual", budgetId: "b1" },
+				},
+			],
+		};
+
+		setupMocks({ operations });
+		await renderOperationsPage();
+
+		const foodRow = await screen.findByRole("button", { name: /Food/ });
+		expect(within(foodRow).getByText(/^Dépassé de 60,00/)).toBeInTheDocument();
+		expect(within(foodRow).getByText("130 %")).toBeInTheDocument();
+	});
+
+	it("shows reached status when an income budget is met", async () => {
+		const operations: MonthlyOperationsResponse = {
+			operations: [
+				{
+					id: "op4",
+					amount: "2500.00",
+					date: "2026-04-01",
+					effectiveDate: null,
+					label: "Salary",
+					budgetLink: { type: "auto", budgetId: "b2" },
+				},
+			],
+		};
+
+		setupMocks({ operations });
+		await renderOperationsPage();
+
+		const incomeRow = await screen.findByRole("button", { name: /Income/ });
+		expect(within(incomeRow).getByText("Atteint")).toBeInTheDocument();
 	});
 });

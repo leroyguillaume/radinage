@@ -1,15 +1,14 @@
+import { ActionIcon, Box, Group, Menu, Tooltip } from "@mantine/core";
 import {
-	ActionIcon,
-	Burger,
-	Drawer,
-	Group,
-	Image,
-	Stack,
-	Text,
-	Tooltip,
-} from "@mantine/core";
-import { useDisclosure } from "@mantine/hooks";
-import { IconLogout, IconSettings } from "@tabler/icons-react";
+	IconChartBar,
+	IconLayoutDashboard,
+	IconListDetails,
+	IconLogout,
+	IconSettings,
+	IconShieldLock,
+	IconUserCircle,
+	IconWallet,
+} from "@tabler/icons-react";
 import {
 	createRootRoute,
 	Link,
@@ -17,46 +16,88 @@ import {
 	useNavigate,
 	useRouterState,
 } from "@tanstack/react-router";
-import { useEffect } from "react";
+import { type ComponentType, useEffect } from "react";
 import { useTranslation } from "react-i18next";
+import { BrandLogo } from "@/components/BrandLogo";
 import { useAuthStore } from "@/stores/auth";
+import { palette } from "@/theme";
 
-function NavLink({
-	to,
-	activePrefix,
-	label,
-	onClick,
-}: {
+interface NavItem {
 	to: string;
-	activePrefix?: string;
-	label: string;
-	onClick?: () => void;
-}) {
+	activePrefix: string;
+	labelKey: string;
+	icon: ComponentType<{ size?: number; stroke?: number }>;
+}
+
+const primaryNav: NavItem[] = [
+	{
+		to: "/",
+		activePrefix: "/summary",
+		labelKey: "nav.forecast",
+		icon: IconLayoutDashboard,
+	},
+	{
+		to: "/operations",
+		activePrefix: "/operations",
+		labelKey: "nav.operations",
+		icon: IconListDetails,
+	},
+	{
+		to: "/stats",
+		activePrefix: "/stats",
+		labelKey: "nav.stats",
+		icon: IconChartBar,
+	},
+	{
+		to: "/budgets",
+		activePrefix: "/budgets",
+		labelKey: "nav.budgets",
+		icon: IconWallet,
+	},
+];
+
+const adminNav: NavItem = {
+	to: "/admin",
+	activePrefix: "/admin",
+	labelKey: "nav.admin",
+	icon: IconShieldLock,
+};
+
+function useIsActive(prefix: string): boolean {
 	const pathname = useRouterState({ select: (s) => s.location.pathname });
-	const isActive = activePrefix
-		? pathname.startsWith(activePrefix)
-		: pathname === to;
+	return pathname.startsWith(prefix);
+}
 
-	const activeStyle = {
-		color: "white",
-		fontWeight: 600,
-		backgroundColor: "rgba(255,255,255,0.1)",
-	};
-	const inactiveStyle = { color: "rgba(255,255,255,0.5)" };
-
+function NavPill({ item }: { item: NavItem }) {
+	const { t } = useTranslation();
+	const active = useIsActive(item.activePrefix);
+	const Icon = item.icon;
 	return (
 		<Link
-			to={to}
-			onClick={onClick}
-			style={{
-				textDecoration: "none",
-				fontSize: "0.875rem",
-				padding: "8px 12px",
-				borderRadius: 4,
-				...(isActive ? activeStyle : inactiveStyle),
-			}}
+			to={item.to}
+			className="nav-pill"
+			data-active={active}
+			aria-current={active ? "page" : undefined}
 		>
-			{label}
+			<Icon size={20} />
+			{t(item.labelKey)}
+		</Link>
+	);
+}
+
+function TabLink({ item }: { item: NavItem }) {
+	const { t } = useTranslation();
+	const active = useIsActive(item.activePrefix);
+	const Icon = item.icon;
+	return (
+		<Link
+			to={item.to}
+			className="tab-link"
+			data-active={active}
+			aria-current={active ? "page" : undefined}
+		>
+			<Icon size={22} />
+			{t(item.labelKey)}
 		</Link>
 	);
 }
@@ -71,8 +112,6 @@ function RootLayout() {
 	const logout = useAuthStore((s) => s.logout);
 	const navigate = useNavigate();
 	const { t } = useTranslation();
-	const [drawerOpened, { open: openDrawer, close: closeDrawer }] =
-		useDisclosure(false);
 
 	useEffect(() => {
 		const publicPaths = ["/login", "/activate"];
@@ -84,131 +123,128 @@ function RootLayout() {
 		}
 	}, [isAuthenticated, navigate]);
 
-	const navLinks = (
-		<>
-			<NavLink
-				to="/"
-				activePrefix="/summary"
-				label={t("nav.forecast")}
-				onClick={closeDrawer}
-			/>
-			<NavLink
-				to="/operations"
-				activePrefix="/operations"
-				label={t("nav.operations")}
-				onClick={closeDrawer}
-			/>
-			<NavLink to="/stats" label={t("nav.stats")} onClick={closeDrawer} />
-			<NavLink to="/budgets" label={t("nav.budgets")} onClick={closeDrawer} />
-			{role === "admin" && (
-				<NavLink to="/admin" label={t("nav.admin")} onClick={closeDrawer} />
-			)}
-		</>
-	);
+	function handleLogout() {
+		logout();
+		navigate({ to: "/login" });
+	}
+
+	const desktopNav = role === "admin" ? [...primaryNav, adminNav] : primaryNav;
 
 	return (
-		<div className="flex h-screen flex-col overflow-hidden bg-[#011e45]">
+		<div className="flex h-screen flex-col overflow-hidden">
 			{isAuthenticated && (
-				<>
+				<Box
+					component="header"
+					bg={palette.surface}
+					style={{ borderBottom: `1px solid ${palette.border}` }}
+				>
 					<Group
-						justify="space-between"
-						px="md"
-						py="xs"
-						style={{ borderBottom: "1px solid rgba(255,255,255,0.1)" }}
+						maw={1240}
+						mx="auto"
+						px={{ base: "md", sm: "lg" }}
+						py={10}
+						gap="xl"
+						wrap="nowrap"
 					>
-						<Group gap="md">
-							<Link
-								to="/summary"
-								search={{ year: new Date().getFullYear() }}
-								style={{ textDecoration: "none" }}
-							>
-								<Group gap="xs">
-									<Image src="/logo-small.png" alt="Radinage" h={28} w="auto" />
-									<Text c="white" fw={700} size="lg">
-										{t("common.appName")}
-									</Text>
-								</Group>
-							</Link>
-							<Group gap="sm" visibleFrom="sm">
-								{navLinks}
-							</Group>
+						<Link
+							to="/summary"
+							search={{ year: new Date().getFullYear() }}
+							style={{ textDecoration: "none" }}
+						>
+							<BrandLogo />
+						</Link>
+						<Group
+							component="nav"
+							aria-label={t("nav.menu")}
+							gap={4}
+							visibleFrom="sm"
+							style={{ flexGrow: 1 }}
+						>
+							{desktopNav.map((item) => (
+								<NavPill key={item.to} item={item} />
+							))}
 						</Group>
-						<Group gap="xs">
-							<Tooltip label={t("nav.settings")} visibleFrom="sm">
+						<Group gap="xs" visibleFrom="sm">
+							<Tooltip label={t("nav.settings")}>
 								<ActionIcon
-									variant="subtle"
-									color="white"
+									variant="default"
+									size={44}
 									onClick={() => navigate({ to: "/settings" })}
 									aria-label={t("nav.settings")}
 								>
 									<IconSettings size={20} />
 								</ActionIcon>
 							</Tooltip>
-							<Tooltip label={t("nav.logout")} visibleFrom="sm">
+							<Tooltip label={t("nav.logout")}>
 								<ActionIcon
-									variant="subtle"
-									color="white"
-									onClick={() => {
-										logout();
-										navigate({ to: "/login" });
-									}}
+									variant="default"
+									size={44}
+									onClick={handleLogout}
 									aria-label={t("nav.logout")}
 								>
 									<IconLogout size={20} />
 								</ActionIcon>
 							</Tooltip>
-							<Burger
-								opened={drawerOpened}
-								onClick={openDrawer}
-								color="white"
-								size="sm"
-								hiddenFrom="sm"
-								aria-label={t("nav.menu")}
-							/>
 						</Group>
+						<Box hiddenFrom="sm" ml="auto">
+							<Menu position="bottom-end" width={220}>
+								<Menu.Target>
+									<ActionIcon
+										variant="default"
+										size={44}
+										aria-label={t("nav.menu")}
+									>
+										<IconUserCircle size={22} />
+									</ActionIcon>
+								</Menu.Target>
+								<Menu.Dropdown>
+									<Menu.Item
+										leftSection={<IconSettings size={18} />}
+										onClick={() => navigate({ to: "/settings" })}
+									>
+										{t("nav.settings")}
+									</Menu.Item>
+									{role === "admin" && (
+										<Menu.Item
+											leftSection={<IconShieldLock size={18} />}
+											onClick={() => navigate({ to: "/admin" })}
+										>
+											{t("nav.admin")}
+										</Menu.Item>
+									)}
+									<Menu.Item
+										leftSection={<IconLogout size={18} />}
+										onClick={handleLogout}
+									>
+										{t("nav.logout")}
+									</Menu.Item>
+								</Menu.Dropdown>
+							</Menu>
+						</Box>
 					</Group>
-					<Drawer
-						opened={drawerOpened}
-						onClose={closeDrawer}
-						position="right"
-						size="xs"
-						hiddenFrom="sm"
-						styles={{
-							content: { backgroundColor: "#011e45" },
-							body: { padding: 0 },
-							header: { backgroundColor: "#011e45" },
-						}}
-					>
-						<Stack gap={0} p="md">
-							{navLinks}
-							<NavLink
-								to="/settings"
-								label={t("nav.settings")}
-								onClick={closeDrawer}
-							/>
-							<Link
-								to="/login"
-								onClick={() => {
-									logout();
-									closeDrawer();
-								}}
-								style={{
-									textDecoration: "none",
-									color: "rgba(255,255,255,0.5)",
-									fontSize: "0.875rem",
-									padding: "8px 12px",
-									borderRadius: 4,
-								}}
-							>
-								{t("nav.logout")}
-							</Link>
-						</Stack>
-					</Drawer>
-				</>
+				</Box>
 			)}
 			<div className="min-h-0 flex-1 overflow-hidden">
 				<Outlet />
 			</div>
+			{isAuthenticated && (
+				<Box
+					component="nav"
+					aria-label={t("nav.menu")}
+					hiddenFrom="sm"
+					bg={palette.surface}
+					p={6}
+					style={{
+						borderTop: `1px solid ${palette.border}`,
+						display: "flex",
+						gap: 4,
+					}}
+				>
+					{primaryNav.map((item) => (
+						<TabLink key={item.to} item={item} />
+					))}
+				</Box>
+			)}
 		</div>
 	);
 }

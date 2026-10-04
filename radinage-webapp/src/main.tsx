@@ -8,7 +8,7 @@ import { createRoot } from "react-dom/client";
 import "./i18n";
 import { router } from "./router";
 import "./styles.css";
-import { theme } from "./theme";
+import { cssVariablesResolver, theme } from "./theme";
 
 const queryClient = new QueryClient();
 
@@ -17,7 +17,11 @@ if (rootElement) {
 	createRoot(rootElement).render(
 		<StrictMode>
 			<QueryClientProvider client={queryClient}>
-				<MantineProvider theme={theme}>
+				<MantineProvider
+					theme={theme}
+					cssVariablesResolver={cssVariablesResolver}
+					forceColorScheme="light"
+				>
 					<DatesProvider settings={{ locale: "fr" }}>
 						<RouterProvider router={router} />
 					</DatesProvider>

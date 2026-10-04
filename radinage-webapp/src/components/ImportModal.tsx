@@ -4,6 +4,7 @@ import {
 	FileInput,
 	Modal,
 	NumberInput,
+	SimpleGrid,
 	Stack,
 	TextInput,
 } from "@mantine/core";
@@ -12,6 +13,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { apiFetch } from "@/lib/api";
+import { headingFont } from "@/theme";
 
 const STORAGE_KEY = "import_config";
 
@@ -120,9 +122,12 @@ export function ImportModal({
 			opened={opened}
 			onClose={onClose}
 			title={t("import.title")}
-			size="md"
+			size="lg"
+			styles={{
+				title: { fontFamily: headingFont, fontSize: 22, fontWeight: 700 },
+			}}
 		>
-			<Stack>
+			<Stack gap="md">
 				<FileInput
 					label={t("import.file")}
 					placeholder={t("import.filePlaceholder")}
@@ -132,42 +137,48 @@ export function ImportModal({
 					onChange={setFile}
 				/>
 
-				<NumberInput
-					label={t("import.labelCol")}
-					value={config.labelCol}
-					onChange={(v) => updateConfig({ labelCol: Number(v) })}
-					min={0}
-				/>
+				<SimpleGrid cols={{ base: 1, sm: 3 }} spacing="md">
+					<NumberInput
+						label={t("import.labelCol")}
+						value={config.labelCol}
+						onChange={(v) => updateConfig({ labelCol: Number(v) })}
+						min={0}
+					/>
 
-				<NumberInput
-					label={t("import.amountCol")}
-					value={config.amountCol}
-					onChange={(v) => updateConfig({ amountCol: Number(v) })}
-					min={0}
-				/>
+					<NumberInput
+						label={t("import.amountCol")}
+						value={config.amountCol}
+						onChange={(v) => updateConfig({ amountCol: Number(v) })}
+						min={0}
+					/>
 
-				<NumberInput
-					label={t("import.dateCol")}
-					value={config.dateCol}
-					onChange={(v) => updateConfig({ dateCol: Number(v) })}
-					min={0}
-				/>
+					<NumberInput
+						label={t("import.dateCol")}
+						value={config.dateCol}
+						onChange={(v) => updateConfig({ dateCol: Number(v) })}
+						min={0}
+					/>
+				</SimpleGrid>
 
-				<TextInput
-					label={t("import.dateFormat")}
-					value={config.dateFormat}
-					onChange={(e) => updateConfig({ dateFormat: e.currentTarget.value })}
-				/>
+				<SimpleGrid cols={{ base: 1, sm: 2 }} spacing="md">
+					<TextInput
+						label={t("import.dateFormat")}
+						value={config.dateFormat}
+						onChange={(e) =>
+							updateConfig({ dateFormat: e.currentTarget.value })
+						}
+					/>
 
-				<NumberInput
-					label={t("import.skipLines")}
-					value={config.skipLines}
-					onChange={(v) => updateConfig({ skipLines: Number(v) })}
-					min={0}
-				/>
+					<NumberInput
+						label={t("import.skipLines")}
+						value={config.skipLines}
+						onChange={(v) => updateConfig({ skipLines: Number(v) })}
+						min={0}
+					/>
+				</SimpleGrid>
 
 				{error && (
-					<Alert color="red" icon={<IconAlertCircle size={16} />}>
+					<Alert color="tangerine" icon={<IconAlertCircle size={16} />}>
 						{error}
 					</Alert>
 				)}
@@ -176,7 +187,9 @@ export function ImportModal({
 					onClick={handleImport}
 					loading={loading}
 					disabled={!file}
+					leftSection={<IconUpload size={18} />}
 					fullWidth
+					mt="xs"
 				>
 					{t("import.submit")}
 				</Button>
