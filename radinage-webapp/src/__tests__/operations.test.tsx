@@ -40,6 +40,7 @@ const mockMonthlyResponse: MonthlyOperationsResponse = {
 			effectiveDate: null,
 			label: "Groceries",
 			budgetLink: { type: "manual", budgetId: "b1" },
+			splits: [],
 		},
 		{
 			id: "op2",
@@ -48,6 +49,7 @@ const mockMonthlyResponse: MonthlyOperationsResponse = {
 			effectiveDate: null,
 			label: "Restaurant",
 			budgetLink: { type: "manual", budgetId: "b1" },
+			splits: [],
 		},
 		{
 			id: "op3",
@@ -56,6 +58,7 @@ const mockMonthlyResponse: MonthlyOperationsResponse = {
 			effectiveDate: null,
 			label: "Electricity",
 			budgetLink: { type: "unlinked" },
+			splits: [],
 		},
 		{
 			id: "op4",
@@ -64,6 +67,7 @@ const mockMonthlyResponse: MonthlyOperationsResponse = {
 			effectiveDate: null,
 			label: "Salary",
 			budgetLink: { type: "auto", budgetId: "b2" },
+			splits: [],
 		},
 	],
 };
@@ -173,6 +177,7 @@ function setupMocks(
 				effectiveDate: null,
 				label: "Op",
 				budgetLink: { type: "unlinked" },
+				splits: [],
 			});
 		}
 		// Link/unlink operations
@@ -582,6 +587,7 @@ describe("MonthlyOperationsPage", () => {
 					effectiveDate: null,
 					label: "Groceries",
 					budgetLink: { type: "manual", budgetId: "b1" },
+					splits: [],
 				},
 				{
 					id: "op5",
@@ -590,6 +596,7 @@ describe("MonthlyOperationsPage", () => {
 					effectiveDate: null,
 					label: "Bus ticket",
 					budgetLink: { type: "manual", budgetId: "b4" },
+					splits: [],
 				},
 				{
 					id: "op4",
@@ -598,6 +605,7 @@ describe("MonthlyOperationsPage", () => {
 					effectiveDate: null,
 					label: "Salary",
 					budgetLink: { type: "auto", budgetId: "b2" },
+					splits: [],
 				},
 				{
 					id: "op6",
@@ -606,6 +614,7 @@ describe("MonthlyOperationsPage", () => {
 					effectiveDate: null,
 					label: "Freelance gig",
 					budgetLink: { type: "auto", budgetId: "b5" },
+					splits: [],
 				},
 			],
 		};
@@ -679,6 +688,7 @@ describe("MonthlyOperationsPage", () => {
 					effectiveDate: null,
 					label: "Groceries",
 					budgetLink: { type: "manual", budgetId: "b1" },
+					splits: [],
 				},
 				{
 					id: "op5",
@@ -687,6 +697,7 @@ describe("MonthlyOperationsPage", () => {
 					effectiveDate: null,
 					label: "Bus ticket",
 					budgetLink: { type: "manual", budgetId: "b4" },
+					splits: [],
 				},
 			],
 		};
@@ -724,6 +735,7 @@ describe("MonthlyOperationsPage", () => {
 					effectiveDate: "2026-04-20",
 					label: "Groceries",
 					budgetLink: { type: "manual" as const, budgetId: "b1" },
+					splits: [],
 				},
 				{
 					id: "op2",
@@ -732,6 +744,7 @@ describe("MonthlyOperationsPage", () => {
 					effectiveDate: null,
 					label: "Restaurant",
 					budgetLink: { type: "manual" as const, budgetId: "b1" },
+					splits: [],
 				},
 			],
 		};
@@ -764,6 +777,7 @@ describe("MonthlyOperationsPage", () => {
 					effectiveDate: null,
 					label: "Salary",
 					budgetLink: { type: "unlinked" },
+					splits: [],
 				},
 				{
 					id: "op2",
@@ -772,6 +786,7 @@ describe("MonthlyOperationsPage", () => {
 					effectiveDate: null,
 					label: "Groceries",
 					budgetLink: { type: "unlinked" },
+					splits: [],
 				},
 				{
 					id: "op3",
@@ -780,6 +795,7 @@ describe("MonthlyOperationsPage", () => {
 					effectiveDate: null,
 					label: "Taxi",
 					budgetLink: { type: "unlinked" },
+					splits: [],
 				},
 			],
 		};
@@ -868,6 +884,7 @@ describe("MonthlyOperationsPage", () => {
 					effectiveDate: null,
 					label: "Groceries",
 					budgetLink: { type: "manual", budgetId: "b1" },
+					splits: [],
 				},
 			],
 		};
@@ -890,6 +907,7 @@ describe("MonthlyOperationsPage", () => {
 					effectiveDate: null,
 					label: "Salary",
 					budgetLink: { type: "auto", budgetId: "b2" },
+					splits: [],
 				},
 			],
 		};
@@ -899,5 +917,118 @@ describe("MonthlyOperationsPage", () => {
 
 		const incomeRow = await screen.findByRole("button", { name: /Income/ });
 		expect(within(incomeRow).getByText("Atteint")).toBeInTheDocument();
+	});
+
+	describe("with a split operation", () => {
+		const operations: MonthlyOperationsResponse = {
+			operations: [
+				{
+					id: "op1",
+					amount: "-50.00",
+					date: "2026-04-05",
+					effectiveDate: null,
+					label: "Groceries",
+					budgetLink: { type: "manual", budgetId: "b1" },
+					splits: [],
+				},
+				{
+					id: "op2",
+					amount: "-100.00",
+					date: "2026-04-08",
+					effectiveDate: null,
+					label: "CASH WITHDRAWAL",
+					budgetLink: { type: "unlinked" },
+					splits: [
+						{ id: "s1", amount: "-30.00", budgetId: "b1" },
+						{ id: "s2", amount: "-70.00", budgetId: null },
+					],
+				},
+				{
+					id: "op3",
+					amount: "-20.00",
+					date: "2026-04-12",
+					effectiveDate: null,
+					label: "Taxi",
+					budgetLink: { type: "unlinked" },
+					splits: [],
+				},
+			],
+		};
+
+		const rowOf = (text: string) => {
+			const row = screen.getByText(text).closest("li");
+			if (!(row instanceof HTMLElement)) throw new Error(`no row for ${text}`);
+			return within(row);
+		};
+
+		it("counts each part in its own budget group", async () => {
+			setupMocks({ operations });
+			await renderOperationsPage();
+			const user = userEvent.setup();
+
+			// Food: -50 + the -30 part = -80 of -200
+			const foodRow = await screen.findByRole("button", { name: /Food/ });
+			expect(within(foodRow).getByText(/^Reste 120,00/)).toBeInTheDocument();
+			expect(within(foodRow).getByText(/2 opération\(s\)/)).toBeInTheDocument();
+
+			// The daily group starts open with the -70 part and the taxi ride.
+			const dailyPart = rowOf("part 2/2");
+			expect(dailyPart.getByText("CASH WITHDRAWAL")).toBeInTheDocument();
+			expect(dailyPart.getByText(/-70,00/)).toBeInTheDocument();
+			expect(screen.queryByText(/-100,00/)).not.toBeInTheDocument();
+
+			await user.click(foodRow);
+			const foodPart = rowOf("part 1/2");
+			expect(foodPart.getByText("CASH WITHDRAWAL")).toBeInTheDocument();
+			expect(foodPart.getByText(/-30,00/)).toBeInTheDocument();
+		});
+
+		it("uses part amounts in the stat tiles", async () => {
+			setupMocks({ operations });
+			await renderOperationsPage();
+
+			// Food -80 (whole op + part) and daily -90 (part + taxi).
+			const [expensesTile] = await screen.findAllByText("Dépenses");
+			const expensesText =
+				expensesTile
+					.closest(".mantine-Paper-root")
+					?.textContent?.replace(/\s/g, "") ?? "";
+			expect(expensesText).toMatch(/-170,00/);
+		});
+
+		it("offers to edit the split instead of linking a part", async () => {
+			setupMocks({ operations });
+			await renderOperationsPage();
+			await screen.findByText("part 2/2");
+
+			const part = rowOf("part 2/2");
+			expect(part.getByLabelText("Modifier la division")).toBeInTheDocument();
+			expect(part.queryByLabelText("Lier à un budget")).not.toBeInTheDocument();
+			expect(part.queryByLabelText("Créer un budget")).not.toBeInTheDocument();
+
+			const taxi = rowOf("Taxi");
+			expect(taxi.getByLabelText("Diviser")).toBeInTheDocument();
+			expect(taxi.getByLabelText("Lier à un budget")).toBeInTheDocument();
+		});
+
+		it("opens the split modal pre-filled with the parts", async () => {
+			setupMocks({ operations });
+			await renderOperationsPage();
+			const user = userEvent.setup();
+			await screen.findByText("part 2/2");
+
+			await user.click(
+				rowOf("part 2/2").getByLabelText("Modifier la division"),
+			);
+
+			const dialog = within(await screen.findByRole("dialog"));
+			expect(dialog.getByText("Diviser l'opération")).toBeInTheDocument();
+			expect(
+				dialog.getByRole("textbox", { name: "Montant (Part 1)" }),
+			).toHaveValue("30,00");
+			expect(
+				dialog.getByRole("textbox", { name: "Montant (Part 2)" }),
+			).toHaveValue("70,00");
+		});
 	});
 });

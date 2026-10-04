@@ -127,7 +127,11 @@ PostgreSQL is the only store, owned exclusively by `radinage-api`. Users own
 operations and budgets; budgets own their periods and matching rules; deleting
 a user or a budget cascades through foreign keys. An operation's budget link is
 two columns (link type and budget id) that encode `BudgetLink`: unlinked,
-manual, or auto. The schema is defined by
+manual, or auto. An operation can instead be split: `operation_splits` holds
+its ordered parts, each with an amount and an optional budget that becomes
+null when that budget is deleted. A split operation's own link stays unlinked,
+and every aggregation counts its parts instead of its amount. The schema is
+defined by
 [radinage-api/migrations/](radinage-api/migrations/).
 
 The API process is otherwise stateless: no session table, no cache. The
@@ -155,6 +159,13 @@ same behind any number of API replicas. The trade-off is that a token stays
 valid until it expires: role changes, password resets and user deletion do not
 revoke tokens already issued.
 
+**A split keeps the bank operation.** Parts live beside the operation instead
+of replacing it with several operations, so the imported row still exists for
+duplicate detection on re-import and removing a split loses nothing. The cost
+is that every aggregation expands split operations into their parts:
+`list_for_summary` in SQL, and
+[operation-parts.ts](radinage-webapp/src/lib/operation-parts.ts) in the web app.
+
 **Same-origin web app.** nginx serves the SPA and proxies `/api/` on the same
 origin, so the browser needs no CORS and the API address is a deployment
 setting of the web app image rather than a build-time constant.
@@ -176,6 +187,9 @@ that defines flags, environment variables and defaults together.
 - **No response exposes `user_id`.**
 - **A manual budget link is never overwritten by auto-matching**; only an
   explicit `force` on apply replaces it.
+- **A split operation's parts sum exactly to its amount**, share its sign and
+  number at least two (`validate_splits`). While split, its amount cannot
+  change, and neither auto-matching nor a manual link touches it.
 - **Recurring budget periods never overlap**, checked by
   `BudgetKind::validate_no_overlap` before writing.
 - **The SPA always calls `/api`.** Whatever sits in front of the API must

@@ -242,6 +242,7 @@ pub async fn import_operations<U, O: OperationRepository, B: BudgetRepository>(
                     label: parsed_row.label,
                     budget_link: BudgetLink::Unlinked,
                     ignored: false,
+                    splits: Vec::new(),
                 };
                 // Best-effort auto-match; don't fail the import on match errors.
                 let _ = auto_match_operation(&state.operation_repo, &state.budget_repo, &op).await;

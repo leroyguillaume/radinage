@@ -22,6 +22,7 @@ import {
 } from "@tabler/icons-react";
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { toDisplayAmount, toRawAmount } from "@/lib/format";
 import { useApplyBudget, useCreateBudget, useUpdateBudget } from "@/lib/hooks";
 import type {
 	ApplyBudgetResponse,
@@ -38,23 +39,6 @@ function ymToDate(ym: YearMonth): Date {
 
 function dateToYm(d: Date): YearMonth {
 	return { year: d.getFullYear(), month: d.getMonth() + 1 };
-}
-
-function getDecimalSeparator(locale: string): string {
-	return locale.startsWith("fr") ? "," : ".";
-}
-
-function toDisplayAmount(raw: string, locale: string): string {
-	if (raw === "" || raw === "-") return raw;
-	const sep = getDecimalSeparator(locale);
-	const num = Number.parseFloat(raw);
-	if (Number.isNaN(num)) return raw;
-	return num.toFixed(2).replace(".", sep);
-}
-
-function toRawAmount(display: string, locale: string): string {
-	const sep = getDecimalSeparator(locale);
-	return display.replace(sep, ".");
 }
 
 let ruleIdCounter = 0;

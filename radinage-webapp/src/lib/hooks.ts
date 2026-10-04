@@ -8,6 +8,7 @@ import type {
 	ImportDataResponse,
 	MonthlyOperationsResponse,
 	OperationResponse,
+	OperationSplitRequest,
 	ResetPasswordResponse,
 	SummaryResponse,
 } from "@/lib/types";
@@ -148,6 +149,43 @@ export function useIgnoreOperation() {
 		onSuccess: () => {
 			queryClient.invalidateQueries({ queryKey: ["monthly-operations"] });
 		},
+	});
+}
+
+function useInvalidateMonthlyData() {
+	const queryClient = useQueryClient();
+	return () => {
+		queryClient.invalidateQueries({ queryKey: ["monthly-operations"] });
+		queryClient.invalidateQueries({ queryKey: ["summary"] });
+	};
+}
+
+export function useSplitOperation() {
+	const invalidate = useInvalidateMonthlyData();
+	return useMutation({
+		mutationFn: ({
+			opId,
+			splits,
+		}: {
+			opId: string;
+			splits: OperationSplitRequest[];
+		}) =>
+			apiFetch<OperationResponse>(`/operations/${opId}/splits`, {
+				method: "PUT",
+				body: JSON.stringify({ splits }),
+			}),
+		onSuccess: invalidate,
+	});
+}
+
+export function useUnsplitOperation() {
+	const invalidate = useInvalidateMonthlyData();
+	return useMutation({
+		mutationFn: (opId: string) =>
+			apiFetch<OperationResponse>(`/operations/${opId}/splits`, {
+				method: "DELETE",
+			}),
+		onSuccess: invalidate,
 	});
 }
 

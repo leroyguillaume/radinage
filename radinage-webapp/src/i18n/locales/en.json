@@ -59,6 +59,25 @@
 			"income": "Income",
 			"savings": "Savings",
 			"balance": "Balance"
+		},
+		"split": {
+			"title": "Split operation",
+			"action": "Split",
+			"editAction": "Edit split",
+			"splitInto": "Split into {{count}} parts",
+			"partBadge": "part {{index}}/{{count}}",
+			"partLabel": "Part {{n}}",
+			"amount": "Amount",
+			"budget": "Budget",
+			"noBudget": "No budget",
+			"addPart": "Add a part",
+			"removePart": "Remove part",
+			"remainder": "Left to allocate: {{amount}}",
+			"fillRemainder": "Allocate the rest",
+			"unsplit": "Undo split",
+			"invalidAmount": "Invalid amount",
+			"saveError": "Failed to save the split",
+			"unsplitError": "Failed to undo the split"
 		}
 	},
 	"import": {

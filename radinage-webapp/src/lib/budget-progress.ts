@@ -1,4 +1,5 @@
 import { getBudgetedAmountForMonth } from "@/lib/budget-utils";
+import { operationEntries } from "@/lib/operation-parts";
 import type { BudgetResponse, OperationResponse } from "@/lib/types";
 
 export type BudgetProgressStatus = "noDue" | "partial" | "reached" | "over";
@@ -15,10 +16,12 @@ export function sumOperationsByBudget(
 	operations: OperationResponse[],
 ): Map<string, number> {
 	const totals = new Map<string, number>();
-	for (const op of operations) {
-		if (op.budgetLink.type === "unlinked") continue;
-		const id = op.budgetLink.budgetId;
-		totals.set(id, (totals.get(id) ?? 0) + Number(op.amount));
+	for (const entry of operations.flatMap(operationEntries)) {
+		if (entry.budgetId === null) continue;
+		totals.set(
+			entry.budgetId,
+			(totals.get(entry.budgetId) ?? 0) + entry.amount,
+		);
 	}
 	return totals;
 }

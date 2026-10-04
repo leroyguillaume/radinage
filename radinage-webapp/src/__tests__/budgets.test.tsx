@@ -96,6 +96,7 @@ function makeLinkedOperation(
 		effectiveDate: null,
 		label: `OP ${id}`,
 		budgetLink: { type: "auto", budgetId },
+		splits: [],
 	};
 }
 
@@ -568,5 +569,42 @@ describe("BudgetsPage", () => {
 
 		const vacances = within(screen.getByRole("article", { name: "Vacances" }));
 		expect(vacances.getByText("Pas d'échéance ce mois-ci")).toBeInTheDocument();
+	});
+
+	it("counts each part of a split operation in its own budget", async () => {
+		setupBudgetsMock(
+			[
+				makeBudget("b1", "Courses", "monthly", "-100.00"),
+				makeBudget("b2", "Loisirs", "monthly", "-200.00"),
+			],
+			[
+				makeLinkedOperation("o1", "b1", "-20.00"),
+				{
+					id: "o2",
+					amount: "-100.00",
+					date: "2024-01-20",
+					effectiveDate: null,
+					label: "RETRAIT DAB",
+					budgetLink: { type: "unlinked" },
+					splits: [
+						{ id: "s1", amount: "-30.00", budgetId: "b1" },
+						{ id: "s2", amount: "-50.00", budgetId: "b2" },
+						{ id: "s3", amount: "-20.00", budgetId: null },
+					],
+				},
+			],
+		);
+		await renderBudgetsPage();
+
+		const courses = within(
+			await screen.findByRole("article", { name: "Courses" }),
+		);
+		expect(
+			await courses.findByText(/50,00\s€ sur 100,00\s€/),
+		).toBeInTheDocument();
+
+		const loisirs = within(screen.getByRole("article", { name: "Loisirs" }));
+		expect(loisirs.getByText(/50,00\s€ sur 200,00\s€/)).toBeInTheDocument();
+		expect(loisirs.getByText("25 %")).toBeInTheDocument();
 	});
 });
