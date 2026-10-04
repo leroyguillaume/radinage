@@ -37,7 +37,7 @@ pub struct ForecastQuery {
 pub enum ForecastMonthStatus {
     /// A month before the current one: actual amounts.
     Past,
-    /// The month in progress: actual amounts so far.
+    /// The month in progress: actual amounts so far, plus what the budgets still expect.
     Current,
     /// A month after the current one: amounts expected by the budgets.
     Future,
@@ -72,6 +72,11 @@ pub struct ForecastMonthResponse {
     /// Income + expenses + savings.
     #[schemars(with = "String")]
     pub balance: Decimal,
+    /// Part of the balance the budgets still expect this month on top of what is already
+    /// linked to them (each budget's expected amount not yet reached). Zero outside the
+    /// current month.
+    #[schemars(with = "String")]
+    pub committed: Decimal,
     /// Sum of the balances from the first month of the horizon up to this one.
     #[schemars(with = "String")]
     pub cumulative: Decimal,
@@ -87,6 +92,7 @@ impl From<&ForecastMonth> for ForecastMonthResponse {
             expenses: m.flows.expenses,
             savings: m.flows.savings,
             balance: m.flows.balance(),
+            committed: m.committed,
             cumulative: m.cumulative,
         }
     }
@@ -286,12 +292,13 @@ mod tests {
                 "months": [
                     {"year": 2020, "month": 11, "status": "past", "income": "1200.00",
                      "expenses": "-800.00", "savings": "0", "balance": "400.00",
-                     "cumulative": "400.00"},
+                     "committed": "0", "cumulative": "400.00"},
                     {"year": 2020, "month": 12, "status": "past", "income": "0",
-                     "expenses": "0", "savings": "0", "balance": "0", "cumulative": "400.00"},
+                     "expenses": "0", "savings": "0", "balance": "0", "committed": "0",
+                     "cumulative": "400.00"},
                     {"year": 2021, "month": 1, "status": "past", "income": "0",
                      "expenses": "0", "savings": "-300.00", "balance": "-300.00",
-                     "cumulative": "100.00"},
+                     "committed": "0", "cumulative": "100.00"},
                 ],
                 "totals": {"income": "1200.00", "expenses": "-800.00", "savings": "-300.00",
                            "balance": "100.00"},
@@ -332,6 +339,49 @@ mod tests {
         assert_eq!(json.totals.income, dec!(30000));
         assert_eq!(json.totals.expenses, dec!(-9600));
         assert_eq!(json.end_balance, dec!(20400));
+    }
+
+    #[tokio::test]
+    async fn current_month_exposes_what_budgets_still_expect() {
+        let user_id = Uuid::new_v4();
+        let current = YearMonth::of(chrono::Local::now().date_naive());
+        let groceries = monthly_budget(user_id, BudgetType::Expense, dec!(-550));
+        let groceries_id = groceries.id;
+        let mut or = MockOperationRepository::new();
+        or.expect_list_for_summary().returning(move |_, start, _| {
+            Box::pin(async move {
+                Ok(vec![SummaryRow {
+                    amount: dec!(-330),
+                    date: start,
+                    budget_link_type: "manual".to_string(),
+                    budget_id: Some(groceries_id),
+                    budget_type: Some("expense".to_string()),
+                }])
+            })
+        });
+        let mut br = MockBudgetRepository::new();
+        br.expect_list_all_for_user().returning(move |_| {
+            let groceries = groceries.clone();
+            Box::pin(async move { Ok(vec![groceries]) })
+        });
+
+        let resp = get(
+            or,
+            br,
+            user_id,
+            &format!(
+                "fromYear={}&fromMonth={}&months=1",
+                current.year, current.month
+            ),
+        )
+        .await;
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        let json: ForecastResponse = response_json(resp).await;
+        let month = &json.months[0];
+        assert_eq!(month.status, ForecastMonthStatus::Current);
+        assert_eq!(month.expenses, dec!(-550));
+        assert_eq!(month.committed, dec!(-220));
     }
 
     #[tokio::test]

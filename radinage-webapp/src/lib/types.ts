@@ -67,6 +67,8 @@ export interface ForecastMonth extends ForecastFlows {
 	year: number;
 	month: number;
 	status: ForecastMonthStatus;
+	/** Part of `balance` the budgets still expect this month; "0" outside the current month. */
+	committed: string;
 	cumulative: string;
 }
 

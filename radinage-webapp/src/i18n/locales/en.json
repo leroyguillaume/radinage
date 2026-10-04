@@ -193,7 +193,7 @@
 		"dailyBudget": "Daily budget",
 		"remainingDays_one": "{{count}} day left",
 		"remainingDays_other": "{{count}} days left",
-		"subtitle": "Actuals up to the current month, then a forecast based on your budgets.",
+		"subtitle": "Actuals for past months, actuals plus what your budgets still expect for the current month, then a forecast based on your budgets.",
 		"previousYear": "Previous year",
 		"nextYear": "Next year",
 		"endOfYearBalance": "End of year balance",
@@ -213,7 +213,8 @@
 		"savings": "Savings",
 		"balance": "Balance",
 		"cumulative": "Cumulative",
-		"projected": "Forecast"
+		"projected": "Forecast",
+		"committed": "incl. {{amount}} still to come"
 	},
 	"nav": {
 		"operations": "Operations",

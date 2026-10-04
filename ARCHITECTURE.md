@@ -170,9 +170,15 @@ is that every aggregation expands split operations into their parts:
 
 **The forecast is computed by the API.** `GET /forecast` returns, for each
 month of a horizon of up to 24 months, income, expenses, savings, balance and
-running balance. Months up to the current one come from the operations
-accounted so far, later months from the amounts the budgets expect
-(`BudgetKind::expected_amount_for_month`). Budget-linked amounts count under
+running balance. Past months come from the operations accounted so far, later
+months from the amounts the budgets expect
+(`BudgetKind::expected_amount_for_month`). The current month takes its
+operations so far plus, for each budget, the part of its expected amount not
+reached yet in the budget's direction (an expense budget of −550 with −330
+linked still commits −220; one already exceeded commits nothing; an income not
+yet received commits all of it); that sum is exposed as the month's
+`committed`, so the month reads as what it will end at rather than what it is
+at today. Budget-linked amounts count under
 their budget's type; an operation outside any budget counts as income or as an
 expense by its own sign, so a salary and a grocery run in the same month never
 cancel each other out. The running balance starts at zero before the first

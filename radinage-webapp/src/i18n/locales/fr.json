@@ -193,7 +193,7 @@
 		"dailyBudget": "Budget / jour",
 		"remainingDays_one": "{{count}} jour restant",
 		"remainingDays_other": "{{count}} jours restants",
-		"subtitle": "Réel jusqu'au mois en cours, prévision ensuite à partir de tes budgets.",
+		"subtitle": "Réel pour les mois passés, réel plus ce que tes budgets attendent encore pour le mois en cours, prévision ensuite à partir de tes budgets.",
 		"previousYear": "Année précédente",
 		"nextYear": "Année suivante",
 		"endOfYearBalance": "Balance fin d'année",
@@ -213,7 +213,8 @@
 		"savings": "Épargne",
 		"balance": "Balance",
 		"cumulative": "Cumulé",
-		"projected": "Prévision"
+		"projected": "Prévision",
+		"committed": "dont {{amount}} à venir"
 	},
 	"nav": {
 		"operations": "Opérations",

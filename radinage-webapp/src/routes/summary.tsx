@@ -58,6 +58,7 @@ interface MonthForecast {
 	expenses: number;
 	savings: number;
 	balance: number;
+	committed: number;
 	cumulative: number;
 }
 
@@ -70,6 +71,7 @@ function toMonthForecast(m: ForecastMonth): MonthForecast {
 		expenses: Number(m.expenses),
 		savings: Number(m.savings),
 		balance: Number(m.balance),
+		committed: Number(m.committed),
 		cumulative: Number(m.cumulative),
 	};
 }
@@ -523,6 +525,13 @@ function MonthlyTable({ forecast, locale }: ForecastViewProps) {
 									</Table.Td>
 									<Table.Td ta="right" fw={600} c={balanceTextColor(m.balance)}>
 										{formatSignedAmount(m.balance)}
+										{m.committed !== 0 && (
+											<Text size="xs" fw={400} c="dimmed">
+												{t("forecast.committed", {
+													amount: formatSignedAmount(m.committed),
+												})}
+											</Text>
+										)}
 									</Table.Td>
 									<Table.Td
 										ta="right"

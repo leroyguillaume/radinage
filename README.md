@@ -14,7 +14,7 @@ Radinage keeps a record of your bank operations and compares them with the budge
 
 - **Operations**: import bank statements (CSV/XLSX), link operations to budgets by hand, or split one operation (a cash withdrawal, say) across several budgets.
 - **Budgets**: recurring (weekly, monthly, quarterly, yearly) or one-off, for expenses, income or savings, with matching rules that categorise operations automatically.
-- **Forecast**: actuals up to the current month (operations outside any budget counted as income or expense by their own sign), budgets beyond it, and the daily amount you can still spend.
+- **Forecast**: actuals for past months (operations outside any budget counted as income or expense by their own sign), the current month's actuals plus what its budgets still expect, budgets beyond it, and the daily amount you can still spend.
 - **Statistics**: income, expenses, savings and balance over any range of months.
 - **Multi-user**: JWT authentication, an admin account and invitation links.
 
