@@ -98,12 +98,6 @@ ingress:
       path: /api
       # -- (string) API path type (Prefix, Exact, ImplementationSpecific)
       pathType: Prefix
-    # MCP ingress rule
-    mcp:
-      # -- (string) MCP URL path
-      path: /mcp
-      # -- (string) MCP path type
-      pathType: Prefix
     # Webapp ingress rule
     webapp:
       # -- (string) Webapp URL path
@@ -244,92 +238,6 @@ apps:
     # Autoscaling
 
     # -- (object) API autoscaling — override `global.autoscaling`
-    autoscaling: {}
-
-  # Radinage MCP server
-  mcp:
-    # -- (bool) Set to false to skip deploying the MCP server
-    enabled: true
-
-    # Radinage MCP config
-
-    # -- (string) Radinage API URL. Defaults to the cluster-internal service URL.
-    apiUrl: ""
-
-    # Pod / Container
-
-    # -- (object) MCP container image — override `global.image`
-    image:
-      # -- (string) Image repository
-      repository: radinage-mcp
-      # -- (string) Image tag — override `global.image.tag`
-      tag: ""
-      # -- (string) Image pull policy — override `global.image.pullPolicy`
-      pullPolicy: ""
-    # -- (list) MCP image pull secrets — override `global.imagePullSecrets`
-    imagePullSecrets: []
-    # -- (string) MCP replica count — override `global.replicaCount`
-    replicaCount: ""
-    # -- (string) MCP revision history limit — override `global.revisionHistoryLimit`
-    revisionHistoryLimit: ""
-    # -- (object) MCP pod security context — override `global.podSecurityContext`
-    podSecurityContext: {}
-    # -- (object) MCP container security context — override `global.containerSecurityContext`
-    containerSecurityContext: {}
-    # -- (object) MCP resource requests and limits — override `global.resources`
-    resources: {}
-    # -- (object) MCP ServiceAccount — override `global.serviceAccount`
-    serviceAccount: {}
-    # -- (object) MCP pod annotations — override `global.podAnnotations`
-    podAnnotations: {}
-    # -- (object) MCP pod labels — override `global.podLabels`
-    podLabels: {}
-    # -- (object) MCP node selector — override `global.nodeSelector`
-    nodeSelector: {}
-    # -- (list) MCP tolerations — override `global.tolerations`
-    tolerations: []
-    # -- (object) MCP affinity — override `global.affinity`
-    affinity: {}
-    # -- (int) MCP container port
-    port: 3001
-    # -- (list) MCP additional environment variables
-    extraEnv: []
-    # -- (object) MCP liveness and readiness probes
-    probes:
-      # -- (object) Liveness probe configuration
-      liveness:
-        httpGet:
-          path: /health
-          port: http
-        initialDelaySeconds: 5
-        periodSeconds: 10
-      # -- (object) Readiness probe configuration
-      readiness:
-        httpGet:
-          path: /health
-          port: http
-        initialDelaySeconds: 5
-        periodSeconds: 5
-
-    # Volumes
-
-    # -- (list) MCP volumes to mount
-    volumes: []
-    # -- (list) MCP additional volumes to mount
-    extraVolumes: []
-    # -- (list) MCP volume mounts for the container
-    volumeMounts: []
-    # -- (list) MCP additional volume mounts for the container
-    extraVolumeMounts: []
-
-    # Service
-
-    # -- (object) MCP service — override `global.service`
-    service: {}
-
-    # Autoscaling
-
-    # -- (object) MCP autoscaling — override `global.autoscaling`
     autoscaling: {}
 
   # Radinage webapp (nginx)

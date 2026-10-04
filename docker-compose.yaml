@@ -28,19 +28,6 @@ services:
     depends_on:
       - postgres
 
-  mcp:
-    profiles:
-      - radinage
-    build:
-      context: .
-      target: mcp
-    environment:
-      RADINAGE_API_URL: http://api:3000/api
-    ports:
-      - 3001:3001
-    depends_on:
-      - api
-
   webapp:
     profiles:
       - radinage

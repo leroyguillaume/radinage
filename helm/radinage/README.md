@@ -58,35 +58,6 @@ A personal bank account tracking application
 | apps.api.volumeMounts | list | `[]` | API volume mounts for the container |
 | apps.api.volumes | list | `[]` | API volumes to mount |
 | apps.api.webappUrl | string | `""` | Base URL of the web application (used for invitation links). Defaults to `<protocol>://<global.domain><ingress.apps.webapp.path>` |
-| apps.mcp.affinity | object | `{}` | MCP affinity — override `global.affinity` |
-| apps.mcp.apiUrl | string | `""` | Radinage API URL. Defaults to the cluster-internal service URL. |
-| apps.mcp.autoscaling | object | `{}` | MCP autoscaling — override `global.autoscaling` |
-| apps.mcp.containerSecurityContext | object | `{}` | MCP container security context — override `global.containerSecurityContext` |
-| apps.mcp.enabled | bool | `true` | Set to false to skip deploying the MCP server |
-| apps.mcp.extraEnv | list | `[]` | MCP additional environment variables |
-| apps.mcp.extraVolumeMounts | list | `[]` | MCP additional volume mounts for the container |
-| apps.mcp.extraVolumes | list | `[]` | MCP additional volumes to mount |
-| apps.mcp.image | object | `{"pullPolicy":"","repository":"radinage-mcp","tag":""}` | MCP container image — override `global.image` |
-| apps.mcp.image.pullPolicy | string | `""` | Image pull policy — override `global.image.pullPolicy` |
-| apps.mcp.image.repository | string | `"radinage-mcp"` | Image repository |
-| apps.mcp.image.tag | string | `""` | Image tag — override `global.image.tag` |
-| apps.mcp.imagePullSecrets | list | `[]` | MCP image pull secrets — override `global.imagePullSecrets` |
-| apps.mcp.nodeSelector | object | `{}` | MCP node selector — override `global.nodeSelector` |
-| apps.mcp.podAnnotations | object | `{}` | MCP pod annotations — override `global.podAnnotations` |
-| apps.mcp.podLabels | object | `{}` | MCP pod labels — override `global.podLabels` |
-| apps.mcp.podSecurityContext | object | `{}` | MCP pod security context — override `global.podSecurityContext` |
-| apps.mcp.port | int | `3001` | MCP container port |
-| apps.mcp.probes | object | `{"liveness":{"httpGet":{"path":"/health","port":"http"},"initialDelaySeconds":5,"periodSeconds":10},"readiness":{"httpGet":{"path":"/health","port":"http"},"initialDelaySeconds":5,"periodSeconds":5}}` | MCP liveness and readiness probes |
-| apps.mcp.probes.liveness | object | `{"httpGet":{"path":"/health","port":"http"},"initialDelaySeconds":5,"periodSeconds":10}` | Liveness probe configuration |
-| apps.mcp.probes.readiness | object | `{"httpGet":{"path":"/health","port":"http"},"initialDelaySeconds":5,"periodSeconds":5}` | Readiness probe configuration |
-| apps.mcp.replicaCount | string | `""` | MCP replica count — override `global.replicaCount` |
-| apps.mcp.resources | object | `{}` | MCP resource requests and limits — override `global.resources` |
-| apps.mcp.revisionHistoryLimit | string | `""` | MCP revision history limit — override `global.revisionHistoryLimit` |
-| apps.mcp.service | object | `{}` | MCP service — override `global.service` |
-| apps.mcp.serviceAccount | object | `{}` | MCP ServiceAccount — override `global.serviceAccount` |
-| apps.mcp.tolerations | list | `[]` | MCP tolerations — override `global.tolerations` |
-| apps.mcp.volumeMounts | list | `[]` | MCP volume mounts for the container |
-| apps.mcp.volumes | list | `[]` | MCP volumes to mount |
 | apps.webapp.affinity | object | `{}` | Webapp affinity — override `global.affinity` |
 | apps.webapp.apiHost | string | `""` | Upstream API host:port used by nginx proxy_pass. Defaults to the cluster-internal service: `<release>-api:<apps.api.port>`. |
 | apps.webapp.autoscaling | object | `{}` | Webapp autoscaling — override `global.autoscaling` |
@@ -147,8 +118,6 @@ A personal bank account tracking application
 | ingress.annotations | object | `{}` | Annotations to add to the Ingress |
 | ingress.apps.api.path | string | `"/api"` | API URL path |
 | ingress.apps.api.pathType | string | `"Prefix"` | API path type (Prefix, Exact, ImplementationSpecific) |
-| ingress.apps.mcp.path | string | `"/mcp"` | MCP URL path |
-| ingress.apps.mcp.pathType | string | `"Prefix"` | MCP path type |
 | ingress.apps.webapp.path | string | `"/"` | Webapp URL path |
 | ingress.apps.webapp.pathType | string | `"Prefix"` | Webapp path type |
 | ingress.apps.webapp.protocol | string | `"https"` | Protocol used to build the webapp URL (http or https) |

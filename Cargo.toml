@@ -1,5 +1,5 @@
 [workspace]
-members = ["radinage-api", "radinage-mcp"]
+members = ["radinage-api"]
 resolver = "2"
 
 [workspace.package]
