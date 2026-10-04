@@ -1,179 +1,154 @@
 <p align="center">
-  <img src="radinage-webapp/public/logo.svg" alt="Radinage logo" width="160">
+  <img src="radinage-webapp/public/logo.svg" alt="Radinage logo: a smiling green wallet holding a euro coin" width="160">
 </p>
 
 # Radinage
 
-[![Docker Publish](https://github.com/leroyguillaume/radinage/actions/workflows/docker-publish.yml/badge.svg)](https://github.com/leroyguillaume/radinage/actions/workflows/docker-publish.yml)
+[![quality](https://github.com/leroyguillaume/radinage/actions/workflows/quality.yaml/badge.svg)](https://github.com/leroyguillaume/radinage/actions/workflows/quality.yaml)
 
-A personal bank account tracking application for managing finances, budgets, and operations. Built with a Rust backend and a React TypeScript frontend.
+A self-hosted personal bank account tracker: import your bank statements, sort them into budgets, and see what you can still spend this year.
 
-## Features
+## Description
 
-- **Operation tracking** -- Import bank statements (CSV/Excel) or add operations manually
-- **Budget management** -- Create recurring or one-off budgets with periods and track spending against them
-- **Auto-categorization** -- Define matching rules to automatically categorize operations into budgets
-- **Monthly summaries** -- View aggregated monthly reports comparing budgets vs. actual spending
-- **Statistics** -- Charts and analytics for visualizing financial data
-- **Multi-user** -- JWT-based authentication with admin and invitation system
-- **LLM integration** -- MCP server exposes the API as tools for Claude and other AI assistants
-- **Mobile-friendly** -- Responsive design, usable on all screen sizes
+Radinage keeps a record of your bank operations and compares them with the budgets you plan, month by month, so the end-of-year balance is never a surprise. It does not connect to your bank: operations come from the CSV or Excel exports banks already provide.
 
-## Architecture
+- **Operations**: import bank statements (CSV/XLSX) or link operations to budgets by hand.
+- **Budgets**: recurring (weekly, monthly, quarterly, yearly) or one-off, for expenses, income or savings, with matching rules that categorise operations automatically.
+- **Forecast**: actuals up to the current month, budgets beyond it, and the daily amount you can still spend.
+- **Statistics**: income, expenses, savings and balance over any range of months.
+- **Multi-user**: JWT authentication, an admin account and invitation links.
+- **LLM access**: an MCP server exposes the whole API as tools for AI assistants.
 
-```
-radinage/
-├── radinage-api/       Rust REST API (Axum, SQLx, PostgreSQL)
-├── radinage-mcp/       Rust MCP server (exposes API as LLM tools)
-├── radinage-webapp/    React SPA (TypeScript, Mantine, TanStack)
-├── helm/               Kubernetes Helm charts
-├── docker-compose.yml  Multi-service orchestration
-├── Dockerfile              Multi-stage build (API, MCP, Webapp)
-└── nginx.conf.template     Frontend reverse proxy config (envsubst at startup)
-```
+See [ARCHITECTURE.md](ARCHITECTURE.md) for the design and the reasoning behind it.
 
-### Backend (`radinage-api`)
-
-- **Framework:** Axum 0.8
-- **Database:** PostgreSQL via SQLx 0.8 (runtime queries)
-- **Auth:** JWT tokens + Argon2 password hashing
-- **API docs:** Auto-generated OpenAPI via aide (served at `/openapi.json`)
-- **Config:** clap with environment variable support
-
-### MCP Server (`radinage-mcp`)
-
-- **Protocol:** Model Context Protocol via rmcp
-- **Function:** Fetches the OpenAPI spec from the running API and exposes each endpoint as an MCP tool
-- **Transport:** Streamable HTTP (hyper)
-
-### Frontend (`radinage-webapp`)
-
-- **Framework:** React 19 with strict TypeScript
-- **Build:** Vite
-- **UI:** Mantine v9 + Tailwind CSS v4
-- **Routing:** TanStack Router (file-based)
-- **Server state:** TanStack Query
-- **Client state:** Zustand
-- **i18n:** i18next
-
-## Getting Started
+## Getting started
 
 ### Prerequisites
 
-- [Rust](https://www.rust-lang.org/tools/install) (1.94+)
-- [Node.js](https://nodejs.org/) (25+)
-- [PostgreSQL](https://www.postgresql.org/) (16+)
-- [Docker](https://www.docker.com/) and Docker Compose (optional)
+To run the stack with Docker Compose:
 
-### Run with Docker Compose
+- [Docker](https://docs.docker.com/get-started/get-docker/) with the Compose plugin
 
-The quickest way to get everything running:
+To run the services from source:
+
+- [Rust](https://www.rust-lang.org/tools/install) 1.94
+- [Node.js](https://nodejs.org/en/download) 25
+- PostgreSQL 16, or Docker to run it
+
+### Installation
 
 ```bash
-docker-compose --profile radinage up
+git clone https://github.com/leroyguillaume/radinage.git
 ```
 
-This starts:
-
-| Service    | URL                    |
-|------------|------------------------|
-| PostgreSQL | `localhost:5432`       |
-| API        | `http://localhost:3000` |
-| MCP Server | `http://localhost:3001` |
-| Webapp     | `http://localhost:8080` |
-
-### Run Locally
-
-#### 1. Start the database
-
 ```bash
-# Using Docker
-docker run -d --name radinage-db \
-  -e POSTGRES_USER=radinage \
-  -e POSTGRES_PASSWORD=radinage \
-  -e POSTGRES_DB=radinage \
-  -p 5432:5432 \
-  postgres:16
+cd radinage
 ```
 
-#### 2. Start the API
+### Configuration
+
+The API (`radinage-api`) reads its configuration from environment variables, or the equivalent `--kebab-case` flags:
+
+| Variable | Required | Default | Description |
+| --- | --- | --- | --- |
+| `DATABASE_URL` | yes | — | PostgreSQL connection string |
+| `JWT_SECRET` | yes | — | Secret used to sign JWTs |
+| `ADMIN_PASSWORD` | yes | — | Password of the admin account created at startup |
+| `WEBAPP_URL` | yes | — | Public URL of the webapp, used to build invitation and reset links |
+| `ADMIN_USERNAME` | no | `admin` | Username of the admin account |
+| `LISTEN_ADDR` | no | `0.0.0.0:3000` | Address the HTTP server listens on |
+| `CORS_ORIGINS` | no | — | Comma-separated allowed CORS origins |
+| `ROOT_PATH` | no | — | Path prefix the API is served under |
+| `JWT_EXPIRATION_SECS` | no | `86400` | Token lifetime in seconds |
+| `MAX_BUDGETS_PER_USER` | no | `100` | Maximum number of budgets per user |
+| `LOG_FILTER` | no | `info` | `tracing` filter directive |
+| `LOG_JSON` | no | `false` | Emit logs as JSON |
+
+The MCP server (`radinage-mcp`):
+
+| Variable | Required | Default | Description |
+| --- | --- | --- | --- |
+| `RADINAGE_API_URL` | yes | — | Base URL of the API |
+| `LISTEN_ADDR` | no | `0.0.0.0:3001` | Address the MCP server listens on |
+| `LOG_FILTER` | no | `info` | `tracing` filter directive |
+
+The webapp image (nginx):
+
+| Variable | Required | Default | Description |
+| --- | --- | --- | --- |
+| `API_HOST` | no | `api:3000` | Upstream `host:port` that `/api/` is proxied to |
+
+Database migrations are applied by the API at startup.
+
+### Usage
+
+#### With Docker Compose
+
+This builds the three images from the [Dockerfile](Dockerfile), then starts them with PostgreSQL:
 
 ```bash
-cd radinage-api
-export DATABASE_URL="postgres://radinage:radinage@localhost:5432/radinage"
-export JWT_SECRET="your-secret-key"
-export ADMIN_PASSWORD="admin"
-export WEBAPP_URL="http://localhost:5173"
-export CORS_ORIGINS="http://localhost:5173"
+docker compose --profile radinage up
+```
 
+| Service | URL |
+| --- | --- |
+| Webapp | <http://localhost:8080> |
+| API | <http://localhost:3000> |
+| MCP server | <http://localhost:3001> |
+| PostgreSQL | `localhost:5432` |
+
+Sign in to the webapp as `admin` with the `ADMIN_PASSWORD` set in [docker-compose.yaml](docker-compose.yaml).
+
+#### From source
+
+Start PostgreSQL alone:
+
+```bash
+docker compose up -d postgres
+```
+
+Start the API from `radinage-api/`, with the required variables above exported:
+
+```bash
 cargo run
 ```
 
-The API runs on `http://localhost:3000` by default. Database migrations are applied automatically on startup.
-
-#### 3. Start the frontend
+Start the webapp from `radinage-webapp/`; it serves on <http://localhost:5173> and proxies `/api` to the API:
 
 ```bash
-cd radinage-webapp
 npm install
+```
+
+```bash
 npm run dev
 ```
 
-The webapp runs on `http://localhost:5173` with hot-reload enabled.
-
-#### 4. (Optional) Start the MCP server
+Start the MCP server from `radinage-mcp/`, with `RADINAGE_API_URL=http://localhost:3000`:
 
 ```bash
-cd radinage-mcp
-export RADINAGE_API_URL="http://localhost:3000"
 cargo run
 ```
 
-The MCP server runs on `http://localhost:3001`.
+### Deployment
 
-## Configuration
+Images are published to GHCR for `linux/amd64` and `linux/arm64`: `ghcr.io/leroyguillaume/radinage-api`, `ghcr.io/leroyguillaume/radinage-mcp` and `ghcr.io/leroyguillaume/radinage-webapp`.
 
-All API configuration is done via environment variables (or CLI flags):
-
-| Variable               | Description                          | Default            |
-|------------------------|--------------------------------------|--------------------|
-| `DATABASE_URL`         | PostgreSQL connection string         | *required*         |
-| `JWT_SECRET`           | Secret key for JWT signing           | *required*         |
-| `ADMIN_PASSWORD`       | Initial admin account password       | *required*         |
-| `WEBAPP_URL`           | Frontend URL (for invitation links)  | *required*         |
-| `CORS_ORIGINS`         | Allowed CORS origins                 | --                 |
-| `ROOT_PATH`            | API root path prefix                 | `/`                |
-| `LOG_FILTER`           | tracing filter directive             | `info`             |
-| `LOG_JSON`             | Output logs as JSON                  | `false`            |
-| `JWT_EXPIRATION_SECS`  | Token expiration in seconds          | `86400`            |
-
-The webapp (nginx) image also accepts:
-
-| Variable    | Description                              | Default    |
-|-------------|------------------------------------------|------------|
-| `API_HOST`  | Upstream API host:port for `/api/` proxy | `api:3000` |
-
-## Deployment
-
-### Kubernetes
-
-Helm charts are provided in the `helm/` directory for Kubernetes deployment.
-
-### Docker
-
-The multi-stage `Dockerfile` produces three separate images via build targets:
+The Helm chart reads the database connection string from an existing Secret, `radinage-db` with a `url` key by default:
 
 ```bash
-# Build the API image
-docker build --target api -t radinage-api .
-
-# Build the MCP server image
-docker build --target mcp -t radinage-mcp .
-
-# Build the webapp image
-docker build --target webapp -t radinage-webapp .
+kubectl create secret generic radinage-db --from-literal=url='postgresql://USER:PASSWORD@HOST:5432/radinage'
 ```
+
+```bash
+helm install radinage oci://ghcr.io/leroyguillaume/charts/radinage --version 0.1.0 --set global.domain=radinage.example.com
+```
+
+Every chart value is documented in [helm/radinage/README.md](helm/radinage/README.md).
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 
-This project is licensed under the Apache License 2.0. See [LICENSE.md](LICENSE.md) for details.
+Apache-2.0 — see [LICENSE.md](LICENSE.md).

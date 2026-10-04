@@ -50,7 +50,7 @@ npx biome format --write .           # auto-format
 npx biome check --fix .              # auto-fix lint
 
 # Docker
-docker-compose --profile radinage up # full stack (postgres + api + mcp + webapp)
+docker compose --profile radinage up # full stack (postgres + api + mcp + webapp)
 ```
 
 ## Architecture patterns

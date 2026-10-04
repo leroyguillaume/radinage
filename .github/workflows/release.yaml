@@ -1,0 +1,76 @@
+name: release
+
+on:
+  push:
+    tags:
+      - v*
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  version:
+    name: version
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - name: check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: derive the version from the tag
+        id: version
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          cargo_versions="$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[].version' | sort -u)"
+          webapp_version="$(jq -r .version radinage-webapp/package.json)"
+          for committed in $cargo_versions $webapp_version; do
+            if [ "$committed" != "$version" ]; then
+              echo "The workspace says ${committed} but the tag says ${version}." >&2
+              echo "Cut releases with scripts/release.sh so the two stay in step." >&2
+              exit 1
+            fi
+          done
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+
+  build:
+    name: build
+    needs:
+      - version
+    permissions:
+      contents: read
+      packages: write
+    uses: ./.github/workflows/build.yaml
+    with:
+      push: true
+      version: ${{ needs.version.outputs.version }}
+
+  github-release:
+    name: GitHub release
+    # A pre-release publishes its images and stops there.
+    if: ${{ !contains(github.ref_name, '-') }}
+    needs:
+      - build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - name: check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          previous="$(git tag --list 'v*' | grep -v -- - | sort -V | grep -B 1 -x "$GITHUB_REF_NAME" | head -n 1)"
+          if [ -n "$previous" ] && [ "$previous" != "$GITHUB_REF_NAME" ]; then
+            gh release create "$GITHUB_REF_NAME" --generate-notes --notes-start-tag "$previous"
+          else
+            gh release create "$GITHUB_REF_NAME" --generate-notes
+          fi
