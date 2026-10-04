@@ -17,6 +17,7 @@ import {
 import { createFileRoute } from "@tanstack/react-router";
 import { type FormEvent, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { AccountBalanceSection } from "@/components/AccountBalanceSection";
 import { PageHeader } from "@/components/PageHeader";
 import { ApiError } from "@/lib/api";
 import { useChangePassword, useExportData, useImportData } from "@/lib/hooks";
@@ -163,6 +164,8 @@ export function SettingsPage() {
 					</form>
 				</Paper>
 
+				<AccountBalanceSection />
+
 				<Paper>
 					<Stack>
 						<Title order={3} fz={20}>
@@ -186,6 +189,8 @@ export function SettingsPage() {
 									operations: dataSuccess.importedOperations,
 									skippedOperations: dataSuccess.skippedOperations,
 								})}
+								{dataSuccess.importedBalance &&
+									` ${t("settings.data.importedBalance")}`}
 							</Alert>
 						)}
 

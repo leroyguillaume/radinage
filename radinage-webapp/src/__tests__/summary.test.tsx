@@ -51,7 +51,10 @@ function statusOf(year: number, month: number): ForecastMonthStatus {
 }
 
 type ForecastExtras = Partial<
-	Pick<ForecastResponse, "unbudgetedRate" | "daysLeft" | "dailyBudget">
+	Pick<
+		ForecastResponse,
+		"unbudgetedRate" | "daysLeft" | "dailyBudget" | "startingBalance"
+	>
 >;
 
 /** A 12-month forecast for `year`, statuses relative to today like the server's. */
@@ -60,7 +63,8 @@ function makeForecast(
 	flowsOf: (month: number) => MonthFlows,
 	extras: ForecastExtras = {},
 ): ForecastResponse {
-	let cumulative = 0;
+	const startingBalance = extras.startingBalance ?? null;
+	let cumulative = Number(startingBalance ?? 0);
 	let firstNegativeMonth: ForecastResponse["firstNegativeMonth"] = null;
 	const totals = { income: 0, expenses: 0, savings: 0 };
 	const months = Array.from({ length: 12 }, (_, i) => {
@@ -101,6 +105,7 @@ function makeForecast(
 			savings: money(totals.savings),
 			balance: money(totals.income + totals.expenses + totals.savings),
 		},
+		startingBalance,
 		endBalance: money(cumulative),
 		unbudgetedRate: "0.0000",
 		daysLeft: 100,
@@ -341,6 +346,44 @@ describe("SummaryPage", () => {
 		const januaryText = (january?.textContent ?? "").replace(/\s/g, "");
 		expect(januaryText).toMatch(/1234,00/);
 		expect(januaryText).toMatch(/-567,00/);
+	});
+
+	it("shows the projected balance at the end of the horizon from the recorded balance", async () => {
+		setupMocks((year) =>
+			makeForecast(
+				year,
+				(month) =>
+					month === 1
+						? { income: 1234, expenses: -567, savings: 0 }
+						: { income: 0, expenses: 0, savings: 0 },
+				{ startingBalance: "1000.00" },
+			),
+		);
+
+		await renderSummaryPage("?year=2025");
+
+		const card = await screen.findByRole("region", {
+			name: "Solde prévu au 31 décembre 2025",
+		});
+		const text = (card.textContent ?? "").replace(/\s/g, "");
+		expect(text).toMatch(/\+1667,00/);
+		expect(text).toMatch(/Soldeau1janvier2025:1000,00/);
+		expect(screen.queryByText("Balance fin d'année")).not.toBeInTheDocument();
+	});
+
+	it("shows the projected balance title in English too", async () => {
+		await i18n.changeLanguage("en");
+		setupMocks((year) =>
+			makeForecast(year, typicalMonth, { startingBalance: "-50.00" }),
+		);
+
+		await renderSummaryPage("?year=2025");
+
+		expect(
+			await screen.findByRole("region", {
+				name: "Projected balance on December 31, 2025",
+			}),
+		).toBeInTheDocument();
 	});
 
 	it("shows what the budgets still expect in the current month's row", async () => {

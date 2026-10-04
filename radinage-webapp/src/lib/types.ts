@@ -77,6 +77,8 @@ export interface ForecastMonth extends ForecastFlows {
 export interface ForecastResponse {
 	months: ForecastMonth[];
 	totals: ForecastFlows;
+	/** Account balance at the start of the horizon, from the recorded balance; null when none is recorded. */
+	startingBalance: string | null;
 	endBalance: string;
 	/** Average daily unbudgeted spending of the 3 complete months before the current one; never positive. */
 	unbudgetedRate: string;
@@ -156,9 +158,17 @@ export interface ResetPasswordResponse {
 	resetLink: string;
 }
 
+/** Account balance read on `date`; operations accounted that day are included in `amount`. */
+export interface AccountBalance {
+	amount: string;
+	/** YYYY-MM-DD, today or earlier. */
+	date: string;
+}
+
 export interface ExportDataResponse {
 	version: number;
 	exportedAt: string;
+	balance?: AccountBalance | null;
 	budgets: unknown[];
 	operations: unknown[];
 }
@@ -168,4 +178,5 @@ export interface ImportDataResponse {
 	skippedBudgets: number;
 	importedOperations: number;
 	skippedOperations: number;
+	importedBalance: boolean;
 }

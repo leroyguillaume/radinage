@@ -37,6 +37,14 @@ export function parseCents(input: string): number | null {
 	return Number(units) * 100 + Number(decimals.padEnd(2, "0"));
 }
 
+/** Signed integer cents of a typed amount ("-12,5" → -1250), or null when not a valid amount. */
+export function parseSignedCents(input: string): number | null {
+	const trimmed = input.trim().replace(/^−/, "-");
+	const cents = parseCents(trimmed);
+	if (cents === null) return null;
+	return trimmed.startsWith("-") ? -cents : cents;
+}
+
 /** Integer cents of an API decimal string, keeping its sign. */
 export function decimalToCents(amount: string): number {
 	return Math.round(Number(amount) * 100);

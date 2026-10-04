@@ -190,8 +190,17 @@ operations page, which shows `unbudgetedRate` × the days of the month as the
 daily operations' forecast, use the same rate. Budget-linked amounts count under
 their budget's type; an operation outside any budget counts as income or as an
 expense by its own sign, so a salary and a grocery run in the same month never
-cancel each other out. The running balance starts at zero before the first
-month. The response also carries `dailyBudget`: the end balance before the
+cancel each other out. The running balance starts at `startingBalance`, the
+account's balance on the first day of the horizon. It is derived from the one
+balance a user may record with its date (`PUT /users/me/balance`, two nullable
+columns on `users`): operations accounted on that date are taken as already in
+it, so the operations accounted after it and before the horizon are added, or,
+when it is more recent than the horizon start, those accounted from the start
+through its date are taken back out. A user who records none starts at zero
+and `startingBalance` is null. Bringing the balance to the horizon start rather
+than starting the horizon at the balance date keeps every month of the horizon
+computed the same way, whatever the balance date. The response also carries
+`dailyBudget`: the end balance before the
 unbudgeted forecast, shared over `daysLeft`, the days from today (or from the
 start of a horizon not begun yet) to its last day, today included. It is what
 can still be spent per day outside any budget without ending the horizon below

@@ -5,6 +5,7 @@ import {
 	formatAmount,
 	formatSignedAmount,
 	parseCents,
+	parseSignedCents,
 } from "@/lib/format";
 import { balanceTextColor, budgetTypeTones } from "@/lib/tones";
 
@@ -46,6 +47,14 @@ describe("cents helpers", () => {
 		expect(parseCents("30,5")).toBe(3050);
 		expect(parseCents(" 0.07 ")).toBe(7);
 		expect(parseCents("-12,34")).toBe(1234);
+	});
+
+	it("keeps the sign of a typed amount when asked to", () => {
+		expect(parseSignedCents("1523,40")).toBe(152340);
+		expect(parseSignedCents(" -80.1")).toBe(-8010);
+		expect(parseSignedCents("−5")).toBe(-500);
+		expect(parseSignedCents("-")).toBeNull();
+		expect(parseSignedCents("12,345")).toBeNull();
 	});
 
 	it("rejects what is not an amount", () => {

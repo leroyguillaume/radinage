@@ -19,8 +19,17 @@ vi.mock("@/lib/api", () => ({
 	apiFetch: vi.fn(),
 }));
 
-const { apiFetch } = await import("@/lib/api");
+const { apiFetch, ApiError } = await import("@/lib/api");
 const apiFetchMock = vi.mocked(apiFetch);
+
+/** Answer data calls with `handler`; the account balance section finds no balance. */
+function mockApi(handler: (path: string) => Promise<unknown>) {
+	apiFetchMock.mockImplementation((path: string) =>
+		path === "/users/me/balance"
+			? Promise.reject(new ApiError(404, "Not Found"))
+			: handler(path),
+	);
+}
 
 function renderPage() {
 	const queryClient = new QueryClient({
@@ -38,6 +47,7 @@ function renderPage() {
 beforeEach(async () => {
 	await i18n.changeLanguage("fr");
 	apiFetchMock.mockReset();
+	mockApi((path) => Promise.reject(new Error(`Unexpected path: ${path}`)));
 });
 
 afterEach(() => {
@@ -62,7 +72,7 @@ describe("SettingsPage data section", () => {
 			budgets: [],
 			operations: [],
 		};
-		apiFetchMock.mockResolvedValueOnce(exportPayload);
+		mockApi(() => Promise.resolve(exportPayload));
 
 		const createUrl = vi
 			.spyOn(URL, "createObjectURL")
@@ -93,7 +103,7 @@ describe("SettingsPage data section", () => {
 	});
 
 	it("shows an error when export fails", async () => {
-		apiFetchMock.mockRejectedValueOnce(new Error("boom"));
+		mockApi(() => Promise.reject(new Error("boom")));
 		renderPage();
 
 		const user = userEvent.setup();
@@ -107,12 +117,15 @@ describe("SettingsPage data section", () => {
 	});
 
 	it("imports a JSON file and displays the result counts", async () => {
-		apiFetchMock.mockResolvedValueOnce({
-			importedBudgets: 2,
-			skippedBudgets: 1,
-			importedOperations: 5,
-			skippedOperations: 3,
-		});
+		mockApi(() =>
+			Promise.resolve({
+				importedBudgets: 2,
+				skippedBudgets: 1,
+				importedOperations: 5,
+				skippedOperations: 3,
+				importedBalance: false,
+			}),
+		);
 
 		renderPage();
 
@@ -155,11 +168,14 @@ describe("SettingsPage data section", () => {
 		expect(
 			await screen.findByText("Fichier invalide ou import refusé"),
 		).toBeInTheDocument();
-		expect(apiFetchMock).not.toHaveBeenCalled();
+		expect(apiFetchMock).not.toHaveBeenCalledWith(
+			"/data/import",
+			expect.anything(),
+		);
 	});
 
 	it("shows an error when the import API rejects the payload", async () => {
-		apiFetchMock.mockRejectedValueOnce(new Error("reject"));
+		mockApi(() => Promise.reject(new Error("reject")));
 		renderPage();
 
 		const payload = { version: 999, budgets: [], operations: [] };
@@ -175,6 +191,38 @@ describe("SettingsPage data section", () => {
 
 		expect(
 			await screen.findByText("Fichier invalide ou import refusé"),
+		).toBeInTheDocument();
+	});
+
+	it("says when the import recorded the account balance", async () => {
+		mockApi(() =>
+			Promise.resolve({
+				importedBudgets: 0,
+				skippedBudgets: 0,
+				importedOperations: 0,
+				skippedOperations: 0,
+				importedBalance: true,
+			}),
+		);
+		renderPage();
+
+		const payload = {
+			version: 1,
+			balance: { amount: "1523.40", date: "2026-03-31" },
+			budgets: [],
+			operations: [],
+		};
+		const file = new File([JSON.stringify(payload)], "backup.json", {
+			type: "application/json",
+		});
+		const user = userEvent.setup();
+		const fileInput = document.querySelector(
+			"input[type='file']",
+		) as HTMLInputElement;
+		await user.upload(fileInput, file);
+
+		expect(
+			await screen.findByText(/Solde du compte importé\./),
 		).toBeInTheDocument();
 	});
 });

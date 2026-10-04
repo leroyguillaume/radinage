@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { apiFetch } from "@/lib/api";
+import { ApiError, apiFetch } from "@/lib/api";
 import type {
+	AccountBalance,
 	ApplyBudgetResponse,
 	BudgetResponse,
 	CreateUserResponse,
@@ -215,6 +216,53 @@ export function useChangePassword() {
 	});
 }
 
+const accountBalanceKey = ["account-balance"];
+
+/** The recorded account balance, null when none is recorded. */
+export function useAccountBalance() {
+	return useQuery({
+		queryKey: accountBalanceKey,
+		queryFn: async () => {
+			try {
+				return await apiFetch<AccountBalance>("/users/me/balance");
+			} catch (err) {
+				if (err instanceof ApiError && err.status === 404) {
+					return null;
+				}
+				throw err;
+			}
+		},
+	});
+}
+
+function useInvalidateAccountBalance() {
+	const queryClient = useQueryClient();
+	return () => {
+		queryClient.invalidateQueries({ queryKey: accountBalanceKey });
+		queryClient.invalidateQueries({ queryKey: ["forecast"] });
+	};
+}
+
+export function useUpdateAccountBalance() {
+	const invalidate = useInvalidateAccountBalance();
+	return useMutation({
+		mutationFn: (body: AccountBalance) =>
+			apiFetch<AccountBalance>("/users/me/balance", {
+				method: "PUT",
+				body: JSON.stringify(body),
+			}),
+		onSuccess: invalidate,
+	});
+}
+
+export function useDeleteAccountBalance() {
+	const invalidate = useInvalidateAccountBalance();
+	return useMutation({
+		mutationFn: () => apiFetch<void>("/users/me/balance", { method: "DELETE" }),
+		onSuccess: invalidate,
+	});
+}
+
 export function useCreateUser() {
 	return useMutation({
 		mutationFn: (body: { username: string; password?: string }) =>
@@ -272,6 +320,7 @@ export function useImportData() {
 			queryClient.invalidateQueries({ queryKey: ["budgets"] });
 			queryClient.invalidateQueries({ queryKey: ["summary"] });
 			queryClient.invalidateQueries({ queryKey: ["forecast"] });
+			queryClient.invalidateQueries({ queryKey: accountBalanceKey });
 		},
 	});
 }
