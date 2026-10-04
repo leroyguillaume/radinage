@@ -7,11 +7,13 @@ import {
 	Loader,
 	Paper,
 	Progress,
+	SegmentedControl,
 	SimpleGrid,
 	Stack,
 	Table,
 	Text,
 	Title,
+	UnstyledButton,
 } from "@mantine/core";
 import {
 	IconAlertCircle,
@@ -20,10 +22,15 @@ import {
 	IconChevronRight,
 } from "@tabler/icons-react";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { type CSSProperties, type ReactNode, useId } from "react";
+import { type CSSProperties, type ReactNode, useId, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { ForecastMonthDrawer } from "@/components/ForecastMonthDrawer";
 import { PageHeader } from "@/components/PageHeader";
-import { formatAmount, formatSignedAmount } from "@/lib/format";
+import {
+	formatAmount,
+	formatMonthYear,
+	formatSignedAmount,
+} from "@/lib/format";
 import { useForecast } from "@/lib/hooks";
 import { balanceTextColor, budgetTypeTones, type Tone } from "@/lib/tones";
 import type {
@@ -33,15 +40,30 @@ import type {
 } from "@/lib/types";
 import { headingFont, palette } from "@/theme";
 
+const forecastModes = ["year", "rolling"] as const;
+type ForecastMode = (typeof forecastModes)[number];
+
+function isForecastMode(value: string): value is ForecastMode {
+	return (forecastModes as readonly string[]).includes(value);
+}
+
+const ROLLING_MONTHS = 12;
+
+/**
+ * `mode` is only written for the rolling view, so a bare `?year=` link is the
+ * calendar-year view. `year` is kept in rolling mode to switch back to it.
+ */
 interface ForecastSearch {
 	year: number;
+	mode?: "rolling";
 }
 
 export const Route = createFileRoute("/summary")({
 	component: ForecastPage,
-	validateSearch: (search: Record<string, unknown>): ForecastSearch => ({
-		year: Number(search.year) || new Date().getFullYear(),
-	}),
+	validateSearch: (search: Record<string, unknown>): ForecastSearch => {
+		const year = Number(search.year) || new Date().getFullYear();
+		return search.mode === "rolling" ? { year, mode: "rolling" } : { year };
+	},
 });
 
 const shortNumber = new Intl.NumberFormat("fr-FR", {
@@ -99,13 +121,6 @@ function monthName(
 ): string {
 	return new Date(year, month - 1).toLocaleDateString(locale, {
 		month: style,
-	});
-}
-
-function monthYearName({ year, month }: YearMonth, locale: string): string {
-	return new Date(year, month - 1).toLocaleDateString(locale, {
-		month: "long",
-		year: "numeric",
 	});
 }
 
@@ -173,6 +188,39 @@ function YearStepper({ year, onChange }: YearStepperProps) {
 				<IconChevronRight size={20} />
 			</ActionIcon>
 		</Group>
+	);
+}
+
+interface ModeSwitchProps {
+	mode: ForecastMode;
+	year: number;
+	onChange: (mode: ForecastMode) => void;
+}
+
+function ModeSwitch({ mode, year, onChange }: ModeSwitchProps) {
+	const { t } = useTranslation();
+	return (
+		<SegmentedControl
+			radius="xl"
+			size="md"
+			aria-label={t("forecast.mode")}
+			value={mode}
+			onChange={(value) => {
+				if (isForecastMode(value)) onChange(value);
+			}}
+			data={[
+				{ value: "year", label: t("forecast.modeYear", { year }) },
+				{ value: "rolling", label: t("forecast.modeRolling") },
+			]}
+			styles={{
+				label: {
+					minHeight: 44,
+					display: "flex",
+					alignItems: "center",
+					justifyContent: "center",
+				},
+			}}
+		/>
 	);
 }
 
@@ -293,6 +341,8 @@ interface ForecastViewProps {
 	forecast: MonthForecast[];
 	locale: string;
 	firstNegativeMonth: YearMonth | null;
+	showYear: boolean;
+	onSelectMonth: (month: YearMonth) => void;
 }
 
 function FirstNegativeMarker() {
@@ -316,6 +366,8 @@ function BalanceChart({
 	forecast,
 	locale,
 	firstNegativeMonth,
+	showYear,
+	onSelectMonth,
 }: ForecastViewProps) {
 	const { t } = useTranslation();
 	const maxPositive = Math.max(0, ...forecast.map((m) => m.balance));
@@ -363,7 +415,7 @@ function BalanceChart({
 						miw={640}
 						style={{
 							display: "grid",
-							gridTemplateColumns: "repeat(12, minmax(48px, 1fr))",
+							gridTemplateColumns: `repeat(${forecast.length}, minmax(48px, 1fr))`,
 							gap: 8,
 						}}
 					>
@@ -382,12 +434,17 @@ function BalanceChart({
 								? stripes("tangerine-3", "tangerine-1")
 								: "var(--mantine-color-tangerine-5)";
 							return (
-								<Stack
+								<UnstyledButton
 									key={`${m.year}-${m.month}`}
-									gap={0}
-									align="center"
+									aria-label={t("forecast.breakdown.openMonth", {
+										month: formatMonthYear(m, locale),
+									})}
+									onClick={() => onSelectMonth(m)}
+									display="flex"
 									bg={isFirstNegative ? "tangerine.0" : undefined}
 									style={{
+										flexDirection: "column",
+										alignItems: "center",
 										borderRadius: 8,
 										outline: isFirstNegative
 											? "2px solid var(--mantine-color-tangerine-5)"
@@ -458,7 +515,12 @@ function BalanceChart({
 										</Text>
 										{isFirstNegative && <FirstNegativeMarker />}
 									</Group>
-								</Stack>
+									{showYear && (
+										<Text className="tabular-nums" fz={11} c="dimmed">
+											{m.year}
+										</Text>
+									)}
+								</UnstyledButton>
 							);
 						})}
 					</Box>
@@ -487,6 +549,8 @@ function MonthlyTable({
 	forecast,
 	locale,
 	firstNegativeMonth,
+	showYear,
+	onSelectMonth,
 }: ForecastViewProps) {
 	const { t } = useTranslation();
 	const { income, expense, savings } = budgetTypeTones;
@@ -545,12 +609,26 @@ function MonthlyTable({
 												: undefined
 									}
 									aria-current={isCurrent ? "date" : undefined}
+									onClick={() => onSelectMonth(m)}
+									style={{ cursor: "pointer" }}
 								>
 									<Table.Td>
 										<Group gap={8} wrap="nowrap">
-											<Text fw={600} tt="capitalize" inherit>
-												{monthName(m.year, m.month, locale, "long")}
-											</Text>
+											<UnstyledButton
+												aria-label={t("forecast.breakdown.openMonth", {
+													month: formatMonthYear(m, locale),
+												})}
+												onClick={() => onSelectMonth(m)}
+												mih={44}
+												fw={600}
+												tt="capitalize"
+												td="underline"
+												style={{ textUnderlineOffset: 3 }}
+											>
+												{showYear
+													? formatMonthYear(m, locale)
+													: monthName(m.year, m.month, locale, "long")}
+											</UnstyledButton>
 											{isCurrent && (
 												<Badge variant="filled" color="forest" tt="none">
 													{t("forecast.current")}
@@ -620,13 +698,22 @@ function MonthlyTable({
 function ForecastPage() {
 	const { t, i18n } = useTranslation();
 	const navigate = useNavigate();
-	const { year: selectedYear } = Route.useSearch();
-	const forecastQuery = useForecast(selectedYear, 1, 12);
+	const search = Route.useSearch();
+	const selectedYear = search.year;
+	const mode: ForecastMode = search.mode ?? "year";
+	const rolling = mode === "rolling";
+	const today = new Date();
+	const forecastQuery = useForecast(
+		rolling ? today.getFullYear() : selectedYear,
+		rolling ? today.getMonth() + 1 : 1,
+		rolling ? ROLLING_MONTHS : 12,
+	);
 	const { isLoading, isError } = forecastQuery;
+	const [selectedMonth, setSelectedMonth] = useState<YearMonth | null>(null);
 
 	const forecast = (forecastQuery.data?.months ?? []).map(toMonthForecast);
 	const totals = forecastQuery.data?.totals;
-	const endOfYearBalance = Number(forecastQuery.data?.endBalance ?? 0);
+	const endBalance = Number(forecastQuery.data?.endBalance ?? 0);
 	const rawStartingBalance = forecastQuery.data?.startingBalance ?? null;
 	const firstMonth = forecast[0];
 	const lastMonth = forecast[forecast.length - 1];
@@ -643,7 +730,15 @@ function ForecastPage() {
 	const unbudgetedRate = Number(forecastQuery.data?.unbudgetedRate ?? 0);
 	const forecastsUnbudgeted = forecast.some((m) => m.unbudgetedForecast !== 0);
 
-	const yearProgress =
+	const showYear =
+		firstMonth !== undefined &&
+		lastMonth !== undefined &&
+		firstMonth.year !== lastMonth.year;
+	const horizonEnd = lastMonth
+		? longDate(new Date(lastMonth.year, lastMonth.month, 0), i18n.language)
+		: "";
+
+	const periodProgress =
 		horizonDays > 0 ? ((horizonDays - daysLeft) / horizonDays) * 100 : 0;
 
 	function shareOfIncome(amount: number): number {
@@ -654,6 +749,16 @@ function ForecastPage() {
 		navigate({
 			to: "/summary",
 			search: { year: selectedYear + delta },
+		});
+	}
+
+	function switchMode(next: ForecastMode) {
+		navigate({
+			to: "/summary",
+			search:
+				next === "rolling"
+					? { year: selectedYear, mode: "rolling" }
+					: { year: selectedYear },
 		});
 	}
 
@@ -669,7 +774,18 @@ function ForecastPage() {
 				<PageHeader
 					title={t("forecast.title")}
 					subtitle={t("forecast.subtitle")}
-					actions={<YearStepper year={selectedYear} onChange={navigateYear} />}
+					actions={
+						<>
+							<ModeSwitch
+								mode={mode}
+								year={selectedYear}
+								onChange={switchMode}
+							/>
+							{!rolling && (
+								<YearStepper year={selectedYear} onChange={navigateYear} />
+							)}
+						</>
+					}
 				/>
 
 				{isLoading && (
@@ -695,7 +811,7 @@ function ForecastPage() {
 								icon={<IconAlertTriangle size={16} />}
 								color="tangerine"
 								title={t("forecast.firstNegativeTitle", {
-									month: monthYearName(firstNegativeMonth, i18n.language),
+									month: formatMonthYear(firstNegativeMonth, i18n.language),
 								})}
 							>
 								{t("forecast.firstNegativeText")}
@@ -734,12 +850,15 @@ function ForecastPage() {
 								</Text>
 								<Stack gap={6} mt="auto">
 									<Text size="sm" c="forest.1">
-										{t("forecast.yearProgress", {
-											percent: Math.round(yearProgress),
-										})}
+										{t(
+											rolling
+												? "forecast.periodProgress"
+												: "forecast.yearProgress",
+											{ percent: Math.round(periodProgress) },
+										)}
 									</Text>
 									<Progress
-										value={yearProgress}
+										value={periodProgress}
 										color="gold.5"
 										size={8}
 										styles={{
@@ -753,24 +872,23 @@ function ForecastPage() {
 
 							<HeroCard
 								title={
-									rawStartingBalance !== null && lastMonth
-										? t("forecast.projectedBalance", {
-												date: longDate(
-													new Date(lastMonth.year, lastMonth.month, 0),
-													i18n.language,
-												),
-											})
-										: t("forecast.endOfYearBalance")
+									rawStartingBalance !== null
+										? t("forecast.projectedBalance", { date: horizonEnd })
+										: rolling
+											? t("forecast.endOfPeriodBalance", { date: horizonEnd })
+											: t("forecast.endOfYearBalance")
 								}
 							>
 								<BigAmount
-									value={formatSignedAmount(endOfYearBalance)}
-									color={balanceTextColor(endOfYearBalance)}
+									value={formatSignedAmount(endBalance)}
+									color={balanceTextColor(endBalance)}
 								/>
 								<Text size="sm" c="dimmed">
 									{rawStartingBalance !== null
 										? t("forecast.projectedBalanceHint")
-										: t("forecast.endOfYearHint")}
+										: rolling
+											? t("forecast.endOfPeriodHint")
+											: t("forecast.endOfYearHint")}
 								</Text>
 								{rawStartingBalance !== null && firstMonth && (
 									<Text size="xs" c="dimmed" mt="auto">
@@ -786,7 +904,13 @@ function ForecastPage() {
 							</HeroCard>
 
 							<HeroCard
-								title={t("forecast.totalsTitle", { year: selectedYear })}
+								title={
+									rolling
+										? t("forecast.rollingTotalsTitle", {
+												count: forecast.length,
+											})
+										: t("forecast.totalsTitle", { year: selectedYear })
+								}
 							>
 								<TotalRow
 									label={t("forecast.totalIncome")}
@@ -820,16 +944,24 @@ function ForecastPage() {
 							forecast={forecast}
 							locale={i18n.language}
 							firstNegativeMonth={firstNegativeMonth}
+							showYear={showYear}
+							onSelectMonth={setSelectedMonth}
 						/>
 
 						<MonthlyTable
 							forecast={forecast}
 							locale={i18n.language}
 							firstNegativeMonth={firstNegativeMonth}
+							showYear={showYear}
+							onSelectMonth={setSelectedMonth}
 						/>
 					</>
 				)}
 			</Stack>
+			<ForecastMonthDrawer
+				month={selectedMonth}
+				onClose={() => setSelectedMonth(null)}
+			/>
 		</div>
 	);
 }

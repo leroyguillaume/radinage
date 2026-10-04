@@ -225,7 +225,26 @@
 		"firstNegativeMarker": "Passage dans le rouge",
 		"projectedBalance": "Solde prévu au {{date}}",
 		"projectedBalanceHint": "Ce que devrait afficher ton compte ce jour-là si tes budgets tiennent.",
-		"startingBalance": "Solde au {{date}} : {{amount}}"
+		"startingBalance": "Solde au {{date}} : {{amount}}",
+		"mode": "Période affichée",
+		"modeYear": "Année {{year}}",
+		"modeRolling": "12 prochains mois",
+		"periodProgress": "Progression de la période : {{percent}} %",
+		"endOfPeriodBalance": "Balance au {{date}}",
+		"endOfPeriodHint": "Ce qu'il devrait te rester à la fin de la période si tes budgets tiennent.",
+		"rollingTotalsTitle": "Totaux sur {{count}} mois",
+		"breakdown": {
+			"openMonth": "Détail de {{month}}",
+			"expected": "Prévu {{amount}}",
+			"notExpected": "Non prévu ce mois-ci",
+			"actual": "Réel {{amount}}",
+			"remaining": "Reste {{amount}}",
+			"unbudgeted": "Hors budget",
+			"estimated": "Estimé {{amount}}",
+			"monthTotals": "Totaux du mois",
+			"noBudgets": "Aucun budget ce mois-ci.",
+			"fetchError": "Impossible de charger le détail du mois"
+		}
 	},
 	"nav": {
 		"operations": "Opérations",

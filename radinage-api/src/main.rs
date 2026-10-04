@@ -457,6 +457,15 @@ where
                     .id("getForecast")
             }),
         )
+        .api_route(
+            "/forecast/{year}/{month}",
+            get_with(handlers::forecast::get_forecast_month, |op| {
+                op.tag("Forecast")
+                    .summary("Break a forecast month down by budget")
+                    .description("Detail one month of `GET /forecast` budget by budget. Each budget expecting or receiving something that month lists its expected amount, what is linked to it (`actual`), what is still counted on top (`remaining`) and its weight in the forecast (`projected` = actual + remaining): a past month counts only what was linked, the current month adds what the budget has not reached yet, a future month counts the expected amount. Budgets are sorted by type (income, expense, savings) then by decreasing magnitude of `projected`. The unbudgeted line gives the unbudgeted operations accounted (`actual`) and the spending forecast at the unbudgeted rate (`forecast`). `totals` are the month's figures in `GET /forecast`. Returns 400 for an invalid month.")
+                    .id("getForecastMonth")
+            }),
+        )
         // Data export / import
         .api_route(
             "/data/export",
@@ -652,6 +661,10 @@ pub(crate) mod test_util {
             // Summary
             .route("/summary", routing::get(handlers::summary::get_summary))
             .route("/forecast", routing::get(handlers::forecast::get_forecast))
+            .route(
+                "/forecast/{year}/{month}",
+                routing::get(handlers::forecast::get_forecast_month),
+            )
             // Data export / import
             .route("/data/export", routing::get(handlers::data::export_data))
             .route("/data/import", routing::post(handlers::data::import_data))
@@ -732,6 +745,54 @@ mod tests {
             assert!(split_props[field].is_object(), "missing {field}");
         }
         assert!(schemas["ReplaceOperationSplitsRequest"]["properties"]["splits"].is_object());
+    }
+
+    #[tokio::test]
+    async fn openapi_documents_forecast_month() {
+        let app = build_router(make_test_state(
+            MockUserRepository::new(),
+            MockOperationRepository::new(),
+            MockBudgetRepository::new(),
+        ));
+        let resp = app
+            .oneshot(json_request("GET", "/openapi.json", None, None))
+            .await
+            .unwrap();
+        let doc: serde_json::Value = response_json(resp).await;
+
+        let op = &doc["paths"]["/forecast/{year}/{month}"]["get"];
+        assert_eq!(op["operationId"], "getForecastMonth");
+        assert_eq!(op["tags"][0], "Forecast");
+        let mut params: Vec<&str> = op["parameters"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|p| p["name"].as_str().unwrap())
+            .collect();
+        params.sort_unstable();
+        assert_eq!(params, ["month", "year"]);
+
+        let schemas = &doc["components"]["schemas"];
+        for field in ["year", "month", "status", "budgets", "unbudgeted", "totals"] {
+            assert!(
+                schemas["ForecastMonthBreakdownResponse"]["properties"][field].is_object(),
+                "missing {field}"
+            );
+        }
+        for field in [
+            "budgetId",
+            "label",
+            "budgetType",
+            "expected",
+            "actual",
+            "remaining",
+            "projected",
+        ] {
+            assert!(
+                schemas["BudgetBreakdownResponse"]["properties"][field].is_object(),
+                "missing {field}"
+            );
+        }
     }
 
     #[tokio::test]

@@ -7,6 +7,17 @@ export function formatAmount(amount: number | string): string {
 	return currency.format(typeof amount === "string" ? Number(amount) : amount);
 }
 
+/** "mars 2026" in `locale`. */
+export function formatMonthYear(
+	{ year, month }: { year: number; month: number },
+	locale: string,
+): string {
+	return new Date(year, month - 1).toLocaleDateString(locale, {
+		month: "long",
+		year: "numeric",
+	});
+}
+
 export function formatSignedAmount(amount: number): string {
 	return amount > 0 ? `+${currency.format(amount)}` : currency.format(amount);
 }

@@ -90,6 +90,38 @@ export interface ForecastResponse {
 	firstNegativeMonth: YearMonth | null;
 }
 
+/** One budget's part in a forecast month; `projected` = `actual` + `remaining`. */
+export interface ForecastBudgetLine {
+	budgetId: string;
+	label: string;
+	budgetType: BudgetType;
+	/** What the budget expects this month; null when it expects nothing. */
+	expected: string | null;
+	/** Net of the amounts linked this month; "0" for a future month. */
+	actual: string;
+	/** Still counted on top of `actual`: "0" for a past month, the whole expected amount for a future one. */
+	remaining: string;
+	projected: string;
+}
+
+export interface ForecastUnbudgetedLine {
+	actual: string;
+	/** The month's `unbudgetedForecast`. */
+	forecast: string;
+	projected: string;
+}
+
+export interface ForecastMonthBreakdown {
+	year: number;
+	month: number;
+	status: ForecastMonthStatus;
+	/** Sorted by type (income, expense, savings), then by decreasing magnitude of `projected`. */
+	budgets: ForecastBudgetLine[];
+	unbudgeted: ForecastUnbudgetedLine;
+	/** The month's figures in `GET /forecast`. */
+	totals: ForecastFlows;
+}
+
 export interface YearMonth {
 	year: number;
 	month: number;
