@@ -50,13 +50,22 @@ function statusOf(year: number, month: number): ForecastMonthStatus {
 	return target === current ? "current" : "future";
 }
 
+type ForecastExtras = Partial<
+	Pick<
+		ForecastResponse,
+		"unbudgetedRate" | "daysLeft" | "dailyBudget" | "startingBalance"
+	>
+>;
+
 /** A 12-month forecast for `year`, statuses relative to today like the server's. */
 function makeForecast(
 	year: number,
 	flowsOf: (month: number) => MonthFlows,
-	unbudgetedRate = 0,
+	extras: ForecastExtras = {},
 ): ForecastResponse {
-	let cumulative = 0;
+	const startingBalance = extras.startingBalance ?? null;
+	let cumulative = Number(startingBalance ?? 0);
+	let firstNegativeMonth: ForecastResponse["firstNegativeMonth"] = null;
 	const totals = { income: 0, expenses: 0, savings: 0 };
 	const months = Array.from({ length: 12 }, (_, i) => {
 		const month = i + 1;
@@ -69,6 +78,9 @@ function makeForecast(
 		} = flowsOf(month);
 		const balance = income + expenses + savings;
 		cumulative += balance;
+		if (cumulative < 0 && firstNegativeMonth === null) {
+			firstNegativeMonth = { year, month };
+		}
 		totals.income += income;
 		totals.expenses += expenses;
 		totals.savings += savings;
@@ -93,8 +105,13 @@ function makeForecast(
 			savings: money(totals.savings),
 			balance: money(totals.income + totals.expenses + totals.savings),
 		},
+		startingBalance,
 		endBalance: money(cumulative),
-		unbudgetedRate: unbudgetedRate.toFixed(4),
+		unbudgetedRate: "0.0000",
+		daysLeft: 100,
+		dailyBudget: "12.34",
+		firstNegativeMonth,
+		...extras,
 	};
 }
 
@@ -331,6 +348,44 @@ describe("SummaryPage", () => {
 		expect(januaryText).toMatch(/-567,00/);
 	});
 
+	it("shows the projected balance at the end of the horizon from the recorded balance", async () => {
+		setupMocks((year) =>
+			makeForecast(
+				year,
+				(month) =>
+					month === 1
+						? { income: 1234, expenses: -567, savings: 0 }
+						: { income: 0, expenses: 0, savings: 0 },
+				{ startingBalance: "1000.00" },
+			),
+		);
+
+		await renderSummaryPage("?year=2025");
+
+		const card = await screen.findByRole("region", {
+			name: "Solde prévu au 31 décembre 2025",
+		});
+		const text = (card.textContent ?? "").replace(/\s/g, "");
+		expect(text).toMatch(/\+1667,00/);
+		expect(text).toMatch(/Soldeau1janvier2025:1000,00/);
+		expect(screen.queryByText("Balance fin d'année")).not.toBeInTheDocument();
+	});
+
+	it("shows the projected balance title in English too", async () => {
+		await i18n.changeLanguage("en");
+		setupMocks((year) =>
+			makeForecast(year, typicalMonth, { startingBalance: "-50.00" }),
+		);
+
+		await renderSummaryPage("?year=2025");
+
+		expect(
+			await screen.findByRole("region", {
+				name: "Projected balance on December 31, 2025",
+			}),
+		).toBeInTheDocument();
+	});
+
 	it("shows what the budgets still expect in the current month's row", async () => {
 		const year = new Date().getFullYear();
 		const currentMonth = new Date().getMonth() + 1;
@@ -375,7 +430,7 @@ describe("SummaryPage", () => {
 					savings: 0,
 					unbudgetedForecast: month === 2 ? -280 : -300,
 				}),
-				-10,
+				{ unbudgetedRate: "-10.0000" },
 			),
 		);
 
@@ -394,7 +449,9 @@ describe("SummaryPage", () => {
 	});
 
 	it("says nothing about unbudgeted spending for a past year", async () => {
-		setupMocks((y) => makeForecast(y, typicalMonth, -10));
+		setupMocks((y) =>
+			makeForecast(y, typicalMonth, { unbudgetedRate: "-10.0000" }),
+		);
 
 		await renderSummaryPage("?year=2025");
 
@@ -404,17 +461,90 @@ describe("SummaryPage", () => {
 		expect(totals.textContent ?? "").not.toMatch(/par jour/);
 	});
 
-	it("clamps daily budget to zero when end-of-year balance is negative", async () => {
+	it("shows the server's daily budget and days left with what they mean", async () => {
 		setupMocks((year) =>
-			makeForecast(year, () => ({ income: 0, expenses: -10000, savings: 0 })),
+			makeForecast(year, typicalMonth, { daysLeft: 42, dailyBudget: "35.16" }),
 		);
 
 		await renderSummaryPage();
 
 		const card = await screen.findByRole("region", { name: "Budget / jour" });
-		const text = card.textContent ?? "";
-		expect(text).not.toMatch(/-\d/);
-		expect(text).toMatch(/0,00/);
+		const text = (card.textContent ?? "").replace(/\s/g, "");
+		expect(text).toMatch(/35,16/);
+		expect(within(card).getByText("42 jours restants")).toBeInTheDocument();
+		expect(
+			within(card).getByText(
+				/hors budgets sans finir la période dans le rouge/,
+			),
+		).toBeInTheDocument();
+	});
+
+	it("shows a negative daily budget as such and explains it", async () => {
+		setupMocks((year) =>
+			makeForecast(year, typicalMonth, { dailyBudget: "-9.50" }),
+		);
+
+		await renderSummaryPage();
+
+		const card = await screen.findByRole("region", { name: "Budget / jour" });
+		expect((card.textContent ?? "").replace(/\s/g, "")).toMatch(/-9,50/);
+		expect(
+			within(card).getByText(/tes budgets seuls finissent déjà/),
+		).toBeInTheDocument();
+	});
+
+	it("shows no daily budget once the period is over", async () => {
+		setupMocks((year) =>
+			makeForecast(year, typicalMonth, { daysLeft: 0, dailyBudget: null }),
+		);
+
+		await renderSummaryPage("?year=2025");
+
+		const card = await screen.findByRole("region", { name: "Budget / jour" });
+		expect(within(card).getByText("—")).toBeInTheDocument();
+		expect(within(card).getByText(/Période terminée/)).toBeInTheDocument();
+		expect(within(card).getByText("0 jour restant")).toBeInTheDocument();
+	});
+
+	it("warns about the first month in the red and highlights it", async () => {
+		setupMocks((year) =>
+			makeForecast(year, (month) =>
+				month < 3
+					? { income: 100, expenses: 0, savings: 0 }
+					: { income: 0, expenses: -250, savings: 0 },
+			),
+		);
+
+		await renderSummaryPage("?year=2027");
+
+		expect(
+			await screen.findByText("Solde négatif à partir de mars 2027"),
+		).toBeInTheDocument();
+
+		const table = screen.getByRole("table");
+		const marked = within(table)
+			.getAllByRole("row")
+			.filter((row) => within(row).queryByText("Passage dans le rouge"));
+		expect(marked).toHaveLength(1);
+		expect(marked[0]?.textContent).toMatch(/mars/i);
+
+		const chart = screen.getByRole("heading", {
+			name: "Balance mois par mois",
+		});
+		const section = chart.closest("section") as HTMLElement;
+		const markers = within(section).getAllByRole("img", {
+			name: "Passage dans le rouge",
+		});
+		expect(markers).toHaveLength(1);
+		expect(markers[0]?.parentElement?.textContent).toMatch(/mars/i);
+	});
+
+	it("shows no red warning when the balance stays positive", async () => {
+		await renderSummaryPage();
+
+		await screen.findByRole("table");
+		expect(screen.queryByText(/Solde négatif/)).not.toBeInTheDocument();
+		expect(screen.queryByText("Passage dans le rouge")).not.toBeInTheDocument();
 	});
 
 	it("displays full year as actual for past years", async () => {

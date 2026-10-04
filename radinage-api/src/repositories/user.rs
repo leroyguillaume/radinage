@@ -1,5 +1,5 @@
 use crate::{
-    domain::user::UserRole,
+    domain::user::{AccountBalance, UserRole},
     error::{AppError, AppResult},
 };
 use sqlx::{PgPool, Row};
@@ -91,6 +91,25 @@ pub trait UserRepository: Send + Sync + 'static {
         username: &str,
         password_hash: &str,
     ) -> impl std::future::Future<Output = AppResult<bool>> + Send;
+
+    /// The account balance the user recorded, `None` when none is.
+    fn find_balance(
+        &self,
+        user_id: Uuid,
+    ) -> impl std::future::Future<Output = AppResult<Option<AccountBalance>>> + Send;
+
+    /// Record the user's account balance, replacing any previous one.
+    fn set_balance(
+        &self,
+        user_id: Uuid,
+        balance: AccountBalance,
+    ) -> impl std::future::Future<Output = AppResult<()>> + Send;
+
+    /// Forget the user's account balance; a no-op when none is recorded.
+    fn clear_balance(
+        &self,
+        user_id: Uuid,
+    ) -> impl std::future::Future<Output = AppResult<()>> + Send;
 }
 
 /// PostgreSQL-backed user repository.
@@ -231,6 +250,46 @@ impl UserRepository for PgUserRepository {
         Ok(true)
     }
 
+    async fn find_balance(&self, user_id: Uuid) -> AppResult<Option<AccountBalance>> {
+        let row = sqlx::query(
+            "SELECT balance_amount, balance_date FROM users \
+             WHERE id = $1 AND balance_date IS NOT NULL",
+        )
+        .bind(user_id)
+        .fetch_optional(&self.pool)
+        .await?;
+        row.map(|r| {
+            Ok(AccountBalance {
+                amount: r.try_get("balance_amount")?,
+                date: r.try_get("balance_date")?,
+            })
+        })
+        .transpose()
+    }
+
+    async fn set_balance(&self, user_id: Uuid, balance: AccountBalance) -> AppResult<()> {
+        let affected =
+            sqlx::query("UPDATE users SET balance_amount = $1, balance_date = $2 WHERE id = $3")
+                .bind(balance.amount)
+                .bind(balance.date)
+                .bind(user_id)
+                .execute(&self.pool)
+                .await?
+                .rows_affected();
+        if affected == 0 {
+            return Err(AppError::NotFound);
+        }
+        Ok(())
+    }
+
+    async fn clear_balance(&self, user_id: Uuid) -> AppResult<()> {
+        sqlx::query("UPDATE users SET balance_amount = NULL, balance_date = NULL WHERE id = $1")
+            .bind(user_id)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
     async fn find_by_username(&self, username: &str) -> AppResult<Option<UserCredentials>> {
         let row = sqlx::query("SELECT id, password_hash, role FROM users WHERE username = $1")
             .bind(username)
@@ -282,6 +341,7 @@ impl UserRepository for PgUserRepository {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rust_decimal::Decimal;
     use sqlx::PgPool;
 
     #[sqlx::test(migrations = "./migrations")]
@@ -568,5 +628,59 @@ mod tests {
 
         let creds = repo.find_by_username("admin_user").await.unwrap().unwrap();
         assert_eq!(creds.role, UserRole::Admin);
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn balance_is_absent_until_set(pool: PgPool) {
+        let repo = PgUserRepository::new(pool);
+        let id = Uuid::new_v4();
+        repo.create(id, "saver", "hash", UserRole::User)
+            .await
+            .unwrap();
+        assert_eq!(repo.find_balance(id).await.unwrap(), None);
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn set_balance_replaces_and_clear_balance_forgets(pool: PgPool) {
+        use rust_decimal_macros::dec;
+
+        let repo = PgUserRepository::new(pool);
+        let id = Uuid::new_v4();
+        let other = Uuid::new_v4();
+        repo.create(id, "saver", "hash", UserRole::User)
+            .await
+            .unwrap();
+        repo.create(other, "other", "hash", UserRole::User)
+            .await
+            .unwrap();
+        let first = AccountBalance {
+            amount: dec!(1234.56),
+            date: chrono::NaiveDate::from_ymd_opt(2026, 3, 31).unwrap(),
+        };
+        let second = AccountBalance {
+            amount: dec!(-80.10),
+            date: chrono::NaiveDate::from_ymd_opt(2026, 4, 15).unwrap(),
+        };
+
+        repo.set_balance(id, first).await.unwrap();
+        assert_eq!(repo.find_balance(id).await.unwrap(), Some(first));
+        repo.set_balance(id, second).await.unwrap();
+        assert_eq!(repo.find_balance(id).await.unwrap(), Some(second));
+        assert_eq!(repo.find_balance(other).await.unwrap(), None);
+
+        repo.clear_balance(id).await.unwrap();
+        assert_eq!(repo.find_balance(id).await.unwrap(), None);
+        repo.clear_balance(id).await.unwrap();
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn set_balance_of_unknown_user_returns_not_found(pool: PgPool) {
+        let repo = PgUserRepository::new(pool);
+        let balance = AccountBalance {
+            amount: Decimal::ONE,
+            date: chrono::NaiveDate::from_ymd_opt(2026, 1, 1).unwrap(),
+        };
+        let err = repo.set_balance(Uuid::new_v4(), balance).await.unwrap_err();
+        assert!(matches!(err, AppError::NotFound));
     }
 }

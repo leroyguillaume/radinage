@@ -3,10 +3,10 @@ use crate::{
     auth::middleware::AuthUser,
     domain::budget::YearMonth,
     error::{AppError, AppResult},
-    repositories::{BudgetRepository, OperationRepository},
+    repositories::{BudgetRepository, OperationRepository, UserRepository},
     services::forecast::{
-        Flows, Forecast, ForecastInput, ForecastMonth, MonthStatus, compute_forecast, horizon,
-        unbudgeted_history,
+        Flows, Forecast, ForecastInput, ForecastMonth, MonthStatus, balance_adjustment_window,
+        compute_forecast, horizon, starting_balance, unbudgeted_history,
     },
 };
 use axum::{
@@ -83,7 +83,8 @@ pub struct ForecastMonthResponse {
     /// past month.
     #[schemars(with = "String")]
     pub unbudgeted_forecast: Decimal,
-    /// Sum of the balances from the first month of the horizon up to this one.
+    /// Account balance at the end of this month: `startingBalance` (zero when none is
+    /// recorded) plus the balances from the first month of the horizon up to this one.
     #[schemars(with = "String")]
     pub cumulative: Decimal,
 }
@@ -136,6 +137,13 @@ impl From<Flows> for ForecastTotalsResponse {
 pub struct ForecastResponse {
     pub months: Vec<ForecastMonthResponse>,
     pub totals: ForecastTotalsResponse,
+    /// Account balance at the start of the first day of the horizon, derived from the balance
+    /// recorded with `PUT /users/me/balance`: plus the operations accounted after its date and
+    /// before the horizon, or minus those accounted from the horizon start through its date
+    /// when it is more recent (operations on the balance date are included in it). Null when
+    /// no balance is recorded, in which case the running balance starts from zero.
+    #[schemars(with = "Option<String>")]
+    pub starting_balance: Option<Decimal>,
     /// Cumulative balance at the end of the last month.
     #[schemars(with = "String")]
     pub end_balance: Decimal,
@@ -144,6 +152,17 @@ pub struct ForecastResponse {
     /// four decimals. Zero or negative; independent of the horizon.
     #[schemars(with = "String")]
     pub unbudgeted_rate: Decimal,
+    /// Days from today (server date) to the last day of the horizon, both included; counted
+    /// from the first day of the horizon when it has not started yet, zero once it is over.
+    pub days_left: u32,
+    /// What can still be spent per day on things outside any budget without ending the
+    /// horizon below zero: (`endBalance` minus the summed `unbudgetedForecast`) / `daysLeft`,
+    /// rounded to the cent. Negative when the budgets alone already end in the red; null when
+    /// the horizon is over (`daysLeft` is zero).
+    #[schemars(with = "Option<String>")]
+    pub daily_budget: Option<Decimal>,
+    /// First month of the horizon whose `cumulative` is below zero, null when none is.
+    pub first_negative_month: Option<YearMonth>,
 }
 
 impl From<Forecast> for ForecastResponse {
@@ -151,13 +170,17 @@ impl From<Forecast> for ForecastResponse {
         Self {
             months: forecast.months.iter().map(Into::into).collect(),
             totals: forecast.totals.into(),
+            starting_balance: forecast.starting_balance,
             end_balance: forecast.end_balance,
             unbudgeted_rate: forecast.unbudgeted_rate,
+            days_left: forecast.days_left,
+            daily_budget: forecast.daily_budget,
+            first_negative_month: forecast.first_negative_month,
         }
     }
 }
 
-pub async fn get_forecast<U, O: OperationRepository, B: BudgetRepository>(
+pub async fn get_forecast<U: UserRepository, O: OperationRepository, B: BudgetRepository>(
     State(state): State<AppState<U, O, B>>,
     auth_user: AuthUser,
     Query(q): Query<ForecastQuery>,
@@ -194,6 +217,22 @@ pub async fn get_forecast<U, O: OperationRepository, B: BudgetRepository>(
         )
     };
     let budgets = state.budget_repo.list_all_for_user(auth_user.id).await?;
+    let starting_balance = match state.user_repo.find_balance(auth_user.id).await? {
+        None => None,
+        Some(balance) => Some(match balance_adjustment_window(balance.date, start) {
+            Some((first, last)) if start <= first && last <= end => {
+                starting_balance(balance, start, &rows)
+            }
+            Some((first, last)) => {
+                let between = state
+                    .operation_repo
+                    .list_for_summary(auth_user.id, first, last)
+                    .await?;
+                starting_balance(balance, start, &between)
+            }
+            None => balance.amount,
+        }),
+    };
 
     let forecast = compute_forecast(&ForecastInput {
         from,
@@ -202,6 +241,7 @@ pub async fn get_forecast<U, O: OperationRepository, B: BudgetRepository>(
         budgets: &budgets,
         rows: &rows,
         history: extra_history.as_deref().unwrap_or(&rows),
+        starting_balance,
     });
     Ok(Json(forecast.into()))
 }
@@ -212,7 +252,7 @@ mod tests {
     use crate::{
         domain::{
             budget::{Budget, BudgetKind, BudgetType, CurrentPeriod, Recurrence},
-            user::UserRole,
+            user::{AccountBalance, UserRole},
         },
         repositories::{
             MockBudgetRepository, MockOperationRepository, MockUserRepository, SummaryRow,
@@ -271,14 +311,32 @@ mod tests {
         expect_history(or, vec![]);
     }
 
+    fn users_with_balance(user_id: Uuid, balance: Option<AccountBalance>) -> MockUserRepository {
+        let mut ur = MockUserRepository::new();
+        ur.expect_find_balance()
+            .withf(move |uid| *uid == user_id)
+            .returning(move |_| Box::pin(async move { Ok(balance) }));
+        ur
+    }
+
     async fn get(
         operation_repo: MockOperationRepository,
         budget_repo: MockBudgetRepository,
         user_id: Uuid,
         query: &str,
     ) -> axum::response::Response {
+        get_with_balance(operation_repo, budget_repo, user_id, None, query).await
+    }
+
+    async fn get_with_balance(
+        operation_repo: MockOperationRepository,
+        budget_repo: MockBudgetRepository,
+        user_id: Uuid,
+        balance: Option<AccountBalance>,
+        query: &str,
+    ) -> axum::response::Response {
         let app = build_test_router(make_test_state(
-            MockUserRepository::new(),
+            users_with_balance(user_id, balance),
             operation_repo,
             budget_repo,
         ));
@@ -345,8 +403,12 @@ mod tests {
                 ],
                 "totals": {"income": "1200.00", "expenses": "-800.00", "savings": "-300.00",
                            "balance": "100.00"},
+                "startingBalance": null,
                 "endBalance": "100.00",
                 "unbudgetedRate": "0",
+                "daysLeft": 0,
+                "dailyBudget": null,
+                "firstNegativeMonth": null,
             })
         );
     }
@@ -534,5 +596,193 @@ mod tests {
         // The history row is counted once, in its own past month.
         assert_eq!(json.months[0].expenses, dec!(-50));
         assert_eq!(json.months[0].unbudgeted_forecast, Decimal::ZERO);
+    }
+
+    #[tokio::test]
+    async fn future_horizon_exposes_daily_budget_and_first_negative_month() {
+        let user_id = Uuid::new_v4();
+        let mut or = MockOperationRepository::new();
+        or.expect_list_for_summary()
+            .returning(|_, _, _| Box::pin(async { Ok(vec![]) }));
+        let mut br = MockBudgetRepository::new();
+        br.expect_list_all_for_user().returning(move |_| {
+            Box::pin(async move {
+                Ok(vec![
+                    monthly_budget(user_id, BudgetType::Income, dec!(1000)),
+                    monthly_budget(user_id, BudgetType::Expense, dec!(-1060)),
+                ])
+            })
+        });
+
+        let resp = get(or, br, user_id, "fromYear=2099&fromMonth=1&months=2").await;
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        let json: serde_json::Value = response_json(resp).await;
+        // -60 per month over January and February 2099 (59 days), no unbudgeted history.
+        assert_eq!(json["endBalance"], "-120");
+        assert_eq!(json["daysLeft"], 59);
+        assert_eq!(json["dailyBudget"], "-2.03");
+        assert_eq!(
+            json["firstNegativeMonth"],
+            serde_json::json!({"year": 2099, "month": 1})
+        );
+    }
+
+    fn no_budgets() -> MockBudgetRepository {
+        let mut br = MockBudgetRepository::new();
+        br.expect_list_all_for_user()
+            .returning(|_| Box::pin(async { Ok(vec![]) }));
+        br
+    }
+
+    fn day(year: i32, month: u32, day: u32) -> NaiveDate {
+        NaiveDate::from_ymd_opt(year, month, day).unwrap()
+    }
+
+    #[tokio::test]
+    async fn an_older_balance_is_brought_forward_to_the_horizon_start() {
+        let user_id = Uuid::new_v4();
+        let mut or = MockOperationRepository::new();
+        or.expect_list_for_summary()
+            .withf(|_, start, end| *start == day(2020, 1, 1) && *end == day(2020, 1, 31))
+            .times(1)
+            .returning(|_, _, _| {
+                Box::pin(async { Ok(vec![unlinked(day(2020, 1, 10), dec!(-100))]) })
+            });
+        or.expect_list_for_summary()
+            .withf(|_, start, end| *start == day(2019, 11, 16) && *end == day(2019, 12, 31))
+            .times(1)
+            .returning(|_, _, _| {
+                Box::pin(async {
+                    Ok(vec![
+                        unlinked(day(2019, 11, 20), dec!(-40)),
+                        unlinked(day(2019, 12, 31), dec!(15.50)),
+                    ])
+                })
+            });
+        expect_no_history(&mut or);
+        let balance = AccountBalance {
+            amount: dec!(1000),
+            date: day(2019, 11, 15),
+        };
+
+        let resp = get_with_balance(
+            or,
+            no_budgets(),
+            user_id,
+            Some(balance),
+            "fromYear=2020&fromMonth=1&months=1",
+        )
+        .await;
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        let json: ForecastResponse = response_json(resp).await;
+        assert_eq!(json.starting_balance, Some(dec!(975.50)));
+        assert_eq!(json.months[0].cumulative, dec!(875.50));
+        assert_eq!(json.end_balance, dec!(875.50));
+    }
+
+    #[tokio::test]
+    async fn a_balance_inside_the_horizon_reuses_its_rows() {
+        let user_id = Uuid::new_v4();
+        let mut or = MockOperationRepository::new();
+        or.expect_list_for_summary()
+            .withf(|_, start, end| *start == day(2020, 1, 1) && *end == day(2020, 2, 29))
+            .times(1)
+            .returning(|_, _, _| {
+                Box::pin(async {
+                    Ok(vec![
+                        unlinked(day(2020, 1, 10), dec!(-100)),
+                        unlinked(day(2020, 2, 5), dec!(-20)),
+                        unlinked(day(2020, 2, 20), dec!(-7)),
+                    ])
+                })
+            });
+        expect_no_history(&mut or);
+        let balance = AccountBalance {
+            amount: dec!(500),
+            date: day(2020, 2, 5),
+        };
+
+        let resp = get_with_balance(
+            or,
+            no_budgets(),
+            user_id,
+            Some(balance),
+            "fromYear=2020&fromMonth=1&months=2",
+        )
+        .await;
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        let json: ForecastResponse = response_json(resp).await;
+        // 500 + 100 + 20: the operations up to and on the balance date are taken back out.
+        assert_eq!(json.starting_balance, Some(dec!(620)));
+        assert_eq!(json.end_balance, dec!(493));
+    }
+
+    #[tokio::test]
+    async fn a_balance_after_the_horizon_fetches_the_operations_up_to_it() {
+        let user_id = Uuid::new_v4();
+        let mut or = MockOperationRepository::new();
+        or.expect_list_for_summary()
+            .withf(|_, start, end| *start == day(2020, 1, 1) && *end == day(2020, 1, 31))
+            .times(1)
+            .returning(|_, _, _| Box::pin(async { Ok(vec![]) }));
+        or.expect_list_for_summary()
+            .withf(|_, start, end| *start == day(2020, 1, 1) && *end == day(2020, 3, 1))
+            .times(1)
+            .returning(|_, _, _| {
+                Box::pin(async { Ok(vec![unlinked(day(2020, 2, 1), dec!(-60))]) })
+            });
+        expect_no_history(&mut or);
+        let balance = AccountBalance {
+            amount: dec!(40),
+            date: day(2020, 3, 1),
+        };
+
+        let resp = get_with_balance(
+            or,
+            no_budgets(),
+            user_id,
+            Some(balance),
+            "fromYear=2020&fromMonth=1&months=1",
+        )
+        .await;
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        let json: ForecastResponse = response_json(resp).await;
+        assert_eq!(json.starting_balance, Some(dec!(100)));
+    }
+
+    #[tokio::test]
+    async fn a_balance_on_the_eve_of_the_horizon_is_taken_as_is() {
+        let user_id = Uuid::new_v4();
+        let mut or = MockOperationRepository::new();
+        or.expect_list_for_summary()
+            .withf(|_, start, _| *start == day(2099, 1, 1))
+            .times(1)
+            .returning(|_, _, _| Box::pin(async { Ok(vec![]) }));
+        expect_no_history(&mut or);
+        let balance = AccountBalance {
+            amount: dec!(310),
+            date: day(2098, 12, 31),
+        };
+
+        let resp = get_with_balance(
+            or,
+            no_budgets(),
+            user_id,
+            Some(balance),
+            "fromYear=2099&fromMonth=1&months=1",
+        )
+        .await;
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        let json: serde_json::Value = response_json(resp).await;
+        assert_eq!(json["startingBalance"], "310");
+        assert_eq!(json["endBalance"], "310");
+        // 310 over the 31 days of January 2099.
+        let daily_budget: Decimal = json["dailyBudget"].as_str().unwrap().parse().unwrap();
+        assert_eq!(daily_budget, dec!(10));
     }
 }

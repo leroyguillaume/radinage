@@ -197,7 +197,7 @@ where
             },
             Tag {
                 name: "Data".to_string(),
-                description: Some("Export and re-import a user's full data (budgets and operations) as JSON. Intended for backup and account migration.".to_string()),
+                description: Some("Export and re-import a user's full data (account balance, budgets and operations) as JSON. Intended for backup and account migration.".to_string()),
                 ..Tag::default()
             },
         ],
@@ -249,6 +249,27 @@ where
                     .summary("Change own password")
                     .description("Change the authenticated user's password. Requires the current password for verification.")
                     .id("changePassword")
+            }),
+        )
+        .api_route(
+            "/users/me/balance",
+            get_with(handlers::users::get_balance, |op| {
+                op.tag("Users")
+                    .summary("Get own account balance")
+                    .description("Return the account balance the authenticated user recorded and the date it was read. Returns 404 when no balance is recorded.")
+                    .id("getAccountBalance")
+            })
+            .put_with(handlers::users::update_balance, |op| {
+                op.tag("Users")
+                    .summary("Record own account balance")
+                    .description("Record the account balance read at a date (today or earlier), replacing any previous one. Operations accounted on that date are considered already included in the amount. Forecasts then start from this balance instead of zero. Returns 400 when the date is in the future.")
+                    .id("updateAccountBalance")
+            })
+            .delete_with(handlers::users::delete_balance, |op| {
+                op.tag("Users")
+                    .summary("Forget own account balance")
+                    .description("Remove the recorded account balance; forecasts start from zero again. Idempotent: returns 204 whether or not a balance was recorded.")
+                    .id("deleteAccountBalance")
             }),
         )
         .api_route(
@@ -432,7 +453,7 @@ where
             get_with(handlers::forecast::get_forecast, |op| {
                 op.tag("Forecast")
                     .summary("Forecast monthly balances over a horizon")
-                    .description("Project income, expenses, savings, balance and running balance for `months` consecutive months (1 to 24) starting at fromYear/fromMonth. Past months use the operations accounted so far: budget-linked amounts under their budget's type, each unbudgeted operation under income or expenses by its own sign. The current month adds to its operations so far what each budget still expects (`committed`). Future months use the amounts the budgets expect. Unbudgeted spending is forecast at `unbudgetedRate`, the average daily unbudgeted spending of the three complete months before the current one: over the days after today for the current month and over every day of a future month (`unbudgetedForecast`, included in `expenses`). The running balance starts at zero before the first month. Ignored operations are excluded and split operations count through their parts. Status is relative to the server's current date.")
+                    .description("Project income, expenses, savings, balance and running balance for `months` consecutive months (1 to 24) starting at fromYear/fromMonth. Past months use the operations accounted so far: budget-linked amounts under their budget's type, each unbudgeted operation under income or expenses by its own sign. The current month adds to its operations so far what each budget still expects (`committed`). Future months use the amounts the budgets expect. Unbudgeted spending is forecast at `unbudgetedRate`, the average daily unbudgeted spending of the three complete months before the current one: over the days after today for the current month and over every day of a future month (`unbudgetedForecast`, included in `expenses`). The running balance starts at `startingBalance`: the balance recorded with PUT /users/me/balance, brought to the first day of the horizon by adding the operations accounted after its date and before the horizon, or by taking back out those accounted from the horizon start through its date when it is more recent (operations on the balance date are considered included in it); zero when no balance is recorded. Ignored operations are excluded and split operations count through their parts. Status is relative to the server's current date.")
                     .id("getForecast")
             }),
         )
@@ -442,7 +463,7 @@ where
             get_with(handlers::data::export_data, |op| {
                 op.tag("Data")
                     .summary("Export all budgets and operations")
-                    .description("Return the authenticated user's full data (budgets and operations) as a versioned JSON payload. Suitable for backup or migration.")
+                    .description("Return the authenticated user's full data (recorded account balance, budgets and operations) as a versioned JSON payload. Suitable for backup or migration.")
                     .id("exportData")
             }),
         )
@@ -451,7 +472,7 @@ where
             post_with(handlers::data::import_data, |op| {
                 op.tag("Data")
                     .summary("Import budgets and operations from a prior export")
-                    .description("Merge budgets and operations from a JSON payload previously obtained via /data/export into the authenticated user's account. Budgets are deduplicated by label, operations by (date, amount, label). Budget links on operations are remapped to existing or newly-created budgets.")
+                    .description("Merge budgets and operations from a JSON payload previously obtained via /data/export into the authenticated user's account. Budgets are deduplicated by label, operations by (date, amount, label). Budget links on operations are remapped to existing or newly-created budgets. The payload's account balance, optional, is recorded only when the account has none.")
                     .id("importData")
             }),
         )
@@ -564,6 +585,12 @@ pub(crate) mod test_util {
             .route(
                 "/users/me/password",
                 routing::put(handlers::users::change_password),
+            )
+            .route(
+                "/users/me/balance",
+                routing::get(handlers::users::get_balance)
+                    .put(handlers::users::update_balance)
+                    .delete(handlers::users::delete_balance),
             )
             .route("/users/{id}", routing::delete(handlers::users::delete_user))
             .route(
@@ -733,7 +760,7 @@ mod tests {
         assert_eq!(params, ["fromMonth", "fromYear", "months"]);
 
         let schemas = &doc["components"]["schemas"];
-        for field in ["months", "totals", "endBalance"] {
+        for field in ["months", "totals", "startingBalance", "endBalance"] {
             assert!(
                 schemas["ForecastResponse"]["properties"][field].is_object(),
                 "missing {field}"
@@ -753,6 +780,34 @@ mod tests {
                 schemas["ForecastMonthResponse"]["properties"][field].is_object(),
                 "missing {field}"
             );
+        }
+    }
+
+    #[tokio::test]
+    async fn openapi_documents_account_balance() {
+        let app = build_router(make_test_state(
+            MockUserRepository::new(),
+            MockOperationRepository::new(),
+            MockBudgetRepository::new(),
+        ));
+        let resp = app
+            .oneshot(json_request("GET", "/openapi.json", None, None))
+            .await
+            .unwrap();
+        let doc: serde_json::Value = response_json(resp).await;
+
+        let path = &doc["paths"]["/users/me/balance"];
+        assert_eq!(path["get"]["operationId"], "getAccountBalance");
+        assert_eq!(path["put"]["operationId"], "updateAccountBalance");
+        assert_eq!(path["delete"]["operationId"], "deleteAccountBalance");
+        let schemas = &doc["components"]["schemas"];
+        for schema in ["UpdateAccountBalanceRequest", "AccountBalanceResponse"] {
+            for field in ["amount", "date"] {
+                assert!(
+                    schemas[schema]["properties"][field].is_object(),
+                    "missing {schema}.{field}"
+                );
+            }
         }
     }
 }

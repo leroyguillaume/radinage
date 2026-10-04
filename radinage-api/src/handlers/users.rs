@@ -1,7 +1,7 @@
 use crate::{
     AppState, auth,
     auth::middleware::AuthUser,
-    domain::user::UserRole,
+    domain::user::{AccountBalance, UserRole},
     error::{AppError, AppResult},
     repositories::UserRepository,
 };
@@ -10,6 +10,8 @@ use axum::{
     extract::{Path, Query, State},
     http::StatusCode,
 };
+use chrono::NaiveDate;
+use rust_decimal::Decimal;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -215,6 +217,80 @@ pub async fn change_password<U: UserRepository, O, B>(
         .change_password(auth_user.id, &new_hash)
         .await?;
 
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// Account balance to record.
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+#[schemars(extend("example" = serde_json::json!({"amount": "1523.40", "date": "2026-03-31"})))]
+pub struct UpdateAccountBalanceRequest {
+    /// Balance of the account at the end of `date`, as shown by the bank; negative when
+    /// overdrawn.
+    #[schemars(with = "String")]
+    pub amount: Decimal,
+    /// Day the balance was read, today or earlier. Operations accounted on that day are
+    /// considered already included in `amount`.
+    pub date: NaiveDate,
+}
+
+/// The account balance recorded by the user.
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct AccountBalanceResponse {
+    /// Balance of the account at the end of `date`.
+    #[schemars(with = "String")]
+    pub amount: Decimal,
+    /// Day the balance was read; operations accounted on that day are included in `amount`.
+    pub date: NaiveDate,
+}
+
+impl From<AccountBalance> for AccountBalanceResponse {
+    fn from(balance: AccountBalance) -> Self {
+        Self {
+            amount: balance.amount,
+            date: balance.date,
+        }
+    }
+}
+
+pub async fn get_balance<U: UserRepository, O, B>(
+    State(state): State<AppState<U, O, B>>,
+    auth_user: AuthUser,
+) -> AppResult<Json<AccountBalanceResponse>> {
+    let balance = state
+        .user_repo
+        .find_balance(auth_user.id)
+        .await?
+        .ok_or(AppError::NotFound)?;
+    Ok(Json(balance.into()))
+}
+
+pub async fn update_balance<U: UserRepository, O, B>(
+    State(state): State<AppState<U, O, B>>,
+    auth_user: AuthUser,
+    Json(body): Json<UpdateAccountBalanceRequest>,
+) -> AppResult<Json<AccountBalanceResponse>> {
+    let today = chrono::Local::now().date_naive();
+    if body.date > today {
+        return Err(AppError::BadRequest(format!(
+            "balance date {} is in the future",
+            body.date
+        )));
+    }
+    let balance = AccountBalance {
+        amount: body.amount,
+        date: body.date,
+    };
+    state.user_repo.set_balance(auth_user.id, balance).await?;
+    Ok(Json(balance.into()))
+}
+
+pub async fn delete_balance<U: UserRepository, O, B>(
+    State(state): State<AppState<U, O, B>>,
+    auth_user: AuthUser,
+) -> AppResult<StatusCode> {
+    state.user_repo.clear_balance(auth_user.id).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -803,5 +879,156 @@ mod tests {
         let resp = app.oneshot(req).await.unwrap();
 
         assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    fn balance_app(user_repo: MockUserRepository) -> axum::Router {
+        build_test_router(make_test_state(
+            user_repo,
+            MockOperationRepository::new(),
+            MockBudgetRepository::new(),
+        ))
+    }
+
+    fn balance_json(amount: &str, date: chrono::NaiveDate) -> String {
+        serde_json::json!({"amount": amount, "date": date}).to_string()
+    }
+
+    #[tokio::test]
+    async fn get_balance_returns_the_recorded_balance() {
+        let user_id = Uuid::new_v4();
+        let mut user_repo = MockUserRepository::new();
+        user_repo
+            .expect_find_balance()
+            .withf(move |uid| *uid == user_id)
+            .once()
+            .returning(|_| {
+                Box::pin(async {
+                    Ok(Some(AccountBalance {
+                        amount: Decimal::new(152340, 2),
+                        date: chrono::NaiveDate::from_ymd_opt(2026, 3, 31).unwrap(),
+                    }))
+                })
+            });
+
+        let auth = auth_header(user_id, UserRole::User);
+        let resp = balance_app(user_repo)
+            .oneshot(json_request("GET", "/users/me/balance", None, Some(&auth)))
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        let json: serde_json::Value = response_json(resp).await;
+        assert_eq!(
+            json,
+            serde_json::json!({"amount": "1523.40", "date": "2026-03-31"})
+        );
+    }
+
+    #[tokio::test]
+    async fn get_balance_returns_404_when_none_is_recorded() {
+        let mut user_repo = MockUserRepository::new();
+        user_repo
+            .expect_find_balance()
+            .once()
+            .returning(|_| Box::pin(async { Ok(None) }));
+
+        let auth = auth_header(Uuid::new_v4(), UserRole::User);
+        let resp = balance_app(user_repo)
+            .oneshot(json_request("GET", "/users/me/balance", None, Some(&auth)))
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn update_balance_records_a_balance_dated_today_or_earlier() {
+        let user_id = Uuid::new_v4();
+        let today = chrono::Local::now().date_naive();
+        for date in [today, today - chrono::Days::new(400)] {
+            let mut user_repo = MockUserRepository::new();
+            user_repo
+                .expect_set_balance()
+                .withf(move |uid, balance| {
+                    *uid == user_id
+                        && *balance
+                            == AccountBalance {
+                                amount: Decimal::new(-8010, 2),
+                                date,
+                            }
+                })
+                .once()
+                .returning(|_, _| Box::pin(async { Ok(()) }));
+
+            let auth = auth_header(user_id, UserRole::User);
+            let body = balance_json("-80.10", date);
+            let resp = balance_app(user_repo)
+                .oneshot(json_request(
+                    "PUT",
+                    "/users/me/balance",
+                    Some(&body),
+                    Some(&auth),
+                ))
+                .await
+                .unwrap();
+
+            assert_eq!(resp.status(), StatusCode::OK, "{date}");
+            let json: AccountBalanceResponse = response_json(resp).await;
+            assert_eq!(json.amount, Decimal::new(-8010, 2));
+            assert_eq!(json.date, date);
+        }
+    }
+
+    #[tokio::test]
+    async fn update_balance_rejects_a_future_date() {
+        let tomorrow = chrono::Local::now().date_naive() + chrono::Days::new(1);
+        let auth = auth_header(Uuid::new_v4(), UserRole::User);
+        let body = balance_json("10", tomorrow);
+        let resp = balance_app(MockUserRepository::new())
+            .oneshot(json_request(
+                "PUT",
+                "/users/me/balance",
+                Some(&body),
+                Some(&auth),
+            ))
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn delete_balance_clears_it_and_returns_204() {
+        let user_id = Uuid::new_v4();
+        let mut user_repo = MockUserRepository::new();
+        user_repo
+            .expect_clear_balance()
+            .withf(move |uid| *uid == user_id)
+            .once()
+            .returning(|_| Box::pin(async { Ok(()) }));
+
+        let auth = auth_header(user_id, UserRole::User);
+        let resp = balance_app(user_repo)
+            .oneshot(json_request(
+                "DELETE",
+                "/users/me/balance",
+                None,
+                Some(&auth),
+            ))
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::NO_CONTENT);
+    }
+
+    #[tokio::test]
+    async fn balance_endpoints_require_authentication() {
+        for method in ["GET", "PUT", "DELETE"] {
+            let resp = balance_app(MockUserRepository::new())
+                .oneshot(json_request(method, "/users/me/balance", None, None))
+                .await
+                .unwrap();
+            assert_eq!(resp.status(), StatusCode::UNAUTHORIZED, "{method}");
+        }
     }
 }

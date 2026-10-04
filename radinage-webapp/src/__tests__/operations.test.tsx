@@ -131,8 +131,12 @@ const forecastResponse: ForecastResponse = {
 		savings: "0",
 		balance: "1520.00",
 	},
+	startingBalance: null,
 	endBalance: "1520.00",
 	unbudgetedRate: "-10.0000",
+	daysLeft: 11,
+	dailyBudget: "147.27",
+	firstNegativeMonth: null,
 };
 
 let apiCalls: Array<{

@@ -4,9 +4,10 @@ use crate::{
     domain::{
         budget::{Budget, BudgetKind, BudgetType, Rule},
         operation::{BudgetLink, NewOperationSplit, Operation, OperationSplit, validate_splits},
+        user::AccountBalance,
     },
     error::{AppError, AppResult},
-    repositories::{BudgetRepository, OperationRepository},
+    repositories::{BudgetRepository, OperationRepository, UserRepository},
 };
 use axum::{Json, extract::State, http::StatusCode};
 use chrono::{DateTime, NaiveDate, Utc};
@@ -109,6 +110,34 @@ impl From<Operation> for ExportOperation {
     }
 }
 
+/// The recorded account balance inside an export payload.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ExportAccountBalance {
+    #[schemars(with = "String")]
+    pub amount: Decimal,
+    /// Day the balance was read; operations accounted on that day are included in `amount`.
+    pub date: NaiveDate,
+}
+
+impl From<AccountBalance> for ExportAccountBalance {
+    fn from(balance: AccountBalance) -> Self {
+        Self {
+            amount: balance.amount,
+            date: balance.date,
+        }
+    }
+}
+
+impl From<ExportAccountBalance> for AccountBalance {
+    fn from(balance: ExportAccountBalance) -> Self {
+        Self {
+            amount: balance.amount,
+            date: balance.date,
+        }
+    }
+}
+
 /// Full export payload: all budgets + operations for the authenticated user.
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
@@ -117,6 +146,8 @@ pub struct ExportResponse {
     pub version: u32,
     /// UTC timestamp at which the export was generated.
     pub exported_at: DateTime<Utc>,
+    /// Recorded account balance, null when none is recorded.
+    pub balance: Option<ExportAccountBalance>,
     pub budgets: Vec<ExportBudget>,
     pub operations: Vec<ExportOperation>,
 }
@@ -127,6 +158,10 @@ pub struct ExportResponse {
 pub struct ImportDataRequest {
     /// Must match the supported export version.
     pub version: u32,
+    /// Account balance to record when the account has none; absent from exports made before
+    /// balances existed.
+    #[serde(default)]
+    pub balance: Option<ExportAccountBalance>,
     #[serde(default)]
     pub budgets: Vec<ExportBudget>,
     #[serde(default)]
@@ -141,27 +176,32 @@ pub struct ImportDataResponse {
     pub skipped_budgets: usize,
     pub imported_operations: usize,
     pub skipped_operations: usize,
+    /// Whether the payload's balance was recorded: false when it carries none or the account
+    /// already has one, which is kept.
+    pub imported_balance: bool,
 }
 
 // ── Handlers ─────────────────────────────────────────────────────────────────
 
-pub async fn export_data<U, O: OperationRepository, B: BudgetRepository>(
+pub async fn export_data<U: UserRepository, O: OperationRepository, B: BudgetRepository>(
     State(state): State<AppState<U, O, B>>,
     auth_user: AuthUser,
 ) -> AppResult<Json<ExportResponse>> {
     let user_id = auth_user.id;
+    let balance = state.user_repo.find_balance(user_id).await?;
     let budgets = state.budget_repo.list_all_for_user(user_id).await?;
     let operations = state.operation_repo.list_all_for_user(user_id).await?;
 
     Ok(Json(ExportResponse {
         version: EXPORT_VERSION,
         exported_at: Utc::now(),
+        balance: balance.map(Into::into),
         budgets: budgets.into_iter().map(ExportBudget::from).collect(),
         operations: operations.into_iter().map(ExportOperation::from).collect(),
     }))
 }
 
-pub async fn import_data<U, O: OperationRepository, B: BudgetRepository>(
+pub async fn import_data<U: UserRepository, O: OperationRepository, B: BudgetRepository>(
     State(state): State<AppState<U, O, B>>,
     auth_user: AuthUser,
     Json(body): Json<ImportDataRequest>,
@@ -279,6 +319,14 @@ pub async fn import_data<U, O: OperationRepository, B: BudgetRepository>(
         imported_operations += 1;
     }
 
+    let imported_balance = match body.balance {
+        Some(balance) if state.user_repo.find_balance(user_id).await?.is_none() => {
+            state.user_repo.set_balance(user_id, balance.into()).await?;
+            true
+        }
+        _ => false,
+    };
+
     Ok((
         StatusCode::OK,
         Json(ImportDataResponse {
@@ -286,6 +334,7 @@ pub async fn import_data<U, O: OperationRepository, B: BudgetRepository>(
             skipped_budgets,
             imported_operations,
             skipped_operations,
+            imported_balance,
         }),
     ))
 }
@@ -360,7 +409,7 @@ mod tests {
             });
 
         let app = build_test_router(make_test_state(
-            MockUserRepository::new(),
+            users_with_balance(None),
             op_repo,
             budget_repo,
         ));
@@ -500,6 +549,7 @@ mod tests {
         assert_eq!(json.skipped_budgets, 1);
         assert_eq!(json.imported_operations, 0);
         assert_eq!(json.skipped_operations, 0);
+        assert!(!json.imported_balance);
     }
 
     #[tokio::test]
@@ -756,7 +806,7 @@ mod tests {
         });
 
         let app = build_test_router(make_test_state(
-            MockUserRepository::new(),
+            users_with_balance(None),
             op_repo,
             budget_repo,
         ));
@@ -976,6 +1026,7 @@ mod tests {
         let export = ExportResponse {
             version: EXPORT_VERSION,
             exported_at: Utc::now(),
+            balance: None,
             budgets: vec![ExportBudget::from(budget)],
             operations: vec![],
         };
@@ -995,5 +1046,116 @@ mod tests {
         assert_eq!(resp.status(), StatusCode::OK);
         let json: ImportDataResponse = response_json(resp).await;
         assert_eq!(json.imported_budgets, 1);
+    }
+
+    fn users_with_balance(balance: Option<AccountBalance>) -> MockUserRepository {
+        let mut user_repo = MockUserRepository::new();
+        user_repo
+            .expect_find_balance()
+            .returning(move |_| Box::pin(async move { Ok(balance) }));
+        user_repo
+    }
+
+    fn sample_balance() -> AccountBalance {
+        AccountBalance {
+            amount: Decimal::new(152340, 2),
+            date: NaiveDate::from_ymd_opt(2026, 3, 31).unwrap(),
+        }
+    }
+
+    fn empty_repos() -> (MockOperationRepository, MockBudgetRepository) {
+        let mut op_repo = MockOperationRepository::new();
+        op_repo
+            .expect_list_all_for_user()
+            .returning(|_| Box::pin(async { Ok(vec![]) }));
+        let mut budget_repo = MockBudgetRepository::new();
+        budget_repo
+            .expect_list_all_for_user()
+            .returning(|_| Box::pin(async { Ok(vec![]) }));
+        (op_repo, budget_repo)
+    }
+
+    async fn import_balance_payload(user_repo: MockUserRepository) -> ImportDataResponse {
+        let (op_repo, budget_repo) = empty_repos();
+        let app = build_test_router(make_test_state(user_repo, op_repo, budget_repo));
+        let auth = auth_header(Uuid::new_v4(), UserRole::User);
+        let body = r#"{"version":1,"balance":{"amount":"1523.40","date":"2026-03-31"},
+                       "budgets":[],"operations":[]}"#;
+        let resp = app
+            .oneshot(json_request(
+                "POST",
+                "/data/import",
+                Some(body),
+                Some(&auth),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        response_json(resp).await
+    }
+
+    #[tokio::test]
+    async fn export_includes_the_recorded_balance() {
+        let (op_repo, budget_repo) = empty_repos();
+        let app = build_test_router(make_test_state(
+            users_with_balance(Some(sample_balance())),
+            op_repo,
+            budget_repo,
+        ));
+        let auth = auth_header(Uuid::new_v4(), UserRole::User);
+        let resp = app
+            .oneshot(json_request("GET", "/data/export", None, Some(&auth)))
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        let json: serde_json::Value = response_json(resp).await;
+        assert_eq!(
+            json["balance"],
+            serde_json::json!({"amount": "1523.40", "date": "2026-03-31"})
+        );
+    }
+
+    #[tokio::test]
+    async fn export_without_balance_has_a_null_balance() {
+        let (op_repo, budget_repo) = empty_repos();
+        let app = build_test_router(make_test_state(
+            users_with_balance(None),
+            op_repo,
+            budget_repo,
+        ));
+        let auth = auth_header(Uuid::new_v4(), UserRole::User);
+        let resp = app
+            .oneshot(json_request("GET", "/data/export", None, Some(&auth)))
+            .await
+            .unwrap();
+
+        let json: serde_json::Value = response_json(resp).await;
+        assert!(json["balance"].is_null());
+    }
+
+    #[tokio::test]
+    async fn import_records_the_balance_when_the_account_has_none() {
+        let mut user_repo = users_with_balance(None);
+        user_repo
+            .expect_set_balance()
+            .withf(|_, balance| *balance == sample_balance())
+            .once()
+            .returning(|_, _| Box::pin(async { Ok(()) }));
+
+        let json = import_balance_payload(user_repo).await;
+        assert!(json.imported_balance);
+    }
+
+    #[tokio::test]
+    async fn import_keeps_an_existing_balance() {
+        let mut user_repo = users_with_balance(Some(AccountBalance {
+            amount: Decimal::ONE,
+            date: NaiveDate::from_ymd_opt(2026, 5, 1).unwrap(),
+        }));
+        user_repo.expect_set_balance().never();
+
+        let json = import_balance_payload(user_repo).await;
+        assert!(!json.imported_balance);
     }
 }

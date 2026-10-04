@@ -15,6 +15,7 @@ import {
 } from "@mantine/core";
 import {
 	IconAlertCircle,
+	IconAlertTriangle,
 	IconChevronLeft,
 	IconChevronRight,
 } from "@tabler/icons-react";
@@ -25,7 +26,11 @@ import { PageHeader } from "@/components/PageHeader";
 import { formatAmount, formatSignedAmount } from "@/lib/format";
 import { useForecast } from "@/lib/hooks";
 import { balanceTextColor, budgetTypeTones, type Tone } from "@/lib/tones";
-import type { ForecastMonth, ForecastMonthStatus } from "@/lib/types";
+import type {
+	ForecastMonth,
+	ForecastMonthStatus,
+	YearMonth,
+} from "@/lib/types";
 import { headingFont, palette } from "@/theme";
 
 interface ForecastSearch {
@@ -78,32 +83,12 @@ function toMonthForecast(m: ForecastMonth): MonthForecast {
 	};
 }
 
-function daysRemainingInYear(year: number): number {
-	const now = new Date();
-	const thisYear = now.getFullYear();
-	if (year < thisYear) return 0;
-	if (year > thisYear) {
-		const jan1 = new Date(year, 0, 1);
-		const dec31 = new Date(year, 11, 31);
-		return (
-			Math.ceil((dec31.getTime() - jan1.getTime()) / (1000 * 60 * 60 * 24)) + 1
-		);
-	}
-	const endOfYear = new Date(year, 11, 31);
-	const diffMs = endOfYear.getTime() - now.getTime();
-	return Math.max(1, Math.ceil(diffMs / (1000 * 60 * 60 * 24)));
+function daysInMonth({ year, month }: YearMonth): number {
+	return new Date(year, month, 0).getDate();
 }
 
-function monthsElapsedRatio(year: number): number {
-	const now = new Date();
-	const thisYear = now.getFullYear();
-	if (year < thisYear) return 1;
-	if (year > thisYear) return 0;
-	const startOfYear = new Date(year, 0, 1);
-	const endOfYear = new Date(year, 11, 31);
-	const total = endOfYear.getTime() - startOfYear.getTime();
-	const elapsed = now.getTime() - startOfYear.getTime();
-	return Math.min(1, elapsed / total);
+function isSameMonth(a: YearMonth, b: YearMonth | null): boolean {
+	return b !== null && a.year === b.year && a.month === b.month;
 }
 
 function monthName(
@@ -114,6 +99,21 @@ function monthName(
 ): string {
 	return new Date(year, month - 1).toLocaleDateString(locale, {
 		month: style,
+	});
+}
+
+function monthYearName({ year, month }: YearMonth, locale: string): string {
+	return new Date(year, month - 1).toLocaleDateString(locale, {
+		month: "long",
+		year: "numeric",
+	});
+}
+
+function longDate(date: Date, locale: string): string {
+	return date.toLocaleDateString(locale, {
+		day: "numeric",
+		month: "long",
+		year: "numeric",
 	});
 }
 
@@ -292,9 +292,31 @@ const MIN_BAR_HEIGHT = 4;
 interface ForecastViewProps {
 	forecast: MonthForecast[];
 	locale: string;
+	firstNegativeMonth: YearMonth | null;
 }
 
-function BalanceChart({ forecast, locale }: ForecastViewProps) {
+function FirstNegativeMarker() {
+	const { t } = useTranslation();
+	const label = t("forecast.firstNegativeMarker");
+	return (
+		<Box
+			component="span"
+			role="img"
+			aria-label={label}
+			title={label}
+			display="inline-flex"
+			c="tangerine.8"
+		>
+			<IconAlertTriangle aria-hidden size={14} />
+		</Box>
+	);
+}
+
+function BalanceChart({
+	forecast,
+	locale,
+	firstNegativeMonth,
+}: ForecastViewProps) {
 	const { t } = useTranslation();
 	const maxPositive = Math.max(0, ...forecast.map((m) => m.balance));
 	const maxNegative = Math.max(0, ...forecast.map((m) => -m.balance));
@@ -348,6 +370,7 @@ function BalanceChart({ forecast, locale }: ForecastViewProps) {
 						{forecast.map((m) => {
 							const isCurrent = m.status === "current";
 							const isProjected = m.status === "future";
+							const isFirstNegative = isSameMonth(m, firstNegativeMonth);
 							const up = m.balance > 0 ? barHeight(m.balance) : 0;
 							const down = m.balance < 0 ? barHeight(m.balance) : 0;
 							const upBg = isProjected
@@ -359,7 +382,18 @@ function BalanceChart({ forecast, locale }: ForecastViewProps) {
 								? stripes("tangerine-3", "tangerine-1")
 								: "var(--mantine-color-tangerine-5)";
 							return (
-								<Stack key={`${m.year}-${m.month}`} gap={0} align="center">
+								<Stack
+									key={`${m.year}-${m.month}`}
+									gap={0}
+									align="center"
+									bg={isFirstNegative ? "tangerine.0" : undefined}
+									style={{
+										borderRadius: 8,
+										outline: isFirstNegative
+											? "2px solid var(--mantine-color-tangerine-5)"
+											: undefined,
+									}}
+								>
 									<Text
 										className="tabular-nums"
 										h={22}
@@ -407,15 +441,23 @@ function BalanceChart({ forecast, locale }: ForecastViewProps) {
 											}}
 										/>
 									</Box>
-									<Text
-										mt={6}
-										fz={13}
-										fw={isCurrent ? 800 : 500}
-										c={isCurrent ? undefined : "dimmed"}
-										tt="capitalize"
-									>
-										{monthName(m.year, m.month, locale, "short")}
-									</Text>
+									<Group mt={6} gap={2} wrap="nowrap">
+										<Text
+											fz={13}
+											fw={isCurrent || isFirstNegative ? 800 : 500}
+											c={
+												isFirstNegative
+													? "tangerine.8"
+													: isCurrent
+														? undefined
+														: "dimmed"
+											}
+											tt="capitalize"
+										>
+											{monthName(m.year, m.month, locale, "short")}
+										</Text>
+										{isFirstNegative && <FirstNegativeMarker />}
+									</Group>
 								</Stack>
 							);
 						})}
@@ -441,7 +483,11 @@ const tdStyle = {
 	whiteSpace: "nowrap",
 } as const;
 
-function MonthlyTable({ forecast, locale }: ForecastViewProps) {
+function MonthlyTable({
+	forecast,
+	locale,
+	firstNegativeMonth,
+}: ForecastViewProps) {
 	const { t } = useTranslation();
 	const { income, expense, savings } = budgetTypeTones;
 	return (
@@ -487,10 +533,17 @@ function MonthlyTable({ forecast, locale }: ForecastViewProps) {
 					<Table.Tbody>
 						{forecast.map((m) => {
 							const isCurrent = m.status === "current";
+							const isFirstNegative = isSameMonth(m, firstNegativeMonth);
 							return (
 								<Table.Tr
 									key={`${m.year}-${m.month}`}
-									bg={isCurrent ? "leaf.1" : undefined}
+									bg={
+										isFirstNegative
+											? "tangerine.0"
+											: isCurrent
+												? "leaf.1"
+												: undefined
+									}
 									aria-current={isCurrent ? "date" : undefined}
 								>
 									<Table.Td>
@@ -512,6 +565,11 @@ function MonthlyTable({ forecast, locale }: ForecastViewProps) {
 													fw={600}
 												>
 													{t("forecast.projected")}
+												</Badge>
+											)}
+											{isFirstNegative && (
+												<Badge variant="filled" color="tangerine.8" tt="none">
+													{t("forecast.firstNegativeMarker")}
 												</Badge>
 											)}
 										</Group>
@@ -569,13 +627,15 @@ function ForecastPage() {
 	const forecast = (forecastQuery.data?.months ?? []).map(toMonthForecast);
 	const totals = forecastQuery.data?.totals;
 	const endOfYearBalance = Number(forecastQuery.data?.endBalance ?? 0);
+	const rawStartingBalance = forecastQuery.data?.startingBalance ?? null;
+	const firstMonth = forecast[0];
+	const lastMonth = forecast[forecast.length - 1];
 
-	const remainingDays = daysRemainingInYear(selectedYear);
-	// A daily budget below zero is meaningless (you can't spend a negative
-	// amount per day). When the projected end-of-year balance is negative,
-	// there is simply no daily budget left.
-	const dailyBudget =
-		remainingDays > 0 ? Math.max(0, endOfYearBalance / remainingDays) : 0;
+	const daysLeft = forecastQuery.data?.daysLeft ?? 0;
+	const rawDailyBudget = forecastQuery.data?.dailyBudget ?? null;
+	const dailyBudget = rawDailyBudget === null ? null : Number(rawDailyBudget);
+	const firstNegativeMonth = forecastQuery.data?.firstNegativeMonth ?? null;
+	const horizonDays = forecast.reduce((sum, m) => sum + daysInMonth(m), 0);
 
 	const totalIncome = Number(totals?.income ?? 0);
 	const totalExpenses = Number(totals?.expenses ?? 0);
@@ -583,7 +643,8 @@ function ForecastPage() {
 	const unbudgetedRate = Number(forecastQuery.data?.unbudgetedRate ?? 0);
 	const forecastsUnbudgeted = forecast.some((m) => m.unbudgetedForecast !== 0);
 
-	const yearProgress = monthsElapsedRatio(selectedYear) * 100;
+	const yearProgress =
+		horizonDays > 0 ? ((horizonDays - daysLeft) / horizonDays) * 100 : 0;
 
 	function shareOfIncome(amount: number): number {
 		return totalIncome > 0 ? Math.abs(amount) / totalIncome : 0;
@@ -629,6 +690,17 @@ function ForecastPage() {
 
 				{!isLoading && !isError && (
 					<>
+						{firstNegativeMonth && (
+							<Alert
+								icon={<IconAlertTriangle size={16} />}
+								color="tangerine"
+								title={t("forecast.firstNegativeTitle", {
+									month: monthYearName(firstNegativeMonth, i18n.language),
+								})}
+							>
+								{t("forecast.firstNegativeText")}
+							</Alert>
+						)}
 						<SimpleGrid cols={{ base: 1, md: 3 }} spacing="md">
 							<HeroCard
 								variant="filled"
@@ -641,11 +713,25 @@ function ForecastPage() {
 										tt="none"
 										fw={700}
 									>
-										{t("forecast.remainingDays", { count: remainingDays })}
+										{t("forecast.remainingDays", { count: daysLeft })}
 									</Badge>
 								}
 							>
-								<BigAmount value={formatAmount(dailyBudget)} />
+								<BigAmount
+									value={dailyBudget === null ? "—" : formatAmount(dailyBudget)}
+									color={
+										dailyBudget !== null && dailyBudget < 0
+											? "tangerine.3"
+											: undefined
+									}
+								/>
+								<Text size="sm" c="forest.1">
+									{dailyBudget === null
+										? t("forecast.dailyBudgetOver")
+										: dailyBudget < 0
+											? t("forecast.dailyBudgetNegativeHint")
+											: t("forecast.dailyBudgetHint")}
+								</Text>
 								<Stack gap={6} mt="auto">
 									<Text size="sm" c="forest.1">
 										{t("forecast.yearProgress", {
@@ -665,14 +751,38 @@ function ForecastPage() {
 								</Stack>
 							</HeroCard>
 
-							<HeroCard title={t("forecast.endOfYearBalance")}>
+							<HeroCard
+								title={
+									rawStartingBalance !== null && lastMonth
+										? t("forecast.projectedBalance", {
+												date: longDate(
+													new Date(lastMonth.year, lastMonth.month, 0),
+													i18n.language,
+												),
+											})
+										: t("forecast.endOfYearBalance")
+								}
+							>
 								<BigAmount
 									value={formatSignedAmount(endOfYearBalance)}
 									color={balanceTextColor(endOfYearBalance)}
 								/>
 								<Text size="sm" c="dimmed">
-									{t("forecast.endOfYearHint")}
+									{rawStartingBalance !== null
+										? t("forecast.projectedBalanceHint")
+										: t("forecast.endOfYearHint")}
 								</Text>
+								{rawStartingBalance !== null && firstMonth && (
+									<Text size="xs" c="dimmed" mt="auto">
+										{t("forecast.startingBalance", {
+											date: longDate(
+												new Date(firstMonth.year, firstMonth.month - 1, 1),
+												i18n.language,
+											),
+											amount: formatAmount(rawStartingBalance),
+										})}
+									</Text>
+								)}
 							</HeroCard>
 
 							<HeroCard
@@ -706,9 +816,17 @@ function ForecastPage() {
 							</HeroCard>
 						</SimpleGrid>
 
-						<BalanceChart forecast={forecast} locale={i18n.language} />
+						<BalanceChart
+							forecast={forecast}
+							locale={i18n.language}
+							firstNegativeMonth={firstNegativeMonth}
+						/>
 
-						<MonthlyTable forecast={forecast} locale={i18n.language} />
+						<MonthlyTable
+							forecast={forecast}
+							locale={i18n.language}
+							firstNegativeMonth={firstNegativeMonth}
+						/>
 					</>
 				)}
 			</Stack>

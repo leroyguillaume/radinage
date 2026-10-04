@@ -216,7 +216,16 @@
 		"projected": "Forecast",
 		"committed": "incl. {{amount}} still to come",
 		"unbudgetedForecast": "incl. {{amount}} estimated outside budgets",
-		"unbudgetedRate": "Spending outside budgets estimated at {{amount}} a day, the average of the last 3 complete months."
+		"unbudgetedRate": "Spending outside budgets estimated at {{amount}} a day, the average of the last 3 complete months.",
+		"dailyBudgetHint": "What you can still spend each day outside your budgets without ending the period in the red.",
+		"dailyBudgetNegativeHint": "Negative: your budgets alone already end the period in the red. You would need to earn or save this much each day to get back to zero.",
+		"dailyBudgetOver": "Period over: no days left to budget.",
+		"firstNegativeTitle": "Negative balance from {{month}}",
+		"firstNegativeText": "The cumulative balance drops below zero that month if your budgets and spending outside budgets follow the forecast.",
+		"firstNegativeMarker": "Goes into the red",
+		"projectedBalance": "Projected balance on {{date}}",
+		"projectedBalanceHint": "What your account should show that day if your budgets hold.",
+		"startingBalance": "Balance on {{date}}: {{amount}}"
 	},
 	"nav": {
 		"operations": "Operations",
@@ -280,6 +289,19 @@
 		"success": "Password changed successfully",
 		"errorCurrentPassword": "Current password is incorrect",
 		"errorPasswordMismatch": "New passwords do not match",
+		"balance": {
+			"title": "Account balance",
+			"description": "The balance your bank shows on a given date. The summary starts from it instead of zero.",
+			"amount": "Balance",
+			"date": "Balance date",
+			"hint": "Operations on that day are considered already included in this balance: pick the date you read it, and only operations of the following days are added to it.",
+			"save": "Save balance",
+			"clear": "Clear balance",
+			"saved": "Balance saved",
+			"cleared": "Balance cleared: the summary starts from zero again.",
+			"errorAmount": "Invalid amount",
+			"errorDate": "The balance date cannot be in the future"
+		},
 		"data": {
 			"title": "Data",
 			"description": "Export a full backup (budgets + operations) or import one to restore or migrate your account.",
@@ -287,7 +309,8 @@
 			"exportError": "Export failed",
 			"import": "Import data",
 			"importError": "Invalid file or import rejected",
-			"importSuccess": "{{budgets}} budget(s) imported ({{skippedBudgets}} skipped), {{operations}} operation(s) imported ({{skippedOperations}} skipped)"
+			"importSuccess": "{{budgets}} budget(s) imported ({{skippedBudgets}} skipped), {{operations}} operation(s) imported ({{skippedOperations}} skipped)",
+			"importedBalance": "Account balance imported."
 		}
 	},
 	"activate": {
