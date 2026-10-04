@@ -222,7 +222,10 @@
 		"dailyBudgetOver": "Période terminée : plus aucun jour à budgéter.",
 		"firstNegativeTitle": "Solde négatif à partir de {{month}}",
 		"firstNegativeText": "Le cumulé passe sous zéro ce mois-là si tes budgets et tes dépenses hors budget suivent la prévision.",
-		"firstNegativeMarker": "Passage dans le rouge"
+		"firstNegativeMarker": "Passage dans le rouge",
+		"projectedBalance": "Solde prévu au {{date}}",
+		"projectedBalanceHint": "Ce que devrait afficher ton compte ce jour-là si tes budgets tiennent.",
+		"startingBalance": "Solde au {{date}} : {{amount}}"
 	},
 	"nav": {
 		"operations": "Opérations",
@@ -286,6 +289,19 @@
 		"success": "Mot de passe modifié avec succès",
 		"errorCurrentPassword": "Le mot de passe actuel est incorrect",
 		"errorPasswordMismatch": "Les nouveaux mots de passe ne correspondent pas",
+		"balance": {
+			"title": "Solde du compte",
+			"description": "Le solde affiché par ta banque à une date donnée. Le résumé part de ce solde au lieu de zéro.",
+			"amount": "Solde",
+			"date": "Date du solde",
+			"hint": "Les opérations de ce jour-là sont considérées comme déjà incluses dans ce solde : choisis la date du relevé ou de la consultation, puis seules les opérations des jours suivants s'y ajoutent.",
+			"save": "Enregistrer le solde",
+			"clear": "Effacer le solde",
+			"saved": "Solde enregistré",
+			"cleared": "Solde effacé : le résumé repart de zéro.",
+			"errorAmount": "Montant invalide",
+			"errorDate": "La date du solde ne peut pas être dans le futur"
+		},
 		"data": {
 			"title": "Données",
 			"description": "Exportez une sauvegarde complète (budgets + opérations) ou importez-la pour restaurer ou migrer votre compte.",
@@ -293,7 +309,8 @@
 			"exportError": "Erreur lors de l'export",
 			"import": "Importer des données",
 			"importError": "Fichier invalide ou import refusé",
-			"importSuccess": "{{budgets}} budget(s) importé(s) ({{skippedBudgets}} ignoré(s)), {{operations}} opération(s) importée(s) ({{skippedOperations}} ignorée(s))"
+			"importSuccess": "{{budgets}} budget(s) importé(s) ({{skippedBudgets}} ignoré(s)), {{operations}} opération(s) importée(s) ({{skippedOperations}} ignorée(s))",
+			"importedBalance": "Solde du compte importé."
 		}
 	},
 	"activate": {

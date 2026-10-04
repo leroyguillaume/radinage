@@ -14,7 +14,7 @@ radinage-api/          Rust REST API (Axum + SQLx + PostgreSQL)
   src/repositories/    Trait-based repos (Pg* impls) + MockXxxRepository for tests
   src/services/        matcher (auto-categorize), importer (CSV/Excel)
   src/error.rs         AppError type, IntoResponse impl
-  migrations/          SQLx migrations (001–011)
+  migrations/          SQLx migrations, embedded and checksummed: never edit an applied one
 
 radinage-webapp/       React 19 + TypeScript SPA
   src/routes/          File-based routes (TanStack Router)

@@ -109,6 +109,14 @@ function monthYearName({ year, month }: YearMonth, locale: string): string {
 	});
 }
 
+function longDate(date: Date, locale: string): string {
+	return date.toLocaleDateString(locale, {
+		day: "numeric",
+		month: "long",
+		year: "numeric",
+	});
+}
+
 function stripes(dark: string, light: string): string {
 	return `repeating-linear-gradient(135deg, var(--mantine-color-${dark}) 0 4px, var(--mantine-color-${light}) 4px 8px)`;
 }
@@ -619,6 +627,9 @@ function ForecastPage() {
 	const forecast = (forecastQuery.data?.months ?? []).map(toMonthForecast);
 	const totals = forecastQuery.data?.totals;
 	const endOfYearBalance = Number(forecastQuery.data?.endBalance ?? 0);
+	const rawStartingBalance = forecastQuery.data?.startingBalance ?? null;
+	const firstMonth = forecast[0];
+	const lastMonth = forecast[forecast.length - 1];
 
 	const daysLeft = forecastQuery.data?.daysLeft ?? 0;
 	const rawDailyBudget = forecastQuery.data?.dailyBudget ?? null;
@@ -740,14 +751,38 @@ function ForecastPage() {
 								</Stack>
 							</HeroCard>
 
-							<HeroCard title={t("forecast.endOfYearBalance")}>
+							<HeroCard
+								title={
+									rawStartingBalance !== null && lastMonth
+										? t("forecast.projectedBalance", {
+												date: longDate(
+													new Date(lastMonth.year, lastMonth.month, 0),
+													i18n.language,
+												),
+											})
+										: t("forecast.endOfYearBalance")
+								}
+							>
 								<BigAmount
 									value={formatSignedAmount(endOfYearBalance)}
 									color={balanceTextColor(endOfYearBalance)}
 								/>
 								<Text size="sm" c="dimmed">
-									{t("forecast.endOfYearHint")}
+									{rawStartingBalance !== null
+										? t("forecast.projectedBalanceHint")
+										: t("forecast.endOfYearHint")}
 								</Text>
+								{rawStartingBalance !== null && firstMonth && (
+									<Text size="xs" c="dimmed" mt="auto">
+										{t("forecast.startingBalance", {
+											date: longDate(
+												new Date(firstMonth.year, firstMonth.month - 1, 1),
+												i18n.language,
+											),
+											amount: formatAmount(rawStartingBalance),
+										})}
+									</Text>
+								)}
 							</HeroCard>
 
 							<HeroCard

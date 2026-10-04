@@ -1,5 +1,15 @@
+use chrono::NaiveDate;
+use rust_decimal::Decimal;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+
+/// The account balance a user recorded at a date. Operations accounted on `date` are
+/// considered already included in `amount`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AccountBalance {
+    pub amount: Decimal,
+    pub date: NaiveDate,
+}
 
 /// The role of a user, determining their access level.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]

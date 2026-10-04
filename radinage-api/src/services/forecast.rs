@@ -2,7 +2,10 @@
 //! from the operations already accounted and the budgets' expected amounts.
 
 use crate::{
-    domain::budget::{Budget, BudgetType, YearMonth},
+    domain::{
+        budget::{Budget, BudgetType, YearMonth},
+        user::AccountBalance,
+    },
     repositories::{SummaryCategory, SummaryRow},
 };
 use chrono::{Datelike, Months, NaiveDate};
@@ -79,7 +82,8 @@ pub struct ForecastMonth {
     /// Unbudgeted spending expected for the rest of this month at the unbudgeted rate,
     /// included in `flows.expenses`; zero for past months, never positive.
     pub unbudgeted_forecast: Decimal,
-    /// Running balance at the end of this month, starting from zero before the horizon.
+    /// Running balance at the end of this month, starting from the starting balance (zero
+    /// when none) before the horizon.
     pub cumulative: Decimal,
 }
 
@@ -87,7 +91,9 @@ pub struct ForecastMonth {
 pub struct Forecast {
     pub months: Vec<ForecastMonth>,
     pub totals: Flows,
-    /// Cumulative balance of the last month, zero for an empty horizon.
+    /// Account balance at the start of the horizon, `None` when no balance is recorded.
+    pub starting_balance: Option<Decimal>,
+    /// Cumulative balance of the last month; the starting balance for an empty horizon.
     pub end_balance: Decimal,
     /// Average daily unbudgeted spending over the history window, never positive.
     pub unbudgeted_rate: Decimal,
@@ -113,6 +119,9 @@ pub struct ForecastInput<'a> {
     /// Accounted amounts covering at least [`unbudgeted_history`]`(today)`; rows outside it
     /// are ignored, so the same slice as `rows` may be passed when it covers that window.
     pub history: &'a [SummaryRow],
+    /// Account balance at the start of the horizon (see [`starting_balance`]); the running
+    /// balance starts from zero when `None`.
+    pub starting_balance: Option<Decimal>,
 }
 
 /// Complete months before the current one that the unbudgeted rate averages.
@@ -204,9 +213,50 @@ pub fn daily_budget(
     })
 }
 
+/// Accounting dates of the operations between a balance recorded on `balance_date` and the
+/// start of the horizon: from the day after the balance date to the day before `start` when
+/// the balance is older, from `start` through the balance date otherwise (operations on the
+/// balance date are included in the balance). `None` when no day separates them.
+pub fn balance_adjustment_window(
+    balance_date: NaiveDate,
+    start: NaiveDate,
+) -> Option<(NaiveDate, NaiveDate)> {
+    if balance_date < start {
+        let first = balance_date.succ_opt()?;
+        let last = start.pred_opt()?;
+        (first <= last).then_some((first, last))
+    } else {
+        Some((start, balance_date))
+    }
+}
+
+/// Account balance at the start of `start`, before any operation accounted on that day:
+/// the recorded balance plus the operations accounted after it and before `start`, or minus
+/// those accounted from `start` through the balance date when the balance is more recent.
+/// `rows` must cover [`balance_adjustment_window`]; rows outside it are ignored.
+pub fn starting_balance<'a>(
+    balance: AccountBalance,
+    start: NaiveDate,
+    rows: impl IntoIterator<Item = &'a SummaryRow>,
+) -> Decimal {
+    let Some((first, last)) = balance_adjustment_window(balance.date, start) else {
+        return balance.amount;
+    };
+    let net: Decimal = rows
+        .into_iter()
+        .filter(|row| (first..=last).contains(&row.date))
+        .map(|row| row.amount)
+        .sum();
+    if balance.date < start {
+        balance.amount + net
+    } else {
+        balance.amount - net
+    }
+}
+
 pub fn compute_forecast(input: &ForecastInput<'_>) -> Forecast {
     let unbudgeted_rate = unbudgeted_rate(input.history, input.today);
-    let mut cumulative = Decimal::ZERO;
+    let mut cumulative = input.starting_balance.unwrap_or_default();
     let mut totals = Flows::default();
     let months: Vec<ForecastMonth> = horizon(input.from, input.months)
         .map(|month| {
@@ -242,6 +292,7 @@ pub fn compute_forecast(input: &ForecastInput<'_>) -> Forecast {
         daily_budget: daily_budget(cumulative, unbudgeted_total, days_left),
         months,
         totals,
+        starting_balance: input.starting_balance,
         end_balance: cumulative,
         unbudgeted_rate,
         days_left,
@@ -486,6 +537,7 @@ mod tests {
             budgets: &budgets,
             rows: &rows,
             history: &[],
+            starting_balance: None,
         });
 
         let expected = [
@@ -531,6 +583,7 @@ mod tests {
             budgets: &[monthly_budget(BudgetType::Expense, dec!(-10))],
             rows: &[],
             history: &[],
+            starting_balance: None,
         });
         let months: Vec<_> = forecast.months.iter().map(|m| m.month).collect();
         assert_eq!(
@@ -554,6 +607,7 @@ mod tests {
             budgets: &[],
             rows: &[],
             history: &[],
+            starting_balance: None,
         });
         assert!(forecast.months.is_empty());
         assert_eq!(forecast.totals, Flows::default());
@@ -658,6 +712,7 @@ mod tests {
                 budgets: &budgets,
                 rows: &rows,
                 history: &[],
+                starting_balance: None,
             });
             let month = &forecast.months[0];
             assert_eq!(month.status, MonthStatus::Current, "{case}");
@@ -678,6 +733,7 @@ mod tests {
             budgets: std::slice::from_ref(&groceries),
             rows: &rows,
             history: &[],
+            starting_balance: None,
         });
         let actual: Vec<_> = forecast
             .months
@@ -807,6 +863,7 @@ mod tests {
             budgets: &[],
             rows: &rows,
             history: &rows,
+            starting_balance: None,
         });
         assert_eq!(forecast.unbudgeted_rate, dec!(-10));
         let actual: Vec<_> = forecast
@@ -839,6 +896,7 @@ mod tests {
             budgets: &[],
             rows: &[],
             history: &history,
+            starting_balance: None,
         });
         assert_eq!(forecast.unbudgeted_rate, dec!(-9.8889));
         assert_eq!(forecast.months[0].unbudgeted_forecast, dec!(0));
@@ -856,6 +914,7 @@ mod tests {
                 budgets: &[],
                 rows: &[],
                 history: &history,
+                starting_balance: None,
             })
         };
 
@@ -912,6 +971,7 @@ mod tests {
             budgets: &budgets,
             rows: &[],
             history: &history,
+            starting_balance: None,
         })
     }
 
@@ -989,8 +1049,174 @@ mod tests {
                 budgets: &[],
                 rows: &rows,
                 history: &[],
+                starting_balance: None,
             });
             assert_eq!(forecast.first_negative_month, expected, "{case}");
         }
+    }
+
+    #[test]
+    fn balance_adjustment_window_spans_the_days_between_balance_and_horizon() {
+        let start = date(2026, 1, 1);
+        let cases = [
+            (
+                "older balance: the day after it to the eve of the start",
+                date(2025, 11, 30),
+                Some((date(2025, 12, 1), date(2025, 12, 31))),
+            ),
+            (
+                "balance on the eve of the start: nothing",
+                date(2025, 12, 31),
+                None,
+            ),
+            (
+                "balance on the start: that day only",
+                start,
+                Some((start, start)),
+            ),
+            (
+                "more recent balance: the start through the balance date",
+                date(2026, 3, 15),
+                Some((start, date(2026, 3, 15))),
+            ),
+        ];
+        for (case, balance_date, expected) in cases {
+            assert_eq!(
+                balance_adjustment_window(balance_date, start),
+                expected,
+                "{case}"
+            );
+        }
+    }
+
+    #[test]
+    fn starting_balance_adds_operations_after_an_older_balance() {
+        let balance = AccountBalance {
+            amount: dec!(1000),
+            date: date(2025, 12, 10),
+        };
+        let rows = [
+            // On the balance date: already included in it.
+            row(date(2025, 12, 10), dec!(-999), None),
+            row(date(2025, 12, 11), dec!(-200), Some("expense")),
+            row(date(2025, 12, 20), dec!(50), None),
+            row(date(2025, 12, 31), dec!(-30), Some("savings")),
+            // On or after the start: counted by the horizon itself.
+            row(date(2026, 1, 1), dec!(-999), None),
+        ];
+        assert_eq!(
+            starting_balance(balance, date(2026, 1, 1), &rows),
+            dec!(820)
+        );
+    }
+
+    #[test]
+    fn starting_balance_removes_operations_up_to_a_more_recent_balance() {
+        let balance = AccountBalance {
+            amount: dec!(1000),
+            date: date(2026, 3, 15),
+        };
+        let rows = [
+            row(date(2025, 12, 31), dec!(-999), None),
+            row(date(2026, 1, 1), dec!(2000), Some("income")),
+            row(date(2026, 2, 3), dec!(-700), None),
+            // On the balance date: included in it, so taken back out too.
+            row(date(2026, 3, 15), dec!(-100), None),
+            // After the balance date: not yet in the balance.
+            row(date(2026, 3, 16), dec!(-999), None),
+        ];
+        // 1000 - (2000 - 700 - 100)
+        assert_eq!(
+            starting_balance(balance, date(2026, 1, 1), &rows),
+            dec!(-200)
+        );
+    }
+
+    #[test]
+    fn starting_balance_on_the_eve_of_the_horizon_is_the_balance() {
+        let balance = AccountBalance {
+            amount: dec!(42.5),
+            date: date(2025, 12, 31),
+        };
+        let rows = [row(date(2025, 12, 31), dec!(-10), None)];
+        assert_eq!(
+            starting_balance(balance, date(2026, 1, 1), &rows),
+            dec!(42.5)
+        );
+    }
+
+    #[test]
+    fn a_balance_recorded_mid_horizon_lands_on_its_own_date() {
+        // Balance of 500 recorded on 2026-02-15, with 2000 in and 700 out in January and
+        // 300 out on 2026-02-10: the horizon starts at 500 - (2000 - 700 - 300) = -500.
+        let rows = [
+            row(date(2026, 1, 5), dec!(2000), Some("income")),
+            row(date(2026, 1, 20), dec!(-700), None),
+            row(date(2026, 2, 10), dec!(-300), None),
+        ];
+        let balance = AccountBalance {
+            amount: dec!(500),
+            date: date(2026, 2, 15),
+        };
+        let seed = starting_balance(balance, date(2026, 1, 1), &rows);
+        let forecast = compute_forecast(&ForecastInput {
+            from: YearMonth::new(2026, 1),
+            months: 2,
+            today: date(2026, 3, 1),
+            budgets: &[],
+            rows: &rows,
+            history: &[],
+            starting_balance: Some(seed),
+        });
+        assert_eq!(forecast.starting_balance, Some(dec!(-500)));
+        let cumulative: Vec<_> = forecast.months.iter().map(|m| m.cumulative).collect();
+        // End of February: the recorded balance, since nothing happened after it.
+        assert_eq!(cumulative, vec![dec!(800), dec!(500)]);
+        assert_eq!(forecast.end_balance, dec!(500));
+        assert_eq!(forecast.first_negative_month, None);
+    }
+
+    #[test]
+    fn starting_balance_seeds_cumulative_daily_budget_and_first_negative_month() {
+        let budgets = [monthly_budget(BudgetType::Expense, dec!(-1000))];
+        let input = |starting_balance| ForecastInput {
+            from: YearMonth::new(2099, 1),
+            months: 2,
+            today: date(2026, 4, 20),
+            budgets: &budgets,
+            rows: &[],
+            history: &[],
+            starting_balance,
+        };
+
+        let without = compute_forecast(&input(None));
+        assert_eq!(without.starting_balance, None);
+        assert_eq!(without.end_balance, dec!(-2000));
+        assert_eq!(without.first_negative_month, Some(YearMonth::new(2099, 1)));
+
+        let with = compute_forecast(&input(Some(dec!(1500))));
+        assert_eq!(with.starting_balance, Some(dec!(1500)));
+        let cumulative: Vec<_> = with.months.iter().map(|m| m.cumulative).collect();
+        assert_eq!(cumulative, vec![dec!(500), dec!(-500)]);
+        assert_eq!(with.totals, without.totals);
+        assert_eq!(with.end_balance, dec!(-500));
+        assert_eq!(with.first_negative_month, Some(YearMonth::new(2099, 2)));
+        // -500 over January and February 2099 (59 days).
+        assert_eq!(with.days_left, 59);
+        assert_eq!(with.daily_budget, Some(dec!(-8.47)));
+    }
+
+    #[test]
+    fn empty_horizon_ends_at_the_starting_balance() {
+        let forecast = compute_forecast(&ForecastInput {
+            from: YearMonth::new(2026, 1),
+            months: 0,
+            today: date(2026, 4, 20),
+            budgets: &[],
+            rows: &[],
+            history: &[],
+            starting_balance: Some(dec!(12)),
+        });
+        assert_eq!(forecast.end_balance, dec!(12));
     }
 }
