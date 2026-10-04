@@ -73,6 +73,9 @@ pub struct ForecastMonth {
     pub month: YearMonth,
     pub status: MonthStatus,
     pub flows: Flows,
+    /// Part of `flows` the budgets still expect this month on top of what is already linked
+    /// to them; zero outside the current month.
+    pub committed: Decimal,
     /// Running balance at the end of this month, starting from zero before the horizon.
     pub cumulative: Decimal,
 }
@@ -106,13 +109,14 @@ pub fn compute_forecast(input: &ForecastInput<'_>) -> Forecast {
     let months: Vec<ForecastMonth> = horizon(input.from, input.months)
         .map(|month| {
             let status = MonthStatus::of(month, input.today);
-            let flows = project_month(input, month, status);
+            let MonthProjection { flows, committed } = project_month(input, month, status);
             cumulative += flows.balance();
             totals += flows;
             ForecastMonth {
                 month,
                 status,
                 flows,
+                committed,
                 cumulative,
             }
         })
@@ -124,17 +128,86 @@ pub fn compute_forecast(input: &ForecastInput<'_>) -> Forecast {
     }
 }
 
-/// Flows of one month: what was accounted for past and current months, what the budgets
-/// expect for future ones.
-fn project_month(input: &ForecastInput<'_>, month: YearMonth, status: MonthStatus) -> Flows {
+struct MonthProjection {
+    flows: Flows,
+    committed: Decimal,
+}
+
+/// Flows of one month: what was accounted for past months; for the current month, that
+/// plus what each budget still expects; what the budgets expect for future months.
+fn project_month(
+    input: &ForecastInput<'_>,
+    month: YearMonth,
+    status: MonthStatus,
+) -> MonthProjection {
+    let month_rows = || {
+        input
+            .rows
+            .iter()
+            .filter(move |row| YearMonth::of(row.date) == month)
+    };
     match status {
-        MonthStatus::Past | MonthStatus::Current => actual_flows(
-            input
-                .rows
-                .iter()
-                .filter(|row| YearMonth::of(row.date) == month),
-        ),
-        MonthStatus::Future => expected_flows(input.budgets, month),
+        MonthStatus::Past => MonthProjection {
+            flows: actual_flows(month_rows()),
+            committed: Decimal::ZERO,
+        },
+        MonthStatus::Current => {
+            let mut flows = actual_flows(month_rows());
+            let mut committed = Decimal::ZERO;
+            for budget in input.budgets {
+                let remaining = budget_progress(budget, month, input.rows).remaining;
+                flows.add_budgeted(budget.budget_type, remaining);
+                committed += remaining;
+            }
+            MonthProjection { flows, committed }
+        }
+        MonthStatus::Future => MonthProjection {
+            flows: expected_flows(input.budgets, month),
+            committed: Decimal::ZERO,
+        },
+    }
+}
+
+/// How far one budget has got in a month, amounts signed like operations.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BudgetProgress {
+    /// What the budget expects this month, `None` when it expects nothing.
+    pub expected: Option<Decimal>,
+    /// Net of the amounts linked to the budget this month.
+    pub actual: Decimal,
+    /// Part of `expected` not reached yet, in the budget's direction; zero once reached or
+    /// exceeded.
+    pub remaining: Decimal,
+}
+
+/// Progress of `budget` in `month` from the accounted `rows` (rows of other budgets or
+/// months are ignored).
+pub fn budget_progress<'a>(
+    budget: &Budget,
+    month: YearMonth,
+    rows: impl IntoIterator<Item = &'a SummaryRow>,
+) -> BudgetProgress {
+    let actual: Decimal = rows
+        .into_iter()
+        .filter(|row| {
+            row.budget_id == Some(budget.id)
+                && YearMonth::of(row.date) == month
+                && matches!(row.category(), Some(SummaryCategory::Budgeted(_)))
+        })
+        .map(|row| row.amount)
+        .sum();
+    let expected = budget
+        .kind
+        .expected_amount_for_month(month.year, month.month);
+    let remaining = match expected {
+        Some(expected) if expected > Decimal::ZERO => (expected - actual).max(Decimal::ZERO),
+        Some(expected) if expected < Decimal::ZERO => (expected - actual).min(Decimal::ZERO),
+        _ => Decimal::ZERO,
+    };
+    BudgetProgress {
+        expected,
+        actual,
+        remaining,
     }
 }
 
@@ -300,17 +373,18 @@ mod tests {
                 flows(dec!(2000), dec!(-100), dec!(0)),
                 dec!(1900),
             ),
+            // Nothing linked yet: both budgets are still fully expected.
             (
                 YearMonth::new(2026, 2),
                 MonthStatus::Current,
-                flows(dec!(0), dec!(-50), dec!(0)),
-                dec!(1850),
+                flows(dec!(2500), dec!(-850), dec!(0)),
+                dec!(3550),
             ),
             (
                 YearMonth::new(2026, 3),
                 MonthStatus::Future,
                 flows(dec!(2500), dec!(-800), dec!(0)),
-                dec!(3550),
+                dec!(5250),
             ),
         ];
         let actual: Vec<_> = forecast
@@ -319,9 +393,11 @@ mod tests {
             .map(|m| (m.month, m.status, m.flows, m.cumulative))
             .collect();
         assert_eq!(actual, expected);
-        assert_eq!(forecast.totals, flows(dec!(4500), dec!(-950), dec!(0)));
-        assert_eq!(forecast.totals.balance(), dec!(3550));
-        assert_eq!(forecast.end_balance, dec!(3550));
+        let committed: Vec<_> = forecast.months.iter().map(|m| m.committed).collect();
+        assert_eq!(committed, vec![dec!(0), dec!(1700), dec!(0)]);
+        assert_eq!(forecast.totals, flows(dec!(7000), dec!(-1750), dec!(0)));
+        assert_eq!(forecast.totals.balance(), dec!(5250));
+        assert_eq!(forecast.end_balance, dec!(5250));
     }
 
     #[test]
@@ -358,5 +434,157 @@ mod tests {
         assert!(forecast.months.is_empty());
         assert_eq!(forecast.totals, Flows::default());
         assert_eq!(forecast.end_balance, Decimal::ZERO);
+    }
+
+    fn linked(day: NaiveDate, amount: Decimal, budget: &Budget) -> SummaryRow {
+        SummaryRow {
+            amount,
+            date: day,
+            budget_link_type: "manual".to_string(),
+            budget_id: Some(budget.id),
+            budget_type: Some(budget.budget_type.as_str().to_string()),
+        }
+    }
+
+    #[test]
+    fn current_month_adds_what_each_budget_still_expects() {
+        let today = date(2026, 3, 12);
+        let earlier = date(2026, 3, 5);
+        let groceries = monthly_budget(BudgetType::Expense, dec!(-550));
+        let salary = monthly_budget(BudgetType::Income, dec!(3420));
+        let livret = monthly_budget(BudgetType::Savings, dec!(-200));
+        let mut ended = monthly_budget(BudgetType::Expense, dec!(-90));
+        if let BudgetKind::Recurring { current_period, .. } = &mut ended.kind {
+            current_period.end = Some(YearMonth::new(2026, 2));
+        }
+
+        // (case, budgets, rows of the month, expected flows, expected committed)
+        let cases = [
+            (
+                "expense partially spent",
+                vec![&groceries],
+                vec![linked(earlier, dec!(-330), &groceries)],
+                flows(dec!(0), dec!(-550), dec!(0)),
+                dec!(-220),
+            ),
+            (
+                "expense exceeded",
+                vec![&groceries],
+                vec![
+                    linked(earlier, dec!(-500), &groceries),
+                    linked(today, dec!(-120), &groceries),
+                ],
+                flows(dec!(0), dec!(-620), dec!(0)),
+                dec!(0),
+            ),
+            (
+                "income not yet received",
+                vec![&salary],
+                vec![],
+                flows(dec!(3420), dec!(0), dec!(0)),
+                dec!(3420),
+            ),
+            (
+                "income received",
+                vec![&salary],
+                vec![linked(earlier, dec!(3500), &salary)],
+                flows(dec!(3500), dec!(0), dec!(0)),
+                dec!(0),
+            ),
+            (
+                "savings partially done",
+                vec![&livret],
+                vec![linked(earlier, dec!(-50), &livret)],
+                flows(dec!(0), dec!(0), dec!(-200)),
+                dec!(-150),
+            ),
+            (
+                "budget expecting nothing this month",
+                vec![&ended],
+                vec![linked(earlier, dec!(-40), &ended)],
+                flows(dec!(0), dec!(-40), dec!(0)),
+                dec!(0),
+            ),
+            (
+                "unbudgeted actuals unchanged",
+                vec![],
+                vec![row(earlier, dec!(-35), None), row(earlier, dec!(60), None)],
+                flows(dec!(60), dec!(-35), dec!(0)),
+                dec!(0),
+            ),
+            (
+                "rows of another budget do not reach this one",
+                vec![&groceries, &salary],
+                vec![
+                    linked(earlier, dec!(-100), &groceries),
+                    linked(earlier, dec!(1000), &salary),
+                    row(earlier, dec!(-20), None),
+                ],
+                flows(dec!(3420), dec!(-570), dec!(0)),
+                dec!(1970),
+            ),
+        ];
+
+        for (case, budgets, rows, expected_flows, expected_committed) in cases {
+            let budgets: Vec<Budget> = budgets.into_iter().cloned().collect();
+            let forecast = compute_forecast(&ForecastInput {
+                from: YearMonth::new(2026, 3),
+                months: 1,
+                today,
+                budgets: &budgets,
+                rows: &rows,
+            });
+            let month = &forecast.months[0];
+            assert_eq!(month.status, MonthStatus::Current, "{case}");
+            assert_eq!(month.flows, expected_flows, "{case}");
+            assert_eq!(month.committed, expected_committed, "{case}");
+            assert_eq!(month.cumulative, expected_flows.balance(), "{case}");
+        }
+    }
+
+    #[test]
+    fn past_and_future_months_commit_nothing() {
+        let groceries = monthly_budget(BudgetType::Expense, dec!(-550));
+        let rows = [linked(date(2026, 2, 3), dec!(-100), &groceries)];
+        let forecast = compute_forecast(&ForecastInput {
+            from: YearMonth::new(2026, 2),
+            months: 3,
+            today: date(2026, 3, 1),
+            budgets: std::slice::from_ref(&groceries),
+            rows: &rows,
+        });
+        let actual: Vec<_> = forecast
+            .months
+            .iter()
+            .map(|m| (m.status, m.flows.expenses, m.committed))
+            .collect();
+        assert_eq!(
+            actual,
+            vec![
+                (MonthStatus::Past, dec!(-100), dec!(0)),
+                (MonthStatus::Current, dec!(-550), dec!(-550)),
+                (MonthStatus::Future, dec!(-550), dec!(0)),
+            ]
+        );
+    }
+
+    #[test]
+    fn budget_progress_ignores_other_months_and_unknown_link_types() {
+        let groceries = monthly_budget(BudgetType::Expense, dec!(-550));
+        let mut ignored = linked(date(2026, 3, 2), dec!(-999), &groceries);
+        ignored.budget_link_type = "ignored".to_string();
+        let rows = [
+            linked(date(2026, 3, 2), dec!(-330), &groceries),
+            linked(date(2026, 2, 28), dec!(-100), &groceries),
+            ignored,
+        ];
+        assert_eq!(
+            budget_progress(&groceries, YearMonth::new(2026, 3), &rows),
+            BudgetProgress {
+                expected: Some(dec!(-550)),
+                actual: dec!(-330),
+                remaining: dec!(-220),
+            }
+        );
     }
 }

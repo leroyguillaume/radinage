@@ -34,6 +34,7 @@ interface MonthFlows {
 	income: number;
 	expenses: number;
 	savings: number;
+	committed?: number;
 }
 
 function money(amount: number): string {
@@ -57,7 +58,7 @@ function makeForecast(
 	const totals = { income: 0, expenses: 0, savings: 0 };
 	const months = Array.from({ length: 12 }, (_, i) => {
 		const month = i + 1;
-		const { income, expenses, savings } = flowsOf(month);
+		const { income, expenses, savings, committed = 0 } = flowsOf(month);
 		const balance = income + expenses + savings;
 		cumulative += balance;
 		totals.income += income;
@@ -71,6 +72,7 @@ function makeForecast(
 			expenses: money(expenses),
 			savings: money(savings),
 			balance: money(balance),
+			committed: money(committed),
 			cumulative: money(cumulative),
 		};
 	});
@@ -317,6 +319,39 @@ describe("SummaryPage", () => {
 		const januaryText = (january?.textContent ?? "").replace(/\s/g, "");
 		expect(januaryText).toMatch(/1234,00/);
 		expect(januaryText).toMatch(/-567,00/);
+	});
+
+	it("shows what the budgets still expect in the current month's row", async () => {
+		const year = new Date().getFullYear();
+		const currentMonth = new Date().getMonth() + 1;
+		setupMocks((y) =>
+			makeForecast(y, (month) =>
+				month === currentMonth
+					? { income: 2500, expenses: -900, savings: 0, committed: -220 }
+					: { income: 0, expenses: 0, savings: 0 },
+			),
+		);
+
+		await renderSummaryPage(`?year=${year}`);
+
+		const table = await screen.findByRole("table");
+		const notes = within(table).getAllByText(/dont .* à venir/);
+		expect(notes).toHaveLength(1);
+		expect((notes[0]?.textContent ?? "").replace(/\s/g, "")).toMatch(
+			/dont-220,00€àvenir/,
+		);
+		const currentRow = within(table)
+			.getAllByRole("row")
+			.find((row) => row.getAttribute("aria-current") === "date");
+		expect(currentRow).toBeDefined();
+		expect(currentRow?.contains(notes[0] ?? null)).toBe(true);
+	});
+
+	it("shows no still-to-come note when nothing is committed", async () => {
+		await renderSummaryPage(`?year=${new Date().getFullYear()}`);
+
+		const table = await screen.findByRole("table");
+		expect(within(table).queryByText(/à venir/)).not.toBeInTheDocument();
 	});
 
 	it("clamps daily budget to zero when end-of-year balance is negative", async () => {
