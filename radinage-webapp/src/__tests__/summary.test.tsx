@@ -12,7 +12,11 @@ import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { i18n } from "@/i18n";
-import type { ForecastMonthStatus, ForecastResponse } from "@/lib/types";
+import type {
+	ForecastMonthStatus,
+	ForecastResponse,
+	YearMonth,
+} from "@/lib/types";
 import { theme } from "@/theme";
 
 vi.mock("@/lib/api", () => ({
@@ -57,9 +61,10 @@ type ForecastExtras = Partial<
 	>
 >;
 
-/** A 12-month forecast for `year`, statuses relative to today like the server's. */
-function makeForecast(
-	year: number,
+/** A forecast of `count` months from `from`, statuses relative to today like the server's. */
+function makeForecastFrom(
+	from: YearMonth,
+	count: number,
 	flowsOf: (month: number) => MonthFlows,
 	extras: ForecastExtras = {},
 ): ForecastResponse {
@@ -67,8 +72,10 @@ function makeForecast(
 	let cumulative = Number(startingBalance ?? 0);
 	let firstNegativeMonth: ForecastResponse["firstNegativeMonth"] = null;
 	const totals = { income: 0, expenses: 0, savings: 0 };
-	const months = Array.from({ length: 12 }, (_, i) => {
-		const month = i + 1;
+	const months = Array.from({ length: count }, (_, i) => {
+		const index = from.year * 12 + from.month - 1 + i;
+		const year = Math.floor(index / 12);
+		const month = (index % 12) + 1;
 		const {
 			income,
 			expenses,
@@ -115,24 +122,38 @@ function makeForecast(
 	};
 }
 
+function makeForecast(
+	year: number,
+	flowsOf: (month: number) => MonthFlows,
+	extras: ForecastExtras = {},
+): ForecastResponse {
+	return makeForecastFrom({ year, month: 1 }, 12, flowsOf, extras);
+}
+
 const typicalMonth = (): MonthFlows => ({
 	income: 2500,
 	expenses: -900,
 	savings: -300,
 });
 
-function setupMocks(forecastOf: (year: number) => ForecastResponse) {
+function setupMocks(
+	forecastOf: (year: number, month: number, count: number) => ForecastResponse,
+) {
 	apiFetchMock.mockReset();
 	apiFetchMock.mockImplementation((path: string) => {
-		const match = /^\/forecast\?fromYear=(\d+)&fromMonth=1&months=12$/.exec(
-			path,
-		);
-		if (match?.[1]) {
-			return Promise.resolve(forecastOf(Number(match[1])));
+		const match =
+			/^\/forecast\?fromYear=(\d+)&fromMonth=(\d+)&months=(\d+)$/.exec(path);
+		if (match) {
+			return Promise.resolve(
+				forecastOf(Number(match[1]), Number(match[2]), Number(match[3])),
+			);
 		}
 		return Promise.reject(new Error(`Unexpected path: ${path}`));
 	});
 }
+
+const typicalForecast = (year: number, month: number, count: number) =>
+	makeForecastFrom({ year, month }, count, typicalMonth);
 
 async function renderSummaryPage(searchParams = "") {
 	const queryClient = new QueryClient({
@@ -165,16 +186,145 @@ async function renderSummaryPage(searchParams = "") {
 		</QueryClientProvider>,
 	);
 
-	return { queryClient };
+	return { queryClient, router };
 }
 
 beforeEach(() => {
 	i18n.changeLanguage("fr");
-	setupMocks((year) => makeForecast(year, typicalMonth));
+	setupMocks(typicalForecast);
 });
 
 afterEach(() => {
+	vi.useRealTimers();
 	vi.restoreAllMocks();
+});
+
+function compact(element: HTMLElement): string {
+	return (element.textContent ?? "").replace(/\s/g, "");
+}
+
+describe("SummaryPage period mode", () => {
+	beforeEach(() => {
+		vi.useFakeTimers({ toFake: ["Date"] });
+		vi.setSystemTime(new Date(2026, 9, 15));
+	});
+
+	it("keeps old ?year= links on the calendar year", async () => {
+		await renderSummaryPage("?year=2025");
+
+		expect(
+			await screen.findByRole("radio", { name: "Année 2025" }),
+		).toBeChecked();
+		expect(
+			screen.getByRole("radio", { name: "12 prochains mois" }),
+		).not.toBeChecked();
+		expect(
+			screen.getByRole("button", { name: "Année suivante" }),
+		).toBeInTheDocument();
+		await waitFor(() => {
+			expect(apiFetchMock).toHaveBeenCalledWith(
+				"/forecast?fromYear=2025&fromMonth=1&months=12",
+			);
+		});
+		const rows = within(await screen.findByRole("table")).getAllByRole("row");
+		expect(rows[1]?.textContent).toMatch(/janvier/i);
+		expect(rows[1]?.textContent).not.toMatch(/2025/);
+	});
+
+	it("switches to the next 12 months and back through the URL", async () => {
+		const user = userEvent.setup();
+		const { router } = await renderSummaryPage("?year=2025");
+		await screen.findByRole("table");
+
+		await user.click(screen.getByRole("radio", { name: "12 prochains mois" }));
+
+		await waitFor(() => {
+			expect(router.state.location.search).toEqual({
+				year: 2025,
+				mode: "rolling",
+			});
+		});
+		await waitFor(() => {
+			expect(apiFetchMock).toHaveBeenCalledWith(
+				"/forecast?fromYear=2026&fromMonth=10&months=12",
+			);
+		});
+		expect(
+			screen.queryByRole("button", { name: "Année suivante" }),
+		).not.toBeInTheDocument();
+
+		await user.click(screen.getByRole("radio", { name: "Année 2025" }));
+
+		await waitFor(() => {
+			expect(router.state.location.search).toEqual({ year: 2025 });
+		});
+		expect(
+			await screen.findByRole("button", { name: "Année suivante" }),
+		).toBeInTheDocument();
+	});
+
+	it("labels months with their year across January", async () => {
+		await renderSummaryPage("?mode=rolling");
+
+		const table = await screen.findByRole("table");
+		const rows = within(table).getAllByRole("row");
+		expect(rows).toHaveLength(13);
+		expect(rows[1]?.textContent).toMatch(/octobre 2026/i);
+		expect(rows[4]?.textContent).toMatch(/janvier 2027/i);
+		expect(rows[12]?.textContent).toMatch(/septembre 2027/i);
+
+		const chart = screen.getByRole("heading", {
+			name: "Balance mois par mois",
+		});
+		const section = chart.closest("section") as HTMLElement;
+		expect(within(section).getAllByText("2026")).toHaveLength(3);
+		expect(within(section).getAllByText("2027")).toHaveLength(9);
+	});
+
+	it("titles the cards after the rolling period", async () => {
+		await renderSummaryPage("?mode=rolling");
+
+		const card = await screen.findByRole("region", {
+			name: "Balance au 30 septembre 2027",
+		});
+		expect(compact(card)).toMatch(/àlafindelapériode/);
+		expect(
+			screen.getByRole("region", { name: "Totaux sur 12 mois" }),
+		).toBeInTheDocument();
+		expect(screen.getByText(/Progression de la période/)).toBeInTheDocument();
+		expect(screen.queryByText("Balance fin d'année")).not.toBeInTheDocument();
+	});
+
+	it("shows the projected balance at the end of the rolling period", async () => {
+		setupMocks((year, month, count) =>
+			makeForecastFrom({ year, month }, count, typicalMonth, {
+				startingBalance: "1000.00",
+			}),
+		);
+
+		await renderSummaryPage("?mode=rolling");
+
+		const card = await screen.findByRole("region", {
+			name: "Solde prévu au 30 septembre 2027",
+		});
+		expect(compact(card)).toMatch(/Soldeau1octobre2026:1000,00/);
+	});
+
+	it("titles the rolling period in English too", async () => {
+		await i18n.changeLanguage("en");
+
+		await renderSummaryPage("?mode=rolling");
+
+		expect(
+			await screen.findByRole("region", {
+				name: "Balance on September 30, 2027",
+			}),
+		).toBeInTheDocument();
+		expect(
+			screen.getByRole("region", { name: "12-month totals" }),
+		).toBeInTheDocument();
+		expect(screen.getByRole("radio", { name: "Next 12 months" })).toBeChecked();
+	});
 });
 
 describe("SummaryPage", () => {
