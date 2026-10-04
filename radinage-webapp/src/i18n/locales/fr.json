@@ -216,7 +216,13 @@
 		"projected": "Prévision",
 		"committed": "dont {{amount}} à venir",
 		"unbudgetedForecast": "dont {{amount}} hors budget estimés",
-		"unbudgetedRate": "Dépenses hors budget estimées à {{amount}} par jour, la moyenne des 3 derniers mois complets."
+		"unbudgetedRate": "Dépenses hors budget estimées à {{amount}} par jour, la moyenne des 3 derniers mois complets.",
+		"dailyBudgetHint": "Ce que tu peux encore dépenser chaque jour hors budgets sans finir la période dans le rouge.",
+		"dailyBudgetNegativeHint": "Négatif : tes budgets seuls finissent déjà la période dans le rouge. Il faudrait gagner ou économiser ce montant chaque jour pour revenir à zéro.",
+		"dailyBudgetOver": "Période terminée : plus aucun jour à budgéter.",
+		"firstNegativeTitle": "Solde négatif à partir de {{month}}",
+		"firstNegativeText": "Le cumulé passe sous zéro ce mois-là si tes budgets et tes dépenses hors budget suivent la prévision.",
+		"firstNegativeMarker": "Passage dans le rouge"
 	},
 	"nav": {
 		"operations": "Opérations",

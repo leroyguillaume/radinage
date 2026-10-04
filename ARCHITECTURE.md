@@ -191,9 +191,15 @@ daily operations' forecast, use the same rate. Budget-linked amounts count under
 their budget's type; an operation outside any budget counts as income or as an
 expense by its own sign, so a salary and a grocery run in the same month never
 cancel each other out. The running balance starts at zero before the first
-month. Keeping this in the API gives a single, tested
-definition of the numbers; the web app only derives presentation values from
-it, such as the daily budget.
+month. The response also carries `dailyBudget`: the end balance before the
+unbudgeted forecast, shared over `daysLeft`, the days from today (or from the
+start of a horizon not begun yet) to its last day, today included. It is what
+can still be spent per day outside any budget without ending the horizon below
+zero: the unbudgeted forecast is added back because that spending is what the
+amount pays for. It stays negative when the budgets alone end in the red and is
+null once the horizon is over. `firstNegativeMonth` is the
+first month whose running balance is below zero. Keeping this in the API gives
+a single, tested definition of the numbers; the web app only formats them.
 
 **Same-origin web app.** nginx serves the SPA and proxies `/api/` on the same
 origin, so the browser needs no CORS and the API address is a deployment

@@ -144,6 +144,17 @@ pub struct ForecastResponse {
     /// four decimals. Zero or negative; independent of the horizon.
     #[schemars(with = "String")]
     pub unbudgeted_rate: Decimal,
+    /// Days from today (server date) to the last day of the horizon, both included; counted
+    /// from the first day of the horizon when it has not started yet, zero once it is over.
+    pub days_left: u32,
+    /// What can still be spent per day on things outside any budget without ending the
+    /// horizon below zero: (`endBalance` minus the summed `unbudgetedForecast`) / `daysLeft`,
+    /// rounded to the cent. Negative when the budgets alone already end in the red; null when
+    /// the horizon is over (`daysLeft` is zero).
+    #[schemars(with = "Option<String>")]
+    pub daily_budget: Option<Decimal>,
+    /// First month of the horizon whose `cumulative` is below zero, null when none is.
+    pub first_negative_month: Option<YearMonth>,
 }
 
 impl From<Forecast> for ForecastResponse {
@@ -153,6 +164,9 @@ impl From<Forecast> for ForecastResponse {
             totals: forecast.totals.into(),
             end_balance: forecast.end_balance,
             unbudgeted_rate: forecast.unbudgeted_rate,
+            days_left: forecast.days_left,
+            daily_budget: forecast.daily_budget,
+            first_negative_month: forecast.first_negative_month,
         }
     }
 }
@@ -347,6 +361,9 @@ mod tests {
                            "balance": "100.00"},
                 "endBalance": "100.00",
                 "unbudgetedRate": "0",
+                "daysLeft": 0,
+                "dailyBudget": null,
+                "firstNegativeMonth": null,
             })
         );
     }
@@ -534,5 +551,35 @@ mod tests {
         // The history row is counted once, in its own past month.
         assert_eq!(json.months[0].expenses, dec!(-50));
         assert_eq!(json.months[0].unbudgeted_forecast, Decimal::ZERO);
+    }
+
+    #[tokio::test]
+    async fn future_horizon_exposes_daily_budget_and_first_negative_month() {
+        let user_id = Uuid::new_v4();
+        let mut or = MockOperationRepository::new();
+        or.expect_list_for_summary()
+            .returning(|_, _, _| Box::pin(async { Ok(vec![]) }));
+        let mut br = MockBudgetRepository::new();
+        br.expect_list_all_for_user().returning(move |_| {
+            Box::pin(async move {
+                Ok(vec![
+                    monthly_budget(user_id, BudgetType::Income, dec!(1000)),
+                    monthly_budget(user_id, BudgetType::Expense, dec!(-1060)),
+                ])
+            })
+        });
+
+        let resp = get(or, br, user_id, "fromYear=2099&fromMonth=1&months=2").await;
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        let json: serde_json::Value = response_json(resp).await;
+        // -60 per month over January and February 2099 (59 days), no unbudgeted history.
+        assert_eq!(json["endBalance"], "-120");
+        assert_eq!(json["daysLeft"], 59);
+        assert_eq!(json["dailyBudget"], "-2.03");
+        assert_eq!(
+            json["firstNegativeMonth"],
+            serde_json::json!({"year": 2099, "month": 1})
+        );
     }
 }

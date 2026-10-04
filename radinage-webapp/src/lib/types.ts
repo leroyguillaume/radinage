@@ -80,6 +80,12 @@ export interface ForecastResponse {
 	endBalance: string;
 	/** Average daily unbudgeted spending of the 3 complete months before the current one; never positive. */
 	unbudgetedRate: string;
+	/** Days from today to the end of the horizon, both included; 0 once it is over. */
+	daysLeft: number;
+	/** Per-day room for unbudgeted spending without ending in the red; may be negative, null once the horizon is over. */
+	dailyBudget: string | null;
+	/** First month whose cumulative is below zero. */
+	firstNegativeMonth: YearMonth | null;
 }
 
 export interface YearMonth {
