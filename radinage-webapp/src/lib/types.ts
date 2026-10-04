@@ -69,6 +69,8 @@ export interface ForecastMonth extends ForecastFlows {
 	status: ForecastMonthStatus;
 	/** Part of `balance` the budgets still expect this month; "0" outside the current month. */
 	committed: string;
+	/** Unbudgeted spending expected at `unbudgetedRate`, included in `expenses`; "0" for past months. */
+	unbudgetedForecast: string;
 	cumulative: string;
 }
 
@@ -76,6 +78,8 @@ export interface ForecastResponse {
 	months: ForecastMonth[];
 	totals: ForecastFlows;
 	endBalance: string;
+	/** Average daily unbudgeted spending of the 3 complete months before the current one; never positive. */
+	unbudgetedRate: string;
 }
 
 export interface YearMonth {

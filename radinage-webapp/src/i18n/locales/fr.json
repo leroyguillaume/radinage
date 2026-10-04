@@ -193,7 +193,7 @@
 		"dailyBudget": "Budget / jour",
 		"remainingDays_one": "{{count}} jour restant",
 		"remainingDays_other": "{{count}} jours restants",
-		"subtitle": "Réel pour les mois passés, réel plus ce que tes budgets attendent encore pour le mois en cours, prévision ensuite à partir de tes budgets.",
+		"subtitle": "Réel pour les mois passés, réel plus ce que tes budgets attendent encore pour le mois en cours, prévision ensuite à partir de tes budgets. Les dépenses hors budget à venir suivent ta moyenne des 3 derniers mois.",
 		"previousYear": "Année précédente",
 		"nextYear": "Année suivante",
 		"endOfYearBalance": "Balance fin d'année",
@@ -214,7 +214,9 @@
 		"balance": "Balance",
 		"cumulative": "Cumulé",
 		"projected": "Prévision",
-		"committed": "dont {{amount}} à venir"
+		"committed": "dont {{amount}} à venir",
+		"unbudgetedForecast": "dont {{amount}} hors budget estimés",
+		"unbudgetedRate": "Dépenses hors budget estimées à {{amount}} par jour, la moyenne des 3 derniers mois complets."
 	},
 	"nav": {
 		"operations": "Opérations",

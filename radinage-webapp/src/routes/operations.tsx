@@ -49,14 +49,17 @@ import type { ImportResult } from "@/components/ImportModal";
 import { ImportModal } from "@/components/ImportModal";
 import { SplitOperationModal } from "@/components/SplitOperationModal";
 import { StatTile } from "@/components/StatTile";
-import { getBudgetedAmountForMonth } from "@/lib/budget-utils";
+import {
+	getBudgetedAmountForMonth,
+	getUnbudgetedForecastForMonth,
+} from "@/lib/budget-utils";
 import { formatAmount, formatSignedAmount } from "@/lib/format";
 import {
 	useBudgets,
+	useForecast,
 	useIgnoreOperation,
 	useLinkBudget,
 	useMonthlyOperations,
-	useSummary,
 	useUnlinkBudget,
 	useUpdateEffectiveDate,
 } from "@/lib/hooks";
@@ -386,15 +389,7 @@ function MonthlyOperationsPage() {
 	const operationsQuery = useMonthlyOperations(year, month);
 	const budgetsQuery = useBudgets();
 
-	// Fetch 3 previous months for daily expense forecast
-	const prev3Start = new Date(year, month - 4); // 3 months before
-	const prev3End = new Date(year, month - 2); // 1 month before
-	const summaryQuery = useSummary(
-		prev3Start.getFullYear(),
-		prev3Start.getMonth() + 1,
-		prev3End.getFullYear(),
-		prev3End.getMonth() + 1,
-	);
+	const forecastQuery = useForecast(year, month, 1);
 
 	const isLoading = operationsQuery.isLoading || budgetsQuery.isLoading;
 	const isError = operationsQuery.isError || budgetsQuery.isError;
@@ -442,23 +437,13 @@ function MonthlyOperationsPage() {
 		);
 	}
 
-	// Compute daily expense forecast from 3 previous months. Only the negative
-	// part of `unbudgeted` is actual spending — positive unbudgeted amounts are
-	// unlinked income and must not lift the forecast.
-	const forecast = (() => {
-		const months = summaryQuery.data?.months;
-		if (!months || months.length === 0) return null;
-		let totalUnbudgetedExpense = 0;
-		let totalDays = 0;
-		for (const m of months) {
-			totalUnbudgetedExpense += Math.min(0, Number(m.unbudgeted));
-			totalDays += new Date(m.year, m.month, 0).getDate();
-		}
-		if (totalDays === 0) return null;
-		const dailyAvg = totalUnbudgetedExpense / totalDays;
-		const daysInCurrentMonth = new Date(year, month, 0).getDate();
-		return dailyAvg * daysInCurrentMonth;
-	})();
+	const forecast = forecastQuery.data
+		? getUnbudgetedForecastForMonth(
+				forecastQuery.data.unbudgetedRate,
+				year,
+				month,
+			)
+		: null;
 
 	const groups = groupOperationsByBudget(
 		operationsQuery.data?.operations ?? [],
