@@ -2,7 +2,7 @@ use crate::openapi::{ApiOperation, build_request, tools_from_openapi};
 use rmcp::{
     ServerHandler,
     model::{
-        CallToolRequestParams, CallToolResult, Content, Implementation, ListToolsResult,
+        CallToolRequestParams, CallToolResult, ContentBlock, Implementation, ListToolsResult,
         PaginatedRequestParams, ServerCapabilities, ServerInfo, Tool,
     },
     service::RequestContext,
@@ -141,10 +141,10 @@ impl ServerHandler for RadinageMcpServer {
                 Ok(json) => serde_json::to_string_pretty(&json).unwrap_or(response_text),
                 Err(_) => response_text,
             };
-            Ok(CallToolResult::success(vec![Content::text(text)]))
+            Ok(CallToolResult::success(vec![ContentBlock::text(text)]))
         } else {
             let text = format!("API error {status}: {response_text}");
-            Ok(CallToolResult::error(vec![Content::text(text)]))
+            Ok(CallToolResult::error(vec![ContentBlock::text(text)]))
         }
     }
 }
