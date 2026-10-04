@@ -4,7 +4,7 @@
 # =============================================================================
 FROM rust:1.94.1-alpine3.23 AS chef
 
-RUN apk add --no-cache musl-dev~=1.2.5-r23 openssl-dev~=3.5.6 openssl-libs-static~=3.5.6 \
+RUN apk add --no-cache musl-dev=1.2.5-r23 openssl-dev=3.5.9-r0 openssl-libs-static=3.5.9-r0 \
     && cargo install cargo-chef@0.1.77 --locked
 
 WORKDIR /usr/src/local/radinage
