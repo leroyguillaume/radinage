@@ -133,7 +133,7 @@ A personal bank account tracking application
 | global.nodeSelector | object | `{}` | Node selector constraints |
 | global.podAnnotations | object | `{}` | Annotations to add to pods |
 | global.podLabels | object | `{}` | Labels to add to pods |
-| global.podSecurityContext | object | `{"fsGroup":1000,"runAsGroup":1000,"runAsNonRoot":true,"runAsUser":1000,"seccompProfile":{"type":"RuntimeDefault"}}` | Pod-level security context (restricted by default) |
+| global.podSecurityContext | object | `{"fsGroup":65532,"runAsGroup":65532,"runAsNonRoot":true,"runAsUser":65532,"seccompProfile":{"type":"RuntimeDefault"}}` | Pod-level security context (restricted by default) |
 | global.replicaCount | int | `1` | Number of replicas |
 | global.resources | object | `{"limits":{"memory":"256Mi"},"requests":{"cpu":"100m","memory":"128Mi"}}` | Container resource requests and limits |
 | global.revisionHistoryLimit | int | `10` | Number of old ReplicaSets to retain for rollback |

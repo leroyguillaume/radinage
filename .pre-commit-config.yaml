@@ -1,81 +1,131 @@
+default_install_hook_types:
+  - pre-commit
+  - commit-msg
+
 repos:
-  # Common checks
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v6.0.0
     hooks:
       - id: trailing-whitespace
       - id: end-of-file-fixer
       - id: check-yaml
-        exclude: ^helm/
+        args:
+          - --allow-multiple-documents
+        exclude: ^helm/radinage/templates/
       - id: check-toml
       - id: check-json
         exclude: tsconfig.*\.json$
+      - id: check-added-large-files
       - id: check-merge-conflict
       - id: detect-private-key
-      - id: check-added-large-files
       - id: pretty-format-json
-        args: [--autofix]
+        args:
+          - --autofix
         exclude: ^(helm/|radinage-webapp/)
 
-  # YAML / TOML formatting
   - repo: https://github.com/macisamuele/language-formatters-pre-commit-hooks
     rev: v2.16.0
     hooks:
       - id: pretty-format-toml
-        args: [--autofix]
+        args:
+          - --autofix
         exclude: ^(helm/|radinage-webapp/|Cargo.lock$)
-      - id: pretty-format-yaml
-        args: [--autofix, --offset, '2']
-        exclude: ^(helm/|radinage-webapp/)
 
-  # Dockerfile linting
-  - repo: https://github.com/hadolint/hadolint
-    rev: v2.14.0
+  - repo: https://github.com/adrienverge/yamllint
+    rev: v1.38.0
     hooks:
-      - id: hadolint-docker
+      - id: yamllint
+        args:
+          - --strict
+        exclude: ^helm/radinage/templates/
 
-  # Rust format
+  - repo: https://github.com/hadolint/hadolint
+    rev: v2.15.1
+    hooks:
+      - id: hadolint
+
+  - repo: https://github.com/rhysd/actionlint
+    rev: v1.7.12
+    hooks:
+      - id: actionlint
+
+  - repo: https://github.com/sqlfluff/sqlfluff
+    rev: 4.4.0
+    hooks:
+      - id: sqlfluff-lint
+        # sqlx::migrate! checksums every migration it has applied: reformatting
+        # 001-011 would make the API refuse to start on any existing database.
+        exclude: ^radinage-api/migrations/0(0[1-9]|1[01])_
+
   - repo: local
     hooks:
+      - id: no-co-authors
+        name: no co-authors in commit message
+        entry: '^\s*co-authored-by:|\bgenerated with\b'
+        language: pygrep
+        args:
+          - --ignore-case
+        stages:
+          - commit-msg
+      - id: shellcheck
+        name: shellcheck
+        entry: shellcheck
+        language: system
+        types:
+          - shell
+      - id: trivy-dockerfile
+        name: trivy config (Dockerfile)
+        entry: trivy config --exit-code 1 Dockerfile
+        language: system
+        pass_filenames: false
+        files: ^Dockerfile$
+      - id: trivy-chart
+        name: trivy config (chart)
+        entry: trivy config --exit-code 1 --config-data .trivy helm/radinage
+        language: system
+        pass_filenames: false
+        files: ^(helm/radinage/|\.trivy/|\.trivyignore$)
+      - id: helm-lint
+        name: helm lint
+        entry: helm lint helm/radinage
+        language: system
+        pass_filenames: false
+        files: ^helm/
+      - id: helm-docs
+        name: helm docs
+        entry: bash -c 'helm-docs --chart-search-root helm/radinage && git diff --exit-code helm/radinage/README.md'
+        language: system
+        pass_filenames: false
+        files: ^helm/
       - id: cargo-fmt
         name: cargo fmt
         entry: cargo fmt --all
         language: system
-        types: [rust]
+        types:
+          - rust
         pass_filenames: false
-      # Rust clippy (all targets, deny warnings)
       - id: cargo-clippy
         name: cargo clippy
         entry: cargo clippy --all-targets -- -D warnings
         language: system
-        types: [rust]
+        types:
+          - rust
         pass_filenames: false
-      # Biome (lint + format for TypeScript/JavaScript/JSON)
       - id: biome-check
         name: biome check
         entry: bash -c 'cd radinage-webapp && npx @biomejs/biome check --write --error-on-warnings'
         language: system
         files: ^radinage-webapp/
-        types_or: [ts, tsx, javascript, jsx, json]
+        types_or:
+          - ts
+          - tsx
+          - javascript
+          - jsx
+          - json
         pass_filenames: false
-      # TypeScript type checking (biome does not do this)
       - id: tsc
         name: tsc
         entry: bash -c 'cd radinage-webapp && npx tsc -b --noEmit'
         language: system
         files: ^radinage-webapp/.*\.(ts|tsx)$
-        pass_filenames: false
-      # Helm lint
-      - id: helm-lint
-        name: helm lint
-        entry: helm lint helm/radinage/
-        language: system
-        files: ^helm/
-        pass_filenames: false
-      # Helm docs (check that README is up-to-date)
-      - id: helm-docs
-        name: helm docs
-        entry: bash -c 'helm-docs --chart-search-root helm/radinage && git diff --exit-code helm/radinage/README.md'
-        language: system
-        files: ^helm/
         pass_filenames: false

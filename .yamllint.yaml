@@ -1,0 +1,23 @@
+extends: default
+
+rules:
+  # No `---` opening a file; multi-document files would need a per-rule ignore.
+  document-start:
+    present: false
+  # Block style only. `non-empty` still allows `{}` / `[]`.
+  braces:
+    forbid: non-empty
+  brackets:
+    forbid: non-empty
+  # A digest-pinned image reference alone is ~150 characters, and a helm-docs
+  # annotation is one line per key by construction.
+  line-length: disable
+  # A workflow's bare `on:` key reads as a YAML 1.1 boolean.
+  truthy:
+    allowed-values:
+      - 'true'
+      - 'false'
+    check-keys: false
+  # Allow the single-space `uses: org/action@<sha> # vX.Y.Z` pin comment.
+  comments:
+    min-spaces-from-content: 1

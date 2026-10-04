@@ -25,9 +25,9 @@ global:
   # -- (object) Pod-level security context (restricted by default)
   podSecurityContext:
     runAsNonRoot: true
-    runAsUser: 1000
-    runAsGroup: 1000
-    fsGroup: 1000
+    runAsUser: 65532
+    runAsGroup: 65532
+    fsGroup: 65532
     seccompProfile:
       type: RuntimeDefault
   # -- (object) Container-level security context (restricted by default)

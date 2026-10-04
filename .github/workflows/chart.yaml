@@ -1,0 +1,71 @@
+name: chart
+
+on:
+  push:
+    tags:
+      - chart-*
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CHART_DIR: helm/radinage
+
+jobs:
+  publish:
+    name: publish
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: derive the version from the tag
+        id: version
+        run: |
+          case "$GITHUB_REF_NAME" in
+            chart-*) ;;
+            *)
+              echo "Run this workflow on a chart-X.Y.Z tag, not ${GITHUB_REF_NAME}." >&2
+              exit 1
+              ;;
+          esac
+          version="${GITHUB_REF_NAME#chart-}"
+          committed="$(sed -n 's/^version: //p' "$CHART_DIR/Chart.yaml")"
+          if [ "$committed" != "$version" ]; then
+            echo "Chart.yaml says ${committed} but the tag says ${version}." >&2
+            echo "Cut releases with scripts/release.sh --chart so the two stay in step." >&2
+            exit 1
+          fi
+          if [ "${version#*-}" = "$version" ] && ! grep -q -- "--version ${version}" README.md; then
+            echo "README.md does not install chart ${version}." >&2
+            echo "Cut releases with scripts/release.sh --chart so the two stay in step." >&2
+            exit 1
+          fi
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+
+      - name: set up Helm
+        uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+        with:
+          version: v4.3.0
+
+      - name: package the chart
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: helm package "$CHART_DIR" --version "$VERSION"
+
+      - name: push the chart to GHCR
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          OWNER: ${{ github.repository_owner }}
+        run: |
+          printf '%s' "$GITHUB_TOKEN" | helm registry login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+          helm push "radinage-${VERSION}.tgz" "oci://ghcr.io/${OWNER}/charts"
