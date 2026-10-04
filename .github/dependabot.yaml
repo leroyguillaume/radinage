@@ -1,0 +1,89 @@
+version: 2
+
+updates:
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 3
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+    commit-message:
+      prefix: "cargo:"
+    groups:
+      cargo:
+        update-types:
+          - minor
+          - patch
+
+  - package-ecosystem: npm
+    directory: /radinage-webapp
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 3
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+    commit-message:
+      prefix: "webapp:"
+    groups:
+      # Mantine packages only work against the matching @mantine/core release.
+      mantine:
+        patterns:
+          - "@mantine/*"
+      # The router, its Vite plugin and devtools are released in lockstep.
+      tanstack-router:
+        patterns:
+          - "@tanstack/router*"
+          - "@tanstack/react-router*"
+      react:
+        patterns:
+          - react
+          - react-dom
+          - "@types/react"
+          - "@types/react-dom"
+      npm:
+        update-types:
+          - minor
+          - patch
+
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 3
+    labels:
+      - dependencies
+    commit-message:
+      prefix: "docker:"
+
+  - package-ecosystem: docker-compose
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 3
+    labels:
+      - dependencies
+    commit-message:
+      prefix: "docker:"
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 3
+    labels:
+      - dependencies
+    commit-message:
+      prefix: "ci:"
+    groups:
+      github-actions:
+        update-types:
+          - minor
+          - patch

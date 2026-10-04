@@ -54,14 +54,16 @@ RUN npm run build
 # =============================================================================
 FROM alpine:3.23 AS api
 
-RUN addgroup -g 1000 -S radinage && adduser -u 1000 -S radinage -G radinage
+RUN addgroup -g 65532 -S radinage && adduser -u 65532 -S radinage -G radinage
 
 COPY --from=rust-builder /usr/src/local/radinage/target/release/radinage-api /usr/local/bin/radinage-api
 COPY radinage-api/migrations /opt/radinage/migrations
 
-USER 1000:1000
+USER 65532:65532
 
 EXPOSE 3000
+
+HEALTHCHECK CMD ["wget", "-q", "-O", "/dev/null", "http://127.0.0.1:3000/health"]
 
 ENTRYPOINT ["radinage-api"]
 
@@ -70,11 +72,13 @@ ENTRYPOINT ["radinage-api"]
 # =============================================================================
 FROM alpine:3.23 AS mcp
 
-RUN addgroup -g 1000 -S radinage && adduser -u 1000 -S radinage -G radinage
+RUN addgroup -g 65532 -S radinage && adduser -u 65532 -S radinage -G radinage
 
 COPY --from=rust-builder /usr/src/local/radinage/target/release/radinage-mcp /usr/local/bin/radinage-mcp
 
-USER 1000:1000
+USER 65532:65532
+
+HEALTHCHECK CMD ["wget", "-q", "-O", "/dev/null", "http://127.0.0.1:3001/health"]
 
 ENTRYPOINT ["radinage-mcp"]
 
@@ -83,7 +87,7 @@ ENTRYPOINT ["radinage-mcp"]
 # =============================================================================
 FROM nginx:1.29.8-alpine3.23 AS webapp
 
-RUN addgroup -g 1000 -S radinage && adduser -u 1000 -S radinage -G radinage \
+RUN addgroup -g 65532 -S radinage && adduser -u 65532 -S radinage -G radinage \
     && mkdir -p /var/cache/nginx /var/run /etc/nginx/templates \
     && chown -R radinage:radinage /var/cache/nginx /var/run /etc/nginx/conf.d /etc/nginx/templates
 
@@ -93,8 +97,10 @@ COPY --from=webapp-builder /usr/src/local/radinage/dist /usr/share/nginx/html
 
 ENV API_HOST=api:3000
 
-USER 1000:1000
+USER 65532:65532
 
 EXPOSE 8080
+
+HEALTHCHECK CMD ["wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/"]
 
 CMD ["nginx", "-g", "daemon off;"]
