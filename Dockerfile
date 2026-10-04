@@ -36,7 +36,7 @@ RUN cargo build --release
 # =============================================================================
 # Stage 2: Node builder (webapp)
 # =============================================================================
-FROM node:25.9.0-alpine3.23 AS webapp-builder
+FROM node:26.10.0-alpine3.23 AS webapp-builder
 
 WORKDIR /usr/src/local/radinage
 
