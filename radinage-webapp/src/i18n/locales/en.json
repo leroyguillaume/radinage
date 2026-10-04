@@ -225,7 +225,14 @@
 		"firstNegativeMarker": "Goes into the red",
 		"projectedBalance": "Projected balance on {{date}}",
 		"projectedBalanceHint": "What your account should show that day if your budgets hold.",
-		"startingBalance": "Balance on {{date}}: {{amount}}"
+		"startingBalance": "Balance on {{date}}: {{amount}}",
+		"mode": "Period shown",
+		"modeYear": "Year {{year}}",
+		"modeRolling": "Next 12 months",
+		"periodProgress": "Period progress: {{percent}}%",
+		"endOfPeriodBalance": "Balance on {{date}}",
+		"endOfPeriodHint": "What you should have left at the end of the period if your budgets hold.",
+		"rollingTotalsTitle": "{{count}}-month totals"
 	},
 	"nav": {
 		"operations": "Operations",
