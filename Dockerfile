@@ -85,7 +85,7 @@ ENTRYPOINT ["radinage-mcp"]
 # =============================================================================
 # Target: radinage-webapp
 # =============================================================================
-FROM nginx:1.29.8-alpine3.23 AS webapp
+FROM nginx:1.31.0-alpine3.23 AS webapp
 
 RUN addgroup -g 65532 -S radinage && adduser -u 65532 -S radinage -G radinage \
     && mkdir -p /var/cache/nginx /var/run /etc/nginx/templates \
