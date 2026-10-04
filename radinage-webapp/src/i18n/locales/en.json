@@ -216,7 +216,13 @@
 		"projected": "Forecast",
 		"committed": "incl. {{amount}} still to come",
 		"unbudgetedForecast": "incl. {{amount}} estimated outside budgets",
-		"unbudgetedRate": "Spending outside budgets estimated at {{amount}} a day, the average of the last 3 complete months."
+		"unbudgetedRate": "Spending outside budgets estimated at {{amount}} a day, the average of the last 3 complete months.",
+		"dailyBudgetHint": "What you can still spend each day outside your budgets without ending the period in the red.",
+		"dailyBudgetNegativeHint": "Negative: your budgets alone already end the period in the red. You would need to earn or save this much each day to get back to zero.",
+		"dailyBudgetOver": "Period over: no days left to budget.",
+		"firstNegativeTitle": "Negative balance from {{month}}",
+		"firstNegativeText": "The cumulative balance drops below zero that month if your budgets and spending outside budgets follow the forecast.",
+		"firstNegativeMarker": "Goes into the red"
 	},
 	"nav": {
 		"operations": "Operations",
