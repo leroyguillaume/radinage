@@ -8,6 +8,7 @@ use serde::Deserialize;
 pub use budget::{BudgetRepository, BudgetSortField, ListBudgetsParams, PgBudgetRepository};
 pub use operation::{
     ListOperationsParams, OperationRepository, OperationSortField, PgOperationRepository,
+    SummaryCategory, SummaryRow,
 };
 pub use user::{PgUserRepository, UserRepository};
 
@@ -35,6 +36,6 @@ impl SortOrder {
 #[cfg(test)]
 pub use budget::MockBudgetRepository;
 #[cfg(test)]
-pub use operation::{MockOperationRepository, SummaryRow};
+pub use operation::MockOperationRepository;
 #[cfg(test)]
 pub use user::{MockUserRepository, UserCredentials};

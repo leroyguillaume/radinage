@@ -22,11 +22,10 @@ import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { type CSSProperties, type ReactNode, useId } from "react";
 import { useTranslation } from "react-i18next";
 import { PageHeader } from "@/components/PageHeader";
-import { getBudgetedAmountForMonth } from "@/lib/budget-utils";
 import { formatAmount, formatSignedAmount } from "@/lib/format";
-import { useBudgets, useSummary } from "@/lib/hooks";
+import { useForecast } from "@/lib/hooks";
 import { balanceTextColor, budgetTypeTones, type Tone } from "@/lib/tones";
-import type { BudgetResponse, MonthlySummary } from "@/lib/types";
+import type { ForecastMonth, ForecastMonthStatus } from "@/lib/types";
 import { headingFont, palette } from "@/theme";
 
 interface ForecastSearch {
@@ -54,102 +53,25 @@ function formatShortSigned(amount: number): string {
 interface MonthForecast {
 	year: number;
 	month: number;
+	status: ForecastMonthStatus;
 	income: number;
 	expenses: number;
 	savings: number;
 	balance: number;
 	cumulative: number;
-	isActual: boolean;
 }
 
-function computeForecast(
-	summaryMonths: MonthlySummary[],
-	budgets: BudgetResponse[],
-	currentYear: number,
-	currentMonth: number,
-): MonthForecast[] {
-	const result: MonthForecast[] = [];
-	let cumulative = 0;
-
-	for (let month = 1; month <= 12; month++) {
-		const isActual = month <= currentMonth;
-
-		if (isActual) {
-			const actual = summaryMonths.find(
-				(m) => m.year === currentYear && m.month === month,
-			);
-			if (actual) {
-				// `unbudgeted` is a net sum (income + expenses on unlinked ops).
-				// Without a per-operation breakdown we attribute its positive part
-				// to income and its negative part to expenses, so the forecast
-				// stays meaningful when the user has no budgets.
-				const unbudgeted = Number(actual.unbudgeted);
-				const income = Number(actual.budgeted.income) + Math.max(0, unbudgeted);
-				const expenses =
-					Number(actual.budgeted.expense) + Math.min(0, unbudgeted);
-				const savings = Number(actual.budgeted.savings);
-				const balance = income + expenses + savings;
-				cumulative += balance;
-				result.push({
-					year: currentYear,
-					month,
-					income,
-					expenses,
-					savings,
-					balance,
-					cumulative,
-					isActual: true,
-				});
-			} else {
-				result.push({
-					year: currentYear,
-					month,
-					income: 0,
-					expenses: 0,
-					savings: 0,
-					balance: 0,
-					cumulative,
-					isActual: true,
-				});
-			}
-		} else {
-			let income = 0;
-			let expenses = 0;
-			let savings = 0;
-
-			for (const budget of budgets) {
-				const amount = getBudgetedAmountForMonth(budget, currentYear, month);
-				if (amount === null) continue;
-
-				switch (budget.budgetType) {
-					case "income":
-						income += amount;
-						break;
-					case "expense":
-						expenses += amount;
-						break;
-					case "savings":
-						savings += amount;
-						break;
-				}
-			}
-
-			const balance = income + expenses + savings;
-			cumulative += balance;
-			result.push({
-				year: currentYear,
-				month,
-				income,
-				expenses,
-				savings,
-				balance,
-				cumulative,
-				isActual: false,
-			});
-		}
-	}
-
-	return result;
+function toMonthForecast(m: ForecastMonth): MonthForecast {
+	return {
+		year: m.year,
+		month: m.month,
+		status: m.status,
+		income: Number(m.income),
+		expenses: Number(m.expenses),
+		savings: Number(m.savings),
+		balance: Number(m.balance),
+		cumulative: Number(m.cumulative),
+	};
 }
 
 function daysRemainingInYear(year: number): number {
@@ -363,13 +285,12 @@ function LegendItem({
 const CHART_HEIGHT = 170;
 const MIN_BAR_HEIGHT = 4;
 
-interface BalanceChartProps {
+interface ForecastViewProps {
 	forecast: MonthForecast[];
-	currentMonth: number | null;
 	locale: string;
 }
 
-function BalanceChart({ forecast, currentMonth, locale }: BalanceChartProps) {
+function BalanceChart({ forecast, locale }: ForecastViewProps) {
 	const { t } = useTranslation();
 	const maxPositive = Math.max(0, ...forecast.map((m) => m.balance));
 	const maxNegative = Math.max(0, ...forecast.map((m) => -m.balance));
@@ -378,7 +299,7 @@ function BalanceChart({ forecast, currentMonth, locale }: BalanceChartProps) {
 	const upArea = range > 0 ? Math.max(maxPositive * unit, MIN_BAR_HEIGHT) : 0;
 	const downArea =
 		maxNegative > 0 ? Math.max(maxNegative * unit, MIN_BAR_HEIGHT) : 0;
-	const hasForecast = forecast.some((m) => !m.isActual);
+	const hasForecast = forecast.some((m) => m.status === "future");
 
 	function barHeight(amount: number): number {
 		return amount === 0 ? 0 : Math.max(Math.abs(amount) * unit, MIN_BAR_HEIGHT);
@@ -421,19 +342,20 @@ function BalanceChart({ forecast, currentMonth, locale }: BalanceChartProps) {
 						}}
 					>
 						{forecast.map((m) => {
-							const isCurrent = m.month === currentMonth;
+							const isCurrent = m.status === "current";
+							const isProjected = m.status === "future";
 							const up = m.balance > 0 ? barHeight(m.balance) : 0;
 							const down = m.balance < 0 ? barHeight(m.balance) : 0;
-							const upBg = !m.isActual
+							const upBg = isProjected
 								? stripes("leaf-3", "leaf-1")
 								: isCurrent
 									? "var(--mantine-color-forest-7)"
 									: "var(--mantine-color-leaf-5)";
-							const downBg = !m.isActual
+							const downBg = isProjected
 								? stripes("tangerine-3", "tangerine-1")
 								: "var(--mantine-color-tangerine-5)";
 							return (
-								<Stack key={m.month} gap={0} align="center">
+								<Stack key={`${m.year}-${m.month}`} gap={0} align="center">
 									<Text
 										className="tabular-nums"
 										h={22}
@@ -515,13 +437,7 @@ const tdStyle = {
 	whiteSpace: "nowrap",
 } as const;
 
-interface MonthlyTableProps {
-	forecast: MonthForecast[];
-	currentMonth: number | null;
-	locale: string;
-}
-
-function MonthlyTable({ forecast, currentMonth, locale }: MonthlyTableProps) {
+function MonthlyTable({ forecast, locale }: ForecastViewProps) {
 	const { t } = useTranslation();
 	const { income, expense, savings } = budgetTypeTones;
 	return (
@@ -566,10 +482,10 @@ function MonthlyTable({ forecast, currentMonth, locale }: MonthlyTableProps) {
 					</Table.Thead>
 					<Table.Tbody>
 						{forecast.map((m) => {
-							const isCurrent = m.month === currentMonth;
+							const isCurrent = m.status === "current";
 							return (
 								<Table.Tr
-									key={m.month}
+									key={`${m.year}-${m.month}`}
 									bg={isCurrent ? "leaf.1" : undefined}
 									aria-current={isCurrent ? "date" : undefined}
 								>
@@ -583,7 +499,7 @@ function MonthlyTable({ forecast, currentMonth, locale }: MonthlyTableProps) {
 													{t("forecast.current")}
 												</Badge>
 											)}
-											{!m.isActual && (
+											{m.status === "future" && (
 												<Badge
 													variant="filled"
 													bg={palette.track}
@@ -629,36 +545,12 @@ function ForecastPage() {
 	const { t, i18n } = useTranslation();
 	const navigate = useNavigate();
 	const { year: selectedYear } = Route.useSearch();
-	const now = new Date();
-	const thisYear = now.getFullYear();
-	const currentMonth =
-		selectedYear === thisYear
-			? now.getMonth() + 1
-			: selectedYear < thisYear
-				? 12
-				: 0;
-	// Past years count December as "actual" too, but only this year has a
-	// month that is genuinely in progress.
-	const inProgressMonth = selectedYear === thisYear ? currentMonth : null;
+	const forecastQuery = useForecast(selectedYear, 1, 12);
+	const { isLoading, isError } = forecastQuery;
 
-	const summaryQuery = useSummary(
-		selectedYear,
-		1,
-		selectedYear,
-		currentMonth > 0 ? currentMonth : 1,
-	);
-	const budgetsQuery = useBudgets();
-
-	const isLoading = summaryQuery.isLoading || budgetsQuery.isLoading;
-	const isError = summaryQuery.isError || budgetsQuery.isError;
-
-	const months = currentMonth > 0 ? (summaryQuery.data?.months ?? []) : [];
-	const budgets = budgetsQuery.data ?? [];
-
-	const forecast = computeForecast(months, budgets, selectedYear, currentMonth);
-
-	const last = forecast.length > 0 ? forecast[forecast.length - 1] : null;
-	const endOfYearBalance = last?.cumulative ?? 0;
+	const forecast = (forecastQuery.data?.months ?? []).map(toMonthForecast);
+	const totals = forecastQuery.data?.totals;
+	const endOfYearBalance = Number(forecastQuery.data?.endBalance ?? 0);
 
 	const remainingDays = daysRemainingInYear(selectedYear);
 	// A daily budget below zero is meaningless (you can't spend a negative
@@ -667,9 +559,9 @@ function ForecastPage() {
 	const dailyBudget =
 		remainingDays > 0 ? Math.max(0, endOfYearBalance / remainingDays) : 0;
 
-	const totalIncome = forecast.reduce((sum, m) => sum + m.income, 0);
-	const totalExpenses = forecast.reduce((sum, m) => sum + m.expenses, 0);
-	const totalSavings = forecast.reduce((sum, m) => sum + m.savings, 0);
+	const totalIncome = Number(totals?.income ?? 0);
+	const totalExpenses = Number(totals?.expenses ?? 0);
+	const totalSavings = Number(totals?.savings ?? 0);
 
 	const yearProgress = monthsElapsedRatio(selectedYear) * 100;
 
@@ -787,17 +679,9 @@ function ForecastPage() {
 							</HeroCard>
 						</SimpleGrid>
 
-						<BalanceChart
-							forecast={forecast}
-							currentMonth={inProgressMonth}
-							locale={i18n.language}
-						/>
+						<BalanceChart forecast={forecast} locale={i18n.language} />
 
-						<MonthlyTable
-							forecast={forecast}
-							currentMonth={inProgressMonth}
-							locale={i18n.language}
-						/>
+						<MonthlyTable forecast={forecast} locale={i18n.language} />
 					</>
 				)}
 			</Stack>

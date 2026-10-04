@@ -1,6 +1,7 @@
 pub mod auth;
 pub mod budgets;
 pub mod data;
+pub mod forecast;
 pub mod import;
 pub mod monthly_operations;
 pub mod operations;

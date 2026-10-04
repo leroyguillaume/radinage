@@ -35,8 +35,10 @@ handler → service → repository → database:
 - [src/services/](radinage-api/src/services/) hold the logic that is not
   persistence: [matcher.rs](radinage-api/src/services/matcher.rs) picks the
   budget an operation belongs to, [importer.rs](radinage-api/src/services/importer.rs)
-  turns a CSV or XLSX file into rows. Both are pure functions over domain
-  values, with no I/O.
+  turns a CSV or XLSX file into rows, and
+  [forecast.rs](radinage-api/src/services/forecast.rs) projects the
+  month-by-month balance behind `GET /forecast`. All are pure functions over
+  domain values, with no I/O.
 - [src/repositories/](radinage-api/src/repositories/) define one trait per
   aggregate (`UserRepository`, `OperationRepository`, `BudgetRepository`), each
   with a `Pg*` implementation and a mockall-generated mock for handler tests.
@@ -163,8 +165,20 @@ revoke tokens already issued.
 of replacing it with several operations, so the imported row still exists for
 duplicate detection on re-import and removing a split loses nothing. The cost
 is that every aggregation expands split operations into their parts:
-`list_for_summary` in SQL, and
+`list_for_summary` in SQL (which feeds both `/summary` and `/forecast`), and
 [operation-parts.ts](radinage-webapp/src/lib/operation-parts.ts) in the web app.
+
+**The forecast is computed by the API.** `GET /forecast` returns, for each
+month of a horizon of up to 24 months, income, expenses, savings, balance and
+running balance. Months up to the current one come from the operations
+accounted so far, later months from the amounts the budgets expect
+(`BudgetKind::expected_amount_for_month`). Budget-linked amounts count under
+their budget's type; an operation outside any budget counts as income or as an
+expense by its own sign, so a salary and a grocery run in the same month never
+cancel each other out. The running balance starts at zero before the first
+month. Keeping this in the API gives a single, tested
+definition of the numbers; the web app only derives presentation values from
+it, such as the daily budget.
 
 **Same-origin web app.** nginx serves the SPA and proxies `/api/` on the same
 origin, so the browser needs no CORS and the API address is a deployment

@@ -54,6 +54,28 @@ export interface SummaryResponse {
 	months: MonthlySummary[];
 }
 
+export type ForecastMonthStatus = "past" | "current" | "future";
+
+export interface ForecastFlows {
+	income: string;
+	expenses: string;
+	savings: string;
+	balance: string;
+}
+
+export interface ForecastMonth extends ForecastFlows {
+	year: number;
+	month: number;
+	status: ForecastMonthStatus;
+	cumulative: string;
+}
+
+export interface ForecastResponse {
+	months: ForecastMonth[];
+	totals: ForecastFlows;
+	endBalance: string;
+}
+
 export interface YearMonth {
 	year: number;
 	month: number;

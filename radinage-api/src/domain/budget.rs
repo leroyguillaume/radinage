@@ -1,3 +1,4 @@
+use chrono::{Datelike, NaiveDate};
 use rust_decimal::Decimal;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -15,6 +16,36 @@ pub struct YearMonth {
 impl YearMonth {
     pub fn new(year: i32, month: u32) -> Self {
         Self { year, month }
+    }
+
+    /// The month containing `date`.
+    pub fn of(date: NaiveDate) -> Self {
+        Self::new(date.year(), date.month())
+    }
+
+    /// The month right after this one.
+    pub fn next(self) -> Self {
+        if self.month == 12 {
+            Self::new(self.year + 1, 1)
+        } else {
+            Self::new(self.year, self.month + 1)
+        }
+    }
+
+    /// First day of the month, or `None` when the month is out of range.
+    pub fn first_day(self) -> Option<NaiveDate> {
+        NaiveDate::from_ymd_opt(self.year, self.month, 1)
+    }
+
+    /// Last day of the month, or `None` when the month is out of range.
+    pub fn last_day(self) -> Option<NaiveDate> {
+        super::last_day_of_month(self.year, self.month)
+    }
+
+    /// Number of months from `self` to `later` (negative when `later` is earlier).
+    fn months_until(self, later: Self) -> i64 {
+        (i64::from(later.year) - i64::from(self.year)) * 12 + i64::from(later.month)
+            - i64::from(self.month)
     }
 }
 
@@ -199,34 +230,44 @@ impl BudgetKind {
         Ok(())
     }
 
-    /// Returns the expected amount for a given year-month pair.
-    #[cfg(test)]
+    /// Amount this budget expects in the given month, `None` when it expects nothing.
+    ///
+    /// The period covering the month gives the base amount. A weekly budget expects it once
+    /// per week of the month (days / 7, rounded half up: 4 for every month); a quarterly or
+    /// yearly budget only in the months that are a multiple of 3 or 12 months after the
+    /// period's start.
     pub fn expected_amount_for_month(&self, year: i32, month: u32) -> Option<Decimal> {
         let ym = YearMonth::new(year, month);
         match self {
             BudgetKind::Recurring {
+                recurrence,
                 closed_periods,
                 current_period,
-                ..
             } => {
-                let from_closed = closed_periods
+                let (start, amount) = closed_periods
                     .iter()
                     .find(|p| p.start <= ym && p.end >= ym)
-                    .map(|p| p.amount);
-
-                if from_closed.is_some() {
-                    return from_closed;
+                    .map(|p| (p.start, p.amount))
+                    .or_else(|| {
+                        (current_period.start <= ym
+                            && current_period.end.is_none_or(|end| end >= ym))
+                        .then_some((current_period.start, current_period.amount))
+                    })?;
+                match recurrence {
+                    Recurrence::Monthly => Some(amount),
+                    Recurrence::Weekly => {
+                        let days = ym.last_day()?.day();
+                        Some(amount * Decimal::from((days * 2 + 7) / 14))
+                    }
+                    Recurrence::Quarterly => (start.months_until(ym) % 3 == 0).then_some(amount),
+                    Recurrence::Yearly => (start.months_until(ym) % 12 == 0).then_some(amount),
                 }
-
-                let current_overlaps =
-                    current_period.start <= ym && current_period.end.is_none_or(|end| end >= ym);
-                current_overlaps.then_some(current_period.amount)
             }
             BudgetKind::Occasional {
                 month: m,
                 year: y,
                 amount,
-            } => (*y == year as u32 && *m == month).then_some(*amount),
+            } => (i64::from(*y) == i64::from(year) && *m == month).then_some(*amount),
         }
     }
 }
@@ -491,10 +532,75 @@ mod tests {
                 amount: Decimal::new(100, 0),
             },
         };
+        for (year, month) in [(2024, 1), (2024, 2), (2025, 2), (2024, 4)] {
+            assert_eq!(
+                kind.expected_amount_for_month(year, month),
+                Some(Decimal::new(400, 0)),
+                "{year}-{month}"
+            );
+        }
+    }
+
+    fn cyclic_kind(recurrence: Recurrence, closed_start: YearMonth) -> BudgetKind {
+        BudgetKind::Recurring {
+            recurrence,
+            closed_periods: vec![ClosedPeriod {
+                start: closed_start,
+                end: YearMonth::new(2023, 12),
+                amount: Decimal::new(-300, 0),
+            }],
+            current_period: CurrentPeriod {
+                start: YearMonth::new(2024, 3),
+                end: None,
+                amount: Decimal::new(-400, 0),
+            },
+        }
+    }
+
+    #[test]
+    fn expected_amount_for_month_cycles_from_the_covering_period_start() {
+        let closed = Some(Decimal::new(-300, 0));
+        let current = Some(Decimal::new(-400, 0));
+        let cases = [
+            (Recurrence::Quarterly, (2023, 2), closed),
+            (Recurrence::Quarterly, (2023, 3), None),
+            (Recurrence::Quarterly, (2023, 5), closed),
+            (Recurrence::Quarterly, (2023, 11), closed),
+            (Recurrence::Quarterly, (2024, 1), None),
+            (Recurrence::Quarterly, (2024, 3), current),
+            (Recurrence::Quarterly, (2024, 4), None),
+            (Recurrence::Quarterly, (2024, 6), current),
+            (Recurrence::Quarterly, (2025, 3), current),
+            (Recurrence::Yearly, (2023, 2), closed),
+            (Recurrence::Yearly, (2023, 3), None),
+            (Recurrence::Yearly, (2024, 3), current),
+            (Recurrence::Yearly, (2024, 6), None),
+            (Recurrence::Yearly, (2025, 3), current),
+            (Recurrence::Yearly, (2026, 2), None),
+        ];
+        for (recurrence, (year, month), expected) in cases {
+            let kind = cyclic_kind(recurrence, YearMonth::new(2023, 2));
+            assert_eq!(
+                kind.expected_amount_for_month(year, month),
+                expected,
+                "{recurrence:?} {year}-{month}"
+            );
+        }
+    }
+
+    #[test]
+    fn year_month_navigation() {
+        assert_eq!(YearMonth::new(2024, 12).next(), YearMonth::new(2025, 1));
+        assert_eq!(YearMonth::new(2024, 3).next(), YearMonth::new(2024, 4));
         assert_eq!(
-            kind.expected_amount_for_month(2024, 6),
-            Some(Decimal::new(100, 0))
+            YearMonth::of(NaiveDate::from_ymd_opt(2024, 2, 17).unwrap()),
+            YearMonth::new(2024, 2)
         );
+        assert_eq!(
+            YearMonth::new(2024, 2).last_day(),
+            NaiveDate::from_ymd_opt(2024, 2, 29)
+        );
+        assert_eq!(YearMonth::new(2024, 13).first_day(), None);
     }
 
     #[test]

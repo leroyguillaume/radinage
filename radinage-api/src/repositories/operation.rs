@@ -1,5 +1,8 @@
 use crate::{
-    domain::operation::{BudgetLink, NewOperationSplit, Operation, OperationSplit},
+    domain::{
+        budget::BudgetType,
+        operation::{BudgetLink, NewOperationSplit, Operation, OperationSplit},
+    },
     error::{AppError, AppResult},
     repositories::SortOrder,
 };
@@ -52,10 +55,40 @@ pub struct ListOperationsParams {
 
 /// A single row returned by the monthly-summary query: an unsplit operation, or one split
 /// part reported as `manual` when it has a budget and `unlinked` otherwise.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SummaryRow {
     pub amount: Decimal,
+    /// Accounting date of the operation (its effective date if set, otherwise its date).
+    pub date: NaiveDate,
     pub budget_link_type: String,
+    /// Budget the operation (or split part) counts towards, if any.
+    pub budget_id: Option<Uuid>,
     pub budget_type: Option<String>,
+}
+
+/// Where a summary row's amount is accounted.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SummaryCategory {
+    /// Not linked to any budget, or linked to a budget whose type is unknown.
+    Unbudgeted,
+    /// Linked to a budget of the given type.
+    Budgeted(BudgetType),
+}
+
+impl SummaryRow {
+    /// Category of this row, `None` for a link type the summary does not count.
+    pub fn category(&self) -> Option<SummaryCategory> {
+        match self.budget_link_type.as_str() {
+            "unlinked" => Some(SummaryCategory::Unbudgeted),
+            "manual" | "auto" => Some(
+                self.budget_type
+                    .as_deref()
+                    .and_then(|s| s.parse::<BudgetType>().ok())
+                    .map_or(SummaryCategory::Unbudgeted, SummaryCategory::Budgeted),
+            ),
+            _ => None,
+        }
+    }
 }
 
 /// Data access interface for operations.
@@ -160,8 +193,9 @@ pub trait OperationRepository: Send + Sync + 'static {
         user_id: Uuid,
     ) -> impl std::future::Future<Output = AppResult<bool>> + Send;
 
-    /// Fetch amounts for the monthly summary, joining budget type from the budgets table.
-    /// A split operation yields one row per split instead of a row for itself.
+    /// Fetch the non-ignored amounts whose accounting date falls in `[month_start, month_end]`,
+    /// joining budget type from the budgets table. A split operation yields one row per split
+    /// instead of a row for itself. Backs both the summary and the forecast.
     fn list_for_summary(
         &self,
         user_id: Uuid,
@@ -528,7 +562,8 @@ impl OperationRepository for PgOperationRepository {
         month_end: NaiveDate,
     ) -> AppResult<Vec<SummaryRow>> {
         let rows = sqlx::query(
-            r#"SELECT o.amount, o.budget_link_type, b.budget_type
+            r#"SELECT o.amount, COALESCE(o.effective_date, o.date) AS accounting_date,
+                      o.budget_link_type, o.budget_link_id AS budget_id, b.budget_type
                FROM operations o
                LEFT JOIN budgets b ON b.id = o.budget_link_id
                WHERE o.user_id = $1
@@ -537,9 +572,9 @@ impl OperationRepository for PgOperationRepository {
                  AND o.ignored = FALSE
                  AND NOT EXISTS (SELECT 1 FROM operation_splits s WHERE s.operation_id = o.id)
                UNION ALL
-               SELECT s.amount,
+               SELECT s.amount, COALESCE(o.effective_date, o.date),
                       CASE WHEN s.budget_id IS NULL THEN 'unlinked' ELSE 'manual' END,
-                      b.budget_type
+                      s.budget_id, b.budget_type
                FROM operation_splits s
                JOIN operations o ON o.id = s.operation_id
                LEFT JOIN budgets b ON b.id = s.budget_id
@@ -556,17 +591,16 @@ impl OperationRepository for PgOperationRepository {
 
         Ok(rows
             .iter()
-            .map(|r| SummaryRow {
-                amount: r.try_get("amount").unwrap_or(Decimal::ZERO),
-                budget_link_type: r
-                    .try_get::<&str, _>("budget_link_type")
-                    .unwrap_or("unlinked")
-                    .to_string(),
-                budget_type: r
-                    .try_get::<Option<String>, _>("budget_type")
-                    .unwrap_or(None),
+            .map(|r| {
+                Ok(SummaryRow {
+                    amount: r.try_get("amount")?,
+                    date: r.try_get("accounting_date")?,
+                    budget_link_type: r.try_get("budget_link_type")?,
+                    budget_id: r.try_get("budget_id")?,
+                    budget_type: r.try_get("budget_type")?,
+                })
             })
-            .collect())
+            .collect::<Result<_, sqlx::Error>>()?)
     }
 }
 
@@ -1112,6 +1146,101 @@ mod integration_tests {
             .await
             .unwrap();
         assert!(outside.is_empty());
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn list_for_summary_reports_accounting_date_and_budget(pool: PgPool) {
+        let repo = PgOperationRepository::new(pool.clone());
+        let user_id = setup_user(&pool).await;
+        let expense_id = setup_budget(&pool, user_id, "expense").await;
+
+        // Dated in February, accounted in March through its effective date.
+        let deferred_id = Uuid::new_v4();
+        repo.insert(
+            deferred_id,
+            user_id,
+            dec!(-12),
+            NaiveDate::from_ymd_opt(2024, 2, 28).unwrap(),
+            NaiveDate::from_ymd_opt(2024, 3, 2),
+            "Card",
+        )
+        .await
+        .unwrap();
+        repo.set_auto_link(deferred_id, expense_id).await.unwrap();
+        let split_id = insert_op(&repo, user_id, dec!(-100)).await;
+        let parts = [part(dec!(-60), Some(expense_id)), part(dec!(-40), None)];
+        repo.replace_splits(split_id, user_id, &parts)
+            .await
+            .unwrap();
+
+        let mut rows = repo
+            .list_for_summary(
+                user_id,
+                NaiveDate::from_ymd_opt(2024, 3, 1).unwrap(),
+                NaiveDate::from_ymd_opt(2024, 3, 31).unwrap(),
+            )
+            .await
+            .unwrap();
+        rows.sort_by_key(|r| r.amount);
+
+        let march = |day| NaiveDate::from_ymd_opt(2024, 3, day).unwrap();
+        assert_eq!(
+            rows,
+            vec![
+                SummaryRow {
+                    amount: dec!(-60),
+                    date: march(10),
+                    budget_link_type: "manual".to_string(),
+                    budget_id: Some(expense_id),
+                    budget_type: Some("expense".to_string()),
+                },
+                SummaryRow {
+                    amount: dec!(-40),
+                    date: march(10),
+                    budget_link_type: "unlinked".to_string(),
+                    budget_id: None,
+                    budget_type: None,
+                },
+                SummaryRow {
+                    amount: dec!(-12),
+                    date: march(2),
+                    budget_link_type: "auto".to_string(),
+                    budget_id: Some(expense_id),
+                    budget_type: Some("expense".to_string()),
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn summary_row_category() {
+        let row = |link: &str, budget_type: Option<&str>| SummaryRow {
+            amount: dec!(-1),
+            date: NaiveDate::from_ymd_opt(2024, 1, 1).unwrap(),
+            budget_link_type: link.to_string(),
+            budget_id: None,
+            budget_type: budget_type.map(str::to_string),
+        };
+        let cases = [
+            (row("unlinked", None), Some(SummaryCategory::Unbudgeted)),
+            (
+                row("manual", Some("savings")),
+                Some(SummaryCategory::Budgeted(BudgetType::Savings)),
+            ),
+            (
+                row("auto", Some("income")),
+                Some(SummaryCategory::Budgeted(BudgetType::Income)),
+            ),
+            (row("manual", None), Some(SummaryCategory::Unbudgeted)),
+            (
+                row("auto", Some("bogus")),
+                Some(SummaryCategory::Unbudgeted),
+            ),
+            (row("other", Some("expense")), None),
+        ];
+        for (r, expected) in cases {
+            assert_eq!(r.category(), expected, "{r:?}");
+        }
     }
 
     #[sqlx::test(migrations = "./migrations")]

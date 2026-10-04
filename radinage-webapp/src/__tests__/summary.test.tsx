@@ -12,6 +12,7 @@ import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { i18n } from "@/i18n";
+import type { ForecastMonthStatus, ForecastResponse } from "@/lib/types";
 import { theme } from "@/theme";
 
 vi.mock("@/lib/api", () => ({
@@ -29,89 +30,76 @@ vi.mock("@/lib/api", () => ({
 const { apiFetch } = await import("@/lib/api");
 const apiFetchMock = vi.mocked(apiFetch);
 
-const mockSummaryResponse = {
-	months: [
-		{
-			year: 2026,
-			month: 1,
-			unbudgeted: "-100.00",
-			budgeted: {
-				expense: "-500.00",
-				income: "2000.00",
-				savings: "-300.00",
-			},
-		},
-		{
-			year: 2026,
-			month: 2,
-			unbudgeted: "-150.00",
-			budgeted: {
-				expense: "-600.00",
-				income: "2200.00",
-				savings: "-400.00",
-			},
-		},
-		{
-			year: 2026,
-			month: 3,
-			unbudgeted: "-200.00",
-			budgeted: {
-				expense: "-700.00",
-				income: "2500.00",
-				savings: "-350.00",
-			},
-		},
-	],
-};
+interface MonthFlows {
+	income: number;
+	expenses: number;
+	savings: number;
+}
 
-const mockBudgetsResponse = [
-	{
-		id: "b1",
-		label: "Salary",
-		budgetType: "income" as const,
-		kind: {
-			type: "recurring" as const,
-			recurrence: "monthly" as const,
-			closedPeriods: [],
-			currentPeriod: {
-				start: { year: 2025, month: 1 },
-				end: null,
-				amount: "2500.00",
-			},
-		},
-		rules: [],
-		createdAt: "2025-01-01T00:00:00Z",
-	},
-	{
-		id: "b2",
-		label: "Rent",
-		budgetType: "expense" as const,
-		kind: {
-			type: "recurring" as const,
-			recurrence: "monthly" as const,
-			closedPeriods: [],
-			currentPeriod: {
-				start: { year: 2025, month: 1 },
-				end: null,
-				amount: "-800.00",
-			},
-		},
-		rules: [],
-		createdAt: "2025-01-01T00:00:00Z",
-	},
-];
+function money(amount: number): string {
+	return amount.toFixed(2);
+}
 
-function setupMocks(
-	summary = mockSummaryResponse,
-	budgets = mockBudgetsResponse,
-) {
+function statusOf(year: number, month: number): ForecastMonthStatus {
+	const now = new Date();
+	const current = now.getFullYear() * 12 + now.getMonth() + 1;
+	const target = year * 12 + month;
+	if (target < current) return "past";
+	return target === current ? "current" : "future";
+}
+
+/** A 12-month forecast for `year`, statuses relative to today like the server's. */
+function makeForecast(
+	year: number,
+	flowsOf: (month: number) => MonthFlows,
+): ForecastResponse {
+	let cumulative = 0;
+	const totals = { income: 0, expenses: 0, savings: 0 };
+	const months = Array.from({ length: 12 }, (_, i) => {
+		const month = i + 1;
+		const { income, expenses, savings } = flowsOf(month);
+		const balance = income + expenses + savings;
+		cumulative += balance;
+		totals.income += income;
+		totals.expenses += expenses;
+		totals.savings += savings;
+		return {
+			year,
+			month,
+			status: statusOf(year, month),
+			income: money(income),
+			expenses: money(expenses),
+			savings: money(savings),
+			balance: money(balance),
+			cumulative: money(cumulative),
+		};
+	});
+	return {
+		months,
+		totals: {
+			income: money(totals.income),
+			expenses: money(totals.expenses),
+			savings: money(totals.savings),
+			balance: money(totals.income + totals.expenses + totals.savings),
+		},
+		endBalance: money(cumulative),
+	};
+}
+
+const typicalMonth = (): MonthFlows => ({
+	income: 2500,
+	expenses: -900,
+	savings: -300,
+});
+
+function setupMocks(forecastOf: (year: number) => ForecastResponse) {
 	apiFetchMock.mockReset();
 	apiFetchMock.mockImplementation((path: string) => {
-		if (path.startsWith("/summary")) {
-			return Promise.resolve(summary);
-		}
-		if (path.startsWith("/budgets")) {
-			return Promise.resolve(budgets);
+		const match = /^\/forecast\?fromYear=(\d+)&fromMonth=1&months=12$/.exec(
+			path,
+		);
+		if (match?.[1]) {
+			return Promise.resolve(forecastOf(Number(match[1])));
 		}
 		return Promise.reject(new Error(`Unexpected path: ${path}`));
 	});
@@ -153,7 +141,7 @@ async function renderSummaryPage(searchParams = "") {
 
 beforeEach(() => {
 	i18n.changeLanguage("fr");
-	setupMocks();
+	setupMocks((year) => makeForecast(year, typicalMonth));
 });
 
 afterEach(() => {
@@ -267,18 +255,14 @@ describe("SummaryPage", () => {
 		});
 	});
 
-	it("handles empty summary response", async () => {
-		setupMocks({ months: [] }, mockBudgetsResponse);
-
-		await renderSummaryPage();
+	it("requests the forecast of January to December of the selected year", async () => {
+		await renderSummaryPage("?year=2025");
 
 		await waitFor(() => {
-			expect(screen.getByText("Budget / jour")).toBeInTheDocument();
+			expect(apiFetchMock).toHaveBeenCalledWith(
+				"/forecast?fromYear=2025&fromMonth=1&months=12",
+			);
 		});
-
-		// Should still render 12 rows (all projected)
-		const rows = document.querySelectorAll("tbody tr");
-		expect(rows.length).toBe(12);
 	});
 
 	it("navigates year with arrow buttons", async () => {
@@ -309,123 +293,48 @@ describe("SummaryPage", () => {
 		});
 	});
 
-	it("treats positive unbudgeted as income and negative as expense when no budgets exist", async () => {
-		// User has no budgets → all operations land in `unbudgeted`. One month
-		// has net positive unbudgeted (salary dominant), another has net
-		// negative (spending dominant). Totals must reflect both signs.
-		const year = new Date().getFullYear();
-		setupMocks(
-			{
-				months: [
-					{
-						year,
-						month: 1,
-						unbudgeted: "1200.00",
-						budgeted: { expense: "0.00", income: "0.00", savings: "0.00" },
-					},
-					{
-						year,
-						month: 2,
-						unbudgeted: "-800.00",
-						budgeted: { expense: "0.00", income: "0.00", savings: "0.00" },
-					},
-				],
-			},
-			[],
-		);
-
-		await renderSummaryPage(`?year=${year}`);
-
-		await waitFor(() => {
-			expect(screen.getAllByText("Revenus").length).toBeGreaterThan(0);
-		});
-
-		// The page now shows income +1200 and expenses -800. Before the fix,
-		// both unbudgeted values were bucketed into expenses and income stayed
-		// at 0, so 1200 never appeared.
-		const pageText = (document.body.textContent ?? "").replace(/\s/g, "");
-		expect(pageText).toMatch(/1200,00/);
-		expect(pageText).toMatch(/-800,00/);
-	});
-
-	it("clamps daily budget to zero when end-of-year balance is negative", async () => {
-		// Big recurring expenses → negative end-of-year balance → daily budget
-		// would be negative. It must be clamped to 0 €.
-		const heavyExpenseBudgets = [
-			{
-				id: "b1",
-				label: "Rent",
-				budgetType: "expense" as const,
-				kind: {
-					type: "recurring" as const,
-					recurrence: "monthly" as const,
-					closedPeriods: [],
-					currentPeriod: {
-						start: { year: 2025, month: 1 },
-						end: null,
-						amount: "-10000.00",
-					},
-				},
-				rules: [],
-				createdAt: "2025-01-01T00:00:00Z",
-			},
-		];
-		setupMocks(
-			{
-				months: [
-					{
-						year: new Date().getFullYear(),
-						month: 1,
-						unbudgeted: "-5000.00",
-						budgeted: {
-							expense: "-10000.00",
-							income: "0.00",
-							savings: "0.00",
-						},
-					},
-				],
-			},
-			heavyExpenseBudgets,
-		);
-
-		await renderSummaryPage();
-
-		await waitFor(() => {
-			expect(screen.getByText("Budget / jour")).toBeInTheDocument();
-		});
-
-		const card = screen.getByRole("region", { name: "Budget / jour" });
-		const text = card.textContent ?? "";
-		// Should not contain a negative sign before the € amount.
-		expect(text).not.toMatch(/-\d/);
-		// Should display zero euros.
-		expect(text).toMatch(/0,00/);
-	});
-
-	it("displays full year as actual for past years", async () => {
-		setupMocks(
-			{
-				months: Array.from({ length: 12 }, (_, i) => ({
-					year: 2025,
-					month: i + 1,
-					unbudgeted: "-50.00",
-					budgeted: {
-						expense: "-200.00",
-						income: "1000.00",
-						savings: "-100.00",
-					},
-				})),
-			},
-			mockBudgetsResponse,
+	it("shows the server's monthly flows, totals and end-of-year balance", async () => {
+		setupMocks((year) =>
+			makeForecast(year, (month) =>
+				month === 1
+					? { income: 1234, expenses: -567, savings: 0 }
+					: { income: 0, expenses: 0, savings: 0 },
+			),
 		);
 
 		await renderSummaryPage("?year=2025");
 
-		await waitFor(() => {
-			expect(screen.getByText("2025")).toBeInTheDocument();
+		const card = await screen.findByRole("region", {
+			name: "Balance fin d'année",
 		});
+		expect((card.textContent ?? "").replace(/\s/g, "")).toMatch(/\+667,00/);
+		const totals = screen.getByRole("region", { name: /Totaux/ });
+		const totalsText = (totals.textContent ?? "").replace(/\s/g, "");
+		expect(totalsText).toMatch(/1234,00/);
+		expect(totalsText).toMatch(/-567,00/);
+		const january = within(screen.getByRole("table")).getAllByRole("row")[1];
+		expect(january).toBeDefined();
+		const januaryText = (january?.textContent ?? "").replace(/\s/g, "");
+		expect(januaryText).toMatch(/1234,00/);
+		expect(januaryText).toMatch(/-567,00/);
+	});
 
-		// Past year = no forecast months and no month in progress
+	it("clamps daily budget to zero when end-of-year balance is negative", async () => {
+		setupMocks((year) =>
+			makeForecast(year, () => ({ income: 0, expenses: -10000, savings: 0 })),
+		);
+
+		await renderSummaryPage();
+
+		const card = await screen.findByRole("region", { name: "Budget / jour" });
+		const text = card.textContent ?? "";
+		expect(text).not.toMatch(/-\d/);
+		expect(text).toMatch(/0,00/);
+	});
+
+	it("displays full year as actual for past years", async () => {
+		await renderSummaryPage("?year=2025");
+
 		const table = await screen.findByRole("table");
 		expect(within(table).queryAllByText("Prévision")).toHaveLength(0);
 		expect(within(table).queryByText("En cours")).not.toBeInTheDocument();
