@@ -5,6 +5,7 @@ import type {
 	BudgetResponse,
 	CreateUserResponse,
 	ExportDataResponse,
+	ForecastResponse,
 	ImportDataResponse,
 	MonthlyOperationsResponse,
 	OperationResponse,
@@ -34,6 +35,20 @@ export function useSummary(
 		queryFn: () =>
 			apiFetch<SummaryResponse>(
 				`/summary?fromYear=${fromYear}&fromMonth=${fromMonth}&toYear=${toYear}&toMonth=${toMonth}`,
+			),
+	});
+}
+
+export function useForecast(
+	fromYear: number,
+	fromMonth: number,
+	months: number,
+) {
+	return useQuery({
+		queryKey: ["forecast", fromYear, fromMonth, months],
+		queryFn: () =>
+			apiFetch<ForecastResponse>(
+				`/forecast?fromYear=${fromYear}&fromMonth=${fromMonth}&months=${months}`,
 			),
 	});
 }
@@ -157,6 +172,7 @@ function useInvalidateMonthlyData() {
 	return () => {
 		queryClient.invalidateQueries({ queryKey: ["monthly-operations"] });
 		queryClient.invalidateQueries({ queryKey: ["summary"] });
+		queryClient.invalidateQueries({ queryKey: ["forecast"] });
 	};
 }
 
@@ -255,6 +271,7 @@ export function useImportData() {
 			queryClient.invalidateQueries({ queryKey: ["monthly-operations"] });
 			queryClient.invalidateQueries({ queryKey: ["budgets"] });
 			queryClient.invalidateQueries({ queryKey: ["summary"] });
+			queryClient.invalidateQueries({ queryKey: ["forecast"] });
 		},
 	});
 }

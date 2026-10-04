@@ -3,7 +3,7 @@ use crate::{
     auth::middleware::AuthUser,
     domain::{budget::BudgetType, last_day_of_month},
     error::{AppError, AppResult},
-    repositories::OperationRepository,
+    repositories::{OperationRepository, SummaryCategory},
 };
 use axum::{
     Json,
@@ -100,21 +100,12 @@ pub async fn get_summary<U, O: OperationRepository, B>(
         let mut savings = Decimal::ZERO;
 
         for row in summary_rows {
-            match row.budget_link_type.as_str() {
-                "unlinked" => unbudgeted += row.amount,
-                "manual" | "auto" => {
-                    match row
-                        .budget_type
-                        .as_deref()
-                        .and_then(|s| s.parse::<BudgetType>().ok())
-                    {
-                        Some(BudgetType::Expense) => expense += row.amount,
-                        Some(BudgetType::Income) => income += row.amount,
-                        Some(BudgetType::Savings) => savings += row.amount,
-                        None => unbudgeted += row.amount,
-                    }
-                }
-                _ => {}
+            match row.category() {
+                Some(SummaryCategory::Unbudgeted) => unbudgeted += row.amount,
+                Some(SummaryCategory::Budgeted(BudgetType::Expense)) => expense += row.amount,
+                Some(SummaryCategory::Budgeted(BudgetType::Income)) => income += row.amount,
+                Some(SummaryCategory::Budgeted(BudgetType::Savings)) => savings += row.amount,
+                None => {}
             }
         }
 
@@ -227,21 +218,29 @@ mod tests {
             Box::pin(async {
                 Ok(vec![
                     SummaryRow {
+                        date: NaiveDate::from_ymd_opt(2024, 1, 15).unwrap(),
+                        budget_id: None,
                         amount: Decimal::new(-800, 0),
                         budget_link_type: "manual".to_string(),
                         budget_type: Some("expense".to_string()),
                     },
                     SummaryRow {
+                        date: NaiveDate::from_ymd_opt(2024, 1, 15).unwrap(),
+                        budget_id: None,
                         amount: Decimal::new(-50, 0),
                         budget_link_type: "unlinked".to_string(),
                         budget_type: None,
                     },
                     SummaryRow {
+                        date: NaiveDate::from_ymd_opt(2024, 1, 15).unwrap(),
+                        budget_id: None,
                         amount: Decimal::new(3000, 0),
                         budget_link_type: "auto".to_string(),
                         budget_type: Some("income".to_string()),
                     },
                     SummaryRow {
+                        date: NaiveDate::from_ymd_opt(2024, 1, 15).unwrap(),
+                        budget_id: None,
                         amount: Decimal::new(-200, 0),
                         budget_link_type: "manual".to_string(),
                         budget_type: Some("savings".to_string()),

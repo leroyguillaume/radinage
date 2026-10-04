@@ -191,6 +191,11 @@ where
                 ..Tag::default()
             },
             Tag {
+                name: "Forecast".to_string(),
+                description: Some("Project the month-by-month balance over a horizon from actual operations and budgeted amounts.".to_string()),
+                ..Tag::default()
+            },
+            Tag {
                 name: "Data".to_string(),
                 description: Some("Export and re-import a user's full data (budgets and operations) as JSON. Intended for backup and account migration.".to_string()),
                 ..Tag::default()
@@ -421,6 +426,16 @@ where
                     .id("getSummary")
             }),
         )
+        // Forecast
+        .api_route(
+            "/forecast",
+            get_with(handlers::forecast::get_forecast, |op| {
+                op.tag("Forecast")
+                    .summary("Forecast monthly balances over a horizon")
+                    .description("Project income, expenses, savings, balance and running balance for `months` consecutive months (1 to 24) starting at fromYear/fromMonth. Past and current months use the operations accounted so far: budget-linked amounts under their budget's type, each unbudgeted operation under income or expenses by its own sign. Future months use the amounts the budgets expect. The running balance starts at zero before the first month. Ignored operations are excluded and split operations count through their parts. Status is relative to the server's current date.")
+                    .id("getForecast")
+            }),
+        )
         // Data export / import
         .api_route(
             "/data/export",
@@ -609,6 +624,7 @@ pub(crate) mod test_util {
             )
             // Summary
             .route("/summary", routing::get(handlers::summary::get_summary))
+            .route("/forecast", routing::get(handlers::forecast::get_forecast))
             // Data export / import
             .route("/data/export", routing::get(handlers::data::export_data))
             .route("/data/import", routing::post(handlers::data::import_data))
@@ -689,5 +705,54 @@ mod tests {
             assert!(split_props[field].is_object(), "missing {field}");
         }
         assert!(schemas["ReplaceOperationSplitsRequest"]["properties"]["splits"].is_object());
+    }
+
+    #[tokio::test]
+    async fn openapi_documents_forecast() {
+        let app = build_router(make_test_state(
+            MockUserRepository::new(),
+            MockOperationRepository::new(),
+            MockBudgetRepository::new(),
+        ));
+        let resp = app
+            .oneshot(json_request("GET", "/openapi.json", None, None))
+            .await
+            .unwrap();
+        let doc: serde_json::Value = response_json(resp).await;
+
+        let op = &doc["paths"]["/forecast"]["get"];
+        assert_eq!(op["operationId"], "getForecast");
+        assert_eq!(op["tags"][0], "Forecast");
+        let mut params: Vec<&str> = op["parameters"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|p| p["name"].as_str().unwrap())
+            .collect();
+        params.sort_unstable();
+        assert_eq!(params, ["fromMonth", "fromYear", "months"]);
+
+        let schemas = &doc["components"]["schemas"];
+        for field in ["months", "totals", "endBalance"] {
+            assert!(
+                schemas["ForecastResponse"]["properties"][field].is_object(),
+                "missing {field}"
+            );
+        }
+        for field in [
+            "year",
+            "month",
+            "status",
+            "income",
+            "expenses",
+            "savings",
+            "balance",
+            "cumulative",
+        ] {
+            assert!(
+                schemas["ForecastMonthResponse"]["properties"][field].is_object(),
+                "missing {field}"
+            );
+        }
     }
 }
