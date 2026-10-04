@@ -49,7 +49,7 @@ RUN npm run build
 # =============================================================================
 # Target: radinage-api
 # =============================================================================
-FROM alpine:3.23 AS api
+FROM alpine:3.24 AS api
 
 RUN addgroup -g 65532 -S radinage && adduser -u 65532 -S radinage -G radinage
 
