@@ -2,7 +2,7 @@
 # Stage 1: Rust builder — uses cargo-chef to cache dependency compilation
 # independently from package version bumps.
 # =============================================================================
-FROM rust:1.94.1-alpine3.23 AS chef
+FROM rust:1.98.1-alpine3.23 AS chef
 
 RUN apk add --no-cache musl-dev=1.2.5-r23 openssl-dev=3.5.9-r0 openssl-libs-static=3.5.9-r0 \
     && cargo install cargo-chef@0.1.77 --locked
