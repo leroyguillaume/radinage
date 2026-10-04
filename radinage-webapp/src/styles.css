@@ -1,4 +1,57 @@
+/* Mantine ships unlayered CSS, which beats every layered Tailwind utility;
+   its layered build lets utilities such as px-4 override component resets. */
+@layer theme, base, mantine, components, utilities;
+
 @import "tailwindcss";
-@import "@mantine/core/styles.css";
-@import "@mantine/dates/styles.css";
-@import "@mantine/charts/styles.css";
+@import "@fontsource-variable/plus-jakarta-sans";
+@import "@fontsource-variable/bricolage-grotesque";
+@import "@mantine/core/styles.layer.css";
+@import "@mantine/dates/styles.layer.css";
+@import "@mantine/charts/styles.layer.css";
+
+.tabular-nums {
+	font-variant-numeric: tabular-nums;
+}
+
+.nav-pill {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	min-height: 44px;
+	padding: 0 16px;
+	border-radius: 999px;
+	text-decoration: none;
+	color: var(--mantine-color-dimmed);
+	font-weight: 600;
+	font-size: 15px;
+}
+
+.nav-pill:hover {
+	background: var(--mantine-color-forest-0);
+	color: var(--mantine-color-text);
+}
+
+.nav-pill[data-active="true"] {
+	background: var(--mantine-color-leaf-1);
+	color: var(--mantine-color-forest-8);
+}
+
+.tab-link {
+	flex: 1;
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	justify-content: center;
+	gap: 2px;
+	min-height: 56px;
+	border-radius: 14px;
+	text-decoration: none;
+	font-size: 11px;
+	font-weight: 700;
+	color: var(--mantine-color-dimmed);
+}
+
+.tab-link[data-active="true"] {
+	background: var(--mantine-color-leaf-1);
+	color: var(--mantine-color-forest-8);
+}

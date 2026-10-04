@@ -28,6 +28,22 @@
 		"clearEffectiveDate": "Clear effective date",
 		"previousMonth": "Previous month",
 		"nextMonth": "Next month",
+		"unbudgeted": "Unbudgeted",
+		"operationsCount": "{{count}} operation(s)",
+		"forecastHint": "3-month forecast",
+		"ofBudgeted": "of {{amount}} budgeted",
+		"ofForecast": "of {{amount}} forecast",
+		"link": "Link",
+		"auto": "auto",
+		"sortBy": "Sort by",
+		"sortAscending": "Ascending order",
+		"sortDescending": "Descending order",
+		"status": {
+			"remaining": "{{amount}} left",
+			"overBy": "Over by {{amount}}",
+			"reached": "Reached",
+			"missing": "{{amount}} short"
+		},
 		"columns": {
 			"budget": "Budget",
 			"date": "Date",
@@ -117,7 +133,25 @@
 		"applyForceManual": "Replace all",
 		"applyRules": "Apply",
 		"applyError": "Failed to apply rules",
-		"applyResult": "{{updated}} operation(s) linked, {{skipped}} skipped"
+		"applyResult": "{{updated}} operation(s) linked, {{skipped}} skipped",
+		"subtitle": "Progress for {{month}}",
+		"filterByType": "Filter by type",
+		"sortBy": "Sort by",
+		"filters": {
+			"all": "All",
+			"expense": "Expenses",
+			"income": "Income",
+			"savings": "Savings"
+		},
+		"progress": {
+			"amounts": "{{real}} of {{planned}}",
+			"percent": "{{percent}}%",
+			"reached": "Reached",
+			"over": "Over",
+			"noDue": "Nothing due this month"
+		},
+		"noRules": "No matching rule",
+		"deleteConfirmMessage": "The budget “{{label}}” will be permanently deleted."
 	},
 	"stats": {
 		"title": "Statistics",
@@ -130,15 +164,27 @@
 		"balance": "Balance",
 		"fetchError": "Failed to load statistics",
 		"monthlyEvolution": "Income, expenses and savings",
-		"balanceEvolution": "Balance evolution"
+		"balanceEvolution": "Balance evolution",
+		"cumulative": "Cumulative over the period"
 	},
 	"forecast": {
 		"title": "Summary",
 		"fetchError": "Failed to load forecast",
 		"yearProgress": "Year progress: {{percent}}%",
 		"dailyBudget": "Daily budget",
-		"remainingDays": "{{count}} day(s) remaining",
+		"remainingDays_one": "{{count}} day left",
+		"remainingDays_other": "{{count}} days left",
+		"subtitle": "Actuals up to the current month, then a forecast based on your budgets.",
+		"previousYear": "Previous year",
+		"nextYear": "Next year",
 		"endOfYearBalance": "End of year balance",
+		"endOfYearHint": "What you should have left on December 31 if your budgets hold.",
+		"totalsTitle": "{{year}} totals",
+		"monthlyChart": "Month-by-month balance",
+		"surplus": "Surplus",
+		"deficit": "Deficit",
+		"monthlyDetail": "Monthly detail",
+		"current": "Current",
 		"totalIncome": "Income",
 		"totalExpenses": "Expenses",
 		"totalSavings": "Savings",
@@ -148,7 +194,7 @@
 		"savings": "Savings",
 		"balance": "Balance",
 		"cumulative": "Cumulative",
-		"projected": "proj."
+		"projected": "Forecast"
 	},
 	"nav": {
 		"operations": "Operations",
@@ -160,8 +206,19 @@
 		"logout": "Log out",
 		"menu": "Menu"
 	},
+	"auth": {
+		"features": {
+			"importTitle": "Statement import",
+			"importText": "CSV or Excel, straight from your bank.",
+			"rulesTitle": "Automatic categorisation",
+			"rulesText": "Rules file your operations under the right budget.",
+			"forecastTitle": "Year-end forecast",
+			"forecastText": "What you can spend per day without ending up in the red."
+		}
+	},
 	"login": {
 		"title": "Sign in",
+		"welcome": "Good to see you again.",
 		"username": "Username",
 		"password": "Password",
 		"submit": "Sign in",

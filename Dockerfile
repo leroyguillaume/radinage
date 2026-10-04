@@ -4,7 +4,7 @@
 # =============================================================================
 FROM rust:1.94.1-alpine3.23 AS chef
 
-RUN apk add --no-cache musl-dev~=1.2.5-r23 openssl-dev~=3.5.6 openssl-libs-static~=3.5.6 \
+RUN apk add --no-cache musl-dev=1.2.5-r23 openssl-dev=3.5.9-r0 openssl-libs-static=3.5.9-r0 \
     && cargo install cargo-chef@0.1.77 --locked
 
 WORKDIR /usr/src/local/radinage
@@ -59,7 +59,7 @@ RUN addgroup -g 1000 -S radinage && adduser -u 1000 -S radinage -G radinage
 COPY --from=rust-builder /usr/src/local/radinage/target/release/radinage-api /usr/local/bin/radinage-api
 COPY radinage-api/migrations /opt/radinage/migrations
 
-USER radinage
+USER 1000:1000
 
 EXPOSE 3000
 
@@ -74,7 +74,7 @@ RUN addgroup -g 1000 -S radinage && adduser -u 1000 -S radinage -G radinage
 
 COPY --from=rust-builder /usr/src/local/radinage/target/release/radinage-mcp /usr/local/bin/radinage-mcp
 
-USER radinage
+USER 1000:1000
 
 ENTRYPOINT ["radinage-mcp"]
 
@@ -93,7 +93,7 @@ COPY --from=webapp-builder /usr/src/local/radinage/dist /usr/share/nginx/html
 
 ENV API_HOST=api:3000
 
-USER radinage
+USER 1000:1000
 
 EXPOSE 8080
 

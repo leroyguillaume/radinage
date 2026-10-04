@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="radinage-webapp/public/logo.svg" alt="Radinage logo" width="160">
+</p>
+
 # Radinage
 
 [![Docker Publish](https://github.com/leroyguillaume/radinage/actions/workflows/docker-publish.yml/badge.svg)](https://github.com/leroyguillaume/radinage/actions/workflows/docker-publish.yml)
@@ -46,7 +50,7 @@ radinage/
 
 - **Framework:** React 19 with strict TypeScript
 - **Build:** Vite
-- **UI:** Mantine v7 + Tailwind CSS v4
+- **UI:** Mantine v9 + Tailwind CSS v4
 - **Routing:** TanStack Router (file-based)
 - **Server state:** TanStack Query
 - **Client state:** Zustand

@@ -9,11 +9,16 @@ import {
 	Outlet,
 	RouterProvider,
 } from "@tanstack/react-router";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { i18n } from "@/i18n";
-import type { BudgetResponse, Recurrence } from "@/lib/types";
+import type {
+	BudgetResponse,
+	BudgetType,
+	OperationResponse,
+	Recurrence,
+} from "@/lib/types";
 import { theme } from "@/theme";
 
 vi.mock("@/lib/api", () => ({
@@ -36,7 +41,7 @@ function makeBudget(
 	label: string,
 	recurrence: Recurrence,
 	amount: string,
-	budgetType: "expense" | "income" | "savings" = "expense",
+	budgetType: BudgetType = "expense",
 ): BudgetResponse {
 	return {
 		id,
@@ -79,7 +84,25 @@ let apiCalls: Array<{
 	options?: { method?: string; body?: string };
 }> = [];
 
-function setupBudgetsMock(budgets: BudgetResponse[]) {
+function makeLinkedOperation(
+	id: string,
+	budgetId: string,
+	amount: string,
+): OperationResponse {
+	return {
+		id,
+		amount,
+		date: "2024-01-15",
+		effectiveDate: null,
+		label: `OP ${id}`,
+		budgetLink: { type: "auto", budgetId },
+	};
+}
+
+function setupBudgetsMock(
+	budgets: BudgetResponse[],
+	operations: OperationResponse[] = [],
+) {
 	apiCalls = [];
 	apiFetchMock.mockImplementation((path: string, options?: unknown) => {
 		const opts = options as { method?: string; body?: string } | undefined;
@@ -88,8 +111,14 @@ function setupBudgetsMock(budgets: BudgetResponse[]) {
 		if (path.match(/\/budgets\/[^/]+\/apply$/)) {
 			return Promise.resolve({ updated: 3, skipped: 1 });
 		}
+		if (path.match(/^\/budgets\/[^/]+$/) && opts?.method === "DELETE") {
+			return Promise.resolve(undefined);
+		}
 		if (path.startsWith("/budgets")) {
 			return Promise.resolve(budgets);
+		}
+		if (path.startsWith("/operations/monthly/")) {
+			return Promise.resolve({ operations });
 		}
 		return Promise.reject(new Error(`Unexpected path: ${path}`));
 	});
@@ -180,9 +209,11 @@ describe("BudgetsPage", () => {
 		]);
 		await renderBudgetsPage();
 
-		expect(await screen.findByText("Dépense")).toBeInTheDocument();
-		expect(screen.getByText("Revenu")).toBeInTheDocument();
-		expect(screen.getByText("Épargne")).toBeInTheDocument();
+		const card = async (name: string) =>
+			within(await screen.findByRole("article", { name }));
+		expect((await card("Loyer")).getByText("Dépense")).toBeInTheDocument();
+		expect((await card("Salaire")).getByText("Revenu")).toBeInTheDocument();
+		expect((await card("PEL")).getByText("Épargne")).toBeInTheDocument();
 	});
 
 	it("shows rules count when rules exist", async () => {
@@ -430,5 +461,112 @@ describe("BudgetsPage", () => {
 				screen.getByText("3 opération(s) liée(s), 1 ignorée(s)"),
 			).toBeInTheDocument();
 		});
+	});
+
+	it("shows a placeholder when no rule is defined", async () => {
+		setupBudgetsMock([makeOccasionalBudget("b1", "Vacances")]);
+		await renderBudgetsPage();
+
+		expect(
+			await screen.findByText("Aucune règle de correspondance"),
+		).toBeInTheDocument();
+		expect(screen.queryByLabelText("Appliquer")).not.toBeInTheDocument();
+	});
+
+	it("filters budgets by type, combined with the search", async () => {
+		setupBudgetsMock([
+			makeBudget("b1", "Loyer", "monthly", "-800.00"),
+			makeBudget("b2", "Salaire", "monthly", "2500.00", "income"),
+			makeBudget("b3", "Livret", "monthly", "-200.00", "savings"),
+			makeBudget("b4", "Salaire bonus", "yearly", "1000.00", "income"),
+		]);
+		await renderBudgetsPage();
+		const user = userEvent.setup();
+
+		await screen.findByText("Loyer");
+		await user.click(screen.getByText("Revenus"));
+
+		await waitFor(() => {
+			expect(screen.queryByText("Loyer")).not.toBeInTheDocument();
+			expect(screen.queryByText("Livret")).not.toBeInTheDocument();
+		});
+		expect(screen.getByText("Salaire")).toBeInTheDocument();
+		expect(screen.getByText("Salaire bonus")).toBeInTheDocument();
+
+		await user.type(screen.getByPlaceholderText("Rechercher"), "bonus");
+		await waitFor(() => {
+			expect(screen.queryByText("Salaire")).not.toBeInTheDocument();
+		});
+		expect(screen.getByText("Salaire bonus")).toBeInTheDocument();
+
+		await user.click(screen.getByText("Tous"));
+		await user.clear(screen.getByPlaceholderText("Rechercher"));
+		expect(await screen.findByText("Loyer")).toBeInTheDocument();
+		expect(screen.getByText("Livret")).toBeInTheDocument();
+	});
+
+	it("asks for confirmation before deleting a budget", async () => {
+		setupBudgetsMock([makeBudget("b1", "Loyer", "monthly", "-800.00")]);
+		await renderBudgetsPage();
+		const user = userEvent.setup();
+
+		await user.click(await screen.findByLabelText("Supprimer"));
+
+		const dialog = await screen.findByRole("dialog");
+		expect(
+			within(dialog).getByText("Supprimer ce budget ?"),
+		).toBeInTheDocument();
+		expect(apiCalls.some((c) => c.options?.method === "DELETE")).toBe(false);
+
+		await user.click(within(dialog).getByRole("button", { name: "Annuler" }));
+		await waitFor(() => {
+			expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+		});
+		expect(apiCalls.some((c) => c.options?.method === "DELETE")).toBe(false);
+
+		await user.click(screen.getByLabelText("Supprimer"));
+		const confirmDialog = await screen.findByRole("dialog");
+		await user.click(
+			within(confirmDialog).getByRole("button", { name: "Supprimer" }),
+		);
+
+		await waitFor(() => {
+			const deleteCall = apiCalls.find((c) => c.options?.method === "DELETE");
+			expect(deleteCall?.path).toBe("/budgets/b1");
+		});
+	});
+
+	it("shows current-month progress against the budgeted amount", async () => {
+		setupBudgetsMock(
+			[
+				makeBudget("b1", "Loyer", "monthly", "-800.00"),
+				makeBudget("b2", "Courses", "monthly", "-100.00"),
+				makeBudget("b3", "Salaire", "monthly", "2500.00", "income"),
+				makeOccasionalBudget("b4", "Vacances"),
+			],
+			[
+				makeLinkedOperation("o1", "b1", "-400.00"),
+				makeLinkedOperation("o2", "b2", "-80.00"),
+				makeLinkedOperation("o3", "b2", "-40.00"),
+				makeLinkedOperation("o4", "b3", "2500.00"),
+			],
+		);
+		await renderBudgetsPage();
+
+		const loyer = within(await screen.findByRole("article", { name: "Loyer" }));
+		expect(
+			await loyer.findByText(/400,00\s€ sur 800,00\s€/),
+		).toBeInTheDocument();
+		expect(loyer.getByText("50 %")).toBeInTheDocument();
+
+		const courses = within(screen.getByRole("article", { name: "Courses" }));
+		expect(courses.getByText(/120,00\s€ sur 100,00\s€/)).toBeInTheDocument();
+		expect(courses.getByText("Dépassé")).toBeInTheDocument();
+
+		const salaire = within(screen.getByRole("article", { name: "Salaire" }));
+		expect(salaire.getByText("Atteint")).toBeInTheDocument();
+
+		const vacances = within(screen.getByRole("article", { name: "Vacances" }));
+		expect(vacances.getByText("Pas d'échéance ce mois-ci")).toBeInTheDocument();
 	});
 });

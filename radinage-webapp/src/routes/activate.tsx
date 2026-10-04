@@ -1,15 +1,9 @@
-import {
-	Alert,
-	Button,
-	Image,
-	Paper,
-	PasswordInput,
-	Stack,
-} from "@mantine/core";
+import { Alert, Button, PasswordInput, Stack, Title } from "@mantine/core";
 import { IconAlertCircle, IconCheck } from "@tabler/icons-react";
 import { createFileRoute } from "@tanstack/react-router";
 import { type FormEvent, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { AuthLayout } from "@/components/AuthLayout";
 import { ApiError, apiFetch } from "@/lib/api";
 
 interface ActivateSearch {
@@ -42,13 +36,11 @@ function ActivatePage() {
 
 	if (!token) {
 		return (
-			<div className="flex h-full flex-col items-center justify-center px-4">
-				<Paper shadow="md" p="md" radius="md" className="w-full max-w-sm">
-					<Alert color="red" icon={<IconAlertCircle size={16} />}>
-						{t("activate.errorMissingToken")}
-					</Alert>
-				</Paper>
-			</div>
+			<AuthLayout>
+				<Alert color="tangerine" icon={<IconAlertCircle size={16} />}>
+					{t("activate.errorMissingToken")}
+				</Alert>
+			</AuthLayout>
 		);
 	}
 
@@ -92,63 +84,57 @@ function ActivatePage() {
 	}
 
 	return (
-		<div className="flex h-full flex-col items-center justify-center px-4">
-			<Image
-				src="/logo-full.png"
-				alt="Radinage"
-				className="w-full max-w-sm"
-				mb="xl"
-			/>
-			<Paper
-				shadow="md"
-				p="md"
-				radius="md"
-				className="w-full max-w-sm"
-				style={{ minHeight: "auto" }}
-			>
-				<form onSubmit={handleSubmit}>
-					<Stack>
-						{error && (
-							<Alert color="red" icon={<IconAlertCircle size={16} />}>
-								{error}
-							</Alert>
-						)}
+		<AuthLayout>
+			<form onSubmit={handleSubmit}>
+				<Stack gap="lg">
+					<Title order={1} fz={36} lts="-0.02em">
+						{t(reset ? "activate.resetSubmit" : "activate.title")}
+					</Title>
 
-						{success && (
-							<Alert color="green" icon={<IconCheck size={16} />}>
-								{t(reset ? "activate.resetSuccess" : "activate.success")}
-							</Alert>
-						)}
+					{error && (
+						<Alert color="tangerine" icon={<IconAlertCircle size={16} />}>
+							{error}
+						</Alert>
+					)}
 
-						<PasswordInput
-							label={t("activate.password")}
-							value={password}
-							onChange={(e) => setPassword(e.currentTarget.value)}
-							required
-							disabled={success}
-							autoFocus
-						/>
+					{success && (
+						<Alert color="leaf" icon={<IconCheck size={16} />}>
+							{t(reset ? "activate.resetSuccess" : "activate.success")}
+						</Alert>
+					)}
 
-						<PasswordInput
-							label={t("activate.confirmPassword")}
-							value={confirmPassword}
-							onChange={(e) => setConfirmPassword(e.currentTarget.value)}
-							required
-							disabled={success}
-						/>
+					<PasswordInput
+						label={t("activate.password")}
+						value={password}
+						onChange={(e) => setPassword(e.currentTarget.value)}
+						required
+						disabled={success}
+						autoFocus
+						autoComplete="new-password"
+						size="md"
+					/>
 
-						<Button
-							type="submit"
-							fullWidth
-							loading={loading}
-							disabled={success}
-							size="md"
-						>
-							{t(reset ? "activate.resetSubmit" : "activate.submit")}
-						</Button>
-					</Stack>
-				</form>
-			</Paper>
-		</div>
+					<PasswordInput
+						label={t("activate.confirmPassword")}
+						value={confirmPassword}
+						onChange={(e) => setConfirmPassword(e.currentTarget.value)}
+						required
+						disabled={success}
+						autoComplete="new-password"
+						size="md"
+					/>
+
+					<Button
+						type="submit"
+						fullWidth
+						loading={loading}
+						disabled={success}
+						size="lg"
+					>
+						{t(reset ? "activate.resetSubmit" : "activate.submit")}
+					</Button>
+				</Stack>
+			</form>
+		</AuthLayout>
 	);
 }

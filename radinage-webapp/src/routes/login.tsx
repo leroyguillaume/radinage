@@ -1,16 +1,17 @@
 import {
 	Alert,
 	Button,
-	Image,
-	Paper,
 	PasswordInput,
 	Stack,
+	Text,
 	TextInput,
+	Title,
 } from "@mantine/core";
 import { IconAlertCircle } from "@tabler/icons-react";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { type FormEvent, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { AuthLayout } from "@/components/AuthLayout";
 import { ApiError, useAuthStore } from "@/stores/auth";
 
 export const Route = createFileRoute("/login")({
@@ -47,49 +48,46 @@ function LoginPage() {
 	}
 
 	return (
-		<div className="flex h-full flex-col items-center justify-center px-4">
-			<Image
-				src="/logo-full.png"
-				alt="Radinage"
-				className="w-full max-w-sm"
-				mb="xl"
-			/>
-			<Paper
-				shadow="md"
-				p="md"
-				radius="md"
-				className="w-full max-w-sm"
-				style={{ minHeight: "auto" }}
-			>
-				<form onSubmit={handleSubmit}>
-					<Stack>
-						{error && (
-							<Alert color="red" icon={<IconAlertCircle size={16} />}>
-								{error}
-							</Alert>
-						)}
-
-						<TextInput
-							label={t("login.username")}
-							value={username}
-							onChange={(e) => setUsername(e.currentTarget.value)}
-							required
-							autoFocus
-						/>
-
-						<PasswordInput
-							label={t("login.password")}
-							value={password}
-							onChange={(e) => setPassword(e.currentTarget.value)}
-							required
-						/>
-
-						<Button type="submit" fullWidth loading={loading} size="md">
-							{t("login.submit")}
-						</Button>
+		<AuthLayout>
+			<form onSubmit={handleSubmit}>
+				<Stack gap="lg">
+					<Stack gap={6}>
+						<Title order={1} fz={36} lts="-0.02em">
+							{t("login.title")}
+						</Title>
+						<Text c="dimmed">{t("login.welcome")}</Text>
 					</Stack>
-				</form>
-			</Paper>
-		</div>
+
+					{error && (
+						<Alert color="tangerine" icon={<IconAlertCircle size={16} />}>
+							{error}
+						</Alert>
+					)}
+
+					<TextInput
+						label={t("login.username")}
+						value={username}
+						onChange={(e) => setUsername(e.currentTarget.value)}
+						required
+						autoFocus
+						autoComplete="username"
+						size="md"
+					/>
+
+					<PasswordInput
+						label={t("login.password")}
+						value={password}
+						onChange={(e) => setPassword(e.currentTarget.value)}
+						required
+						autoComplete="current-password"
+						size="md"
+					/>
+
+					<Button type="submit" fullWidth loading={loading} size="lg">
+						{t("login.submit")}
+					</Button>
+				</Stack>
+			</form>
+		</AuthLayout>
 	);
 }

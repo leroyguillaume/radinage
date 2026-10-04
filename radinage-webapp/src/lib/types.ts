@@ -1,3 +1,5 @@
+export type BudgetType = "expense" | "income" | "savings";
+
 export interface PaginatedResponse<T> {
 	data: T[];
 	total: number;
@@ -87,7 +89,7 @@ export type LabelPattern =
 export interface BudgetResponse {
 	id: string;
 	label: string;
-	budgetType: "expense" | "income" | "savings";
+	budgetType: BudgetType;
 	kind: BudgetKind;
 	rules: Rule[];
 	createdAt: string;

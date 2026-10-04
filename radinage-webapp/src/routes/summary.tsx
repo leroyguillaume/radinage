@@ -1,10 +1,13 @@
 import {
 	ActionIcon,
 	Alert,
-	Grid,
+	Badge,
+	Box,
 	Group,
 	Loader,
+	Paper,
 	Progress,
+	SimpleGrid,
 	Stack,
 	Table,
 	Text,
@@ -16,9 +19,15 @@ import {
 	IconChevronRight,
 } from "@tabler/icons-react";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { type CSSProperties, type ReactNode, useId } from "react";
 import { useTranslation } from "react-i18next";
+import { PageHeader } from "@/components/PageHeader";
 import { getBudgetedAmountForMonth } from "@/lib/budget-utils";
+import { formatAmount, formatSignedAmount } from "@/lib/format";
 import { useBudgets, useSummary } from "@/lib/hooks";
+import { balanceTextColor, budgetTypeTones, type Tone } from "@/lib/tones";
+import type { BudgetResponse, MonthlySummary } from "@/lib/types";
+import { headingFont, palette } from "@/theme";
 
 interface ForecastSearch {
 	year: number;
@@ -31,17 +40,15 @@ export const Route = createFileRoute("/summary")({
 	}),
 });
 
-function formatAmount(amount: number): string {
-	return new Intl.NumberFormat("fr-FR", {
-		style: "currency",
-		currency: "EUR",
-	}).format(amount);
-}
+const shortNumber = new Intl.NumberFormat("fr-FR", {
+	maximumFractionDigits: 0,
+});
 
-function amountColor(amount: number): string {
-	if (amount > 0) return "green";
-	if (amount < 0) return "red";
-	return "white";
+function formatShortSigned(amount: number): string {
+	const rounded = Math.round(amount);
+	return rounded > 0
+		? `+${shortNumber.format(rounded)}`
+		: shortNumber.format(rounded);
 }
 
 interface MonthForecast {
@@ -56,20 +63,8 @@ interface MonthForecast {
 }
 
 function computeForecast(
-	summaryMonths: Array<{
-		year: number;
-		month: number;
-		unbudgeted: string;
-		budgeted: { expense: string; income: string; savings: string };
-	}>,
-	budgets: Array<{
-		id: string;
-		label: string;
-		budgetType: "expense" | "income" | "savings";
-		kind: import("@/lib/types").BudgetKind;
-		rules: import("@/lib/types").Rule[];
-		createdAt: string;
-	}>,
+	summaryMonths: MonthlySummary[],
+	budgets: BudgetResponse[],
 	currentYear: number,
 	currentMonth: number,
 ): MonthForecast[] {
@@ -185,6 +180,451 @@ function monthsElapsedRatio(year: number): number {
 	return Math.min(1, elapsed / total);
 }
 
+function monthName(
+	year: number,
+	month: number,
+	locale: string,
+	style: "long" | "short",
+): string {
+	return new Date(year, month - 1).toLocaleDateString(locale, {
+		month: style,
+	});
+}
+
+function stripes(dark: string, light: string): string {
+	return `repeating-linear-gradient(135deg, var(--mantine-color-${dark}) 0 4px, var(--mantine-color-${light}) 4px 8px)`;
+}
+
+const cardTitleProps = {
+	component: "h2",
+	m: 0,
+	fz: 15,
+	fw: 600,
+} as const;
+
+interface YearStepperProps {
+	year: number;
+	onChange: (delta: number) => void;
+}
+
+function YearStepper({ year, onChange }: YearStepperProps) {
+	const { t } = useTranslation();
+	return (
+		<Group
+			gap={4}
+			p={4}
+			wrap="nowrap"
+			bg={palette.surface}
+			bd={`1px solid ${palette.border}`}
+			style={{ borderRadius: 999 }}
+		>
+			<ActionIcon
+				size={44}
+				radius="xl"
+				variant="subtle"
+				aria-label={t("forecast.previousYear")}
+				onClick={() => onChange(-1)}
+			>
+				<IconChevronLeft size={20} />
+			</ActionIcon>
+			<Text
+				className="tabular-nums"
+				ff={headingFont}
+				fw={700}
+				fz={20}
+				miw={64}
+				ta="center"
+			>
+				{year}
+			</Text>
+			<ActionIcon
+				size={44}
+				radius="xl"
+				variant="subtle"
+				aria-label={t("forecast.nextYear")}
+				onClick={() => onChange(1)}
+			>
+				<IconChevronRight size={20} />
+			</ActionIcon>
+		</Group>
+	);
+}
+
+interface HeroCardProps {
+	title: ReactNode;
+	titleAside?: ReactNode;
+	children: ReactNode;
+	variant?: "filled" | "default";
+}
+
+function HeroCard({
+	title,
+	titleAside,
+	children,
+	variant = "default",
+}: HeroCardProps) {
+	const titleId = useId();
+	const filled = variant === "filled";
+	return (
+		<Paper
+			component="section"
+			aria-labelledby={titleId}
+			bg={filled ? "forest.7" : undefined}
+			c={filled ? "forest.0" : undefined}
+			withBorder={!filled}
+		>
+			<Stack gap={14} h="100%">
+				<Group justify="space-between" align="center" gap="xs">
+					<Text
+						{...cardTitleProps}
+						id={titleId}
+						c={filled ? "forest.1" : "dimmed"}
+					>
+						{title}
+					</Text>
+					{titleAside}
+				</Group>
+				{children}
+			</Stack>
+		</Paper>
+	);
+}
+
+function BigAmount({ value, color }: { value: string; color?: string }) {
+	return (
+		<Text
+			className="tabular-nums"
+			ff={headingFont}
+			fz={{ base: 44, sm: 52 }}
+			fw={800}
+			lh={1}
+			lts="-0.03em"
+			c={color}
+		>
+			{value}
+		</Text>
+	);
+}
+
+interface TotalRowProps {
+	label: string;
+	amount: number;
+	ratio: number;
+	tone: Tone;
+}
+
+function TotalRow({ label, amount, ratio, tone }: TotalRowProps) {
+	const width = Math.round(Math.min(1, Math.max(0, ratio)) * 100);
+	return (
+		<Stack gap={6}>
+			<Group justify="space-between" align="baseline" wrap="nowrap" gap="xs">
+				<Group gap={8} wrap="nowrap">
+					<Box w={10} h={10} bg={tone.fill} style={{ borderRadius: 3 }} />
+					<Text fw={600}>{label}</Text>
+				</Group>
+				<Text className="tabular-nums" fw={700} c={tone.text}>
+					{formatAmount(amount)}
+				</Text>
+			</Group>
+			<Box
+				aria-hidden
+				h={6}
+				bg={palette.track}
+				style={{ borderRadius: 999, overflow: "hidden" }}
+			>
+				<Box
+					h="100%"
+					w={`${width}%`}
+					bg={tone.fill}
+					style={{ borderRadius: 999 }}
+				/>
+			</Box>
+		</Stack>
+	);
+}
+
+function LegendItem({
+	swatch,
+	label,
+}: {
+	swatch: CSSProperties;
+	label: string;
+}) {
+	return (
+		<Group gap={6} wrap="nowrap">
+			<Box w={12} h={12} style={{ borderRadius: 3, ...swatch }} />
+			<Text size="sm" c="dimmed">
+				{label}
+			</Text>
+		</Group>
+	);
+}
+
+const CHART_HEIGHT = 170;
+const MIN_BAR_HEIGHT = 4;
+
+interface BalanceChartProps {
+	forecast: MonthForecast[];
+	currentMonth: number | null;
+	locale: string;
+}
+
+function BalanceChart({ forecast, currentMonth, locale }: BalanceChartProps) {
+	const { t } = useTranslation();
+	const maxPositive = Math.max(0, ...forecast.map((m) => m.balance));
+	const maxNegative = Math.max(0, ...forecast.map((m) => -m.balance));
+	const range = maxPositive + maxNegative;
+	const unit = range > 0 ? CHART_HEIGHT / range : 0;
+	const upArea = range > 0 ? Math.max(maxPositive * unit, MIN_BAR_HEIGHT) : 0;
+	const downArea =
+		maxNegative > 0 ? Math.max(maxNegative * unit, MIN_BAR_HEIGHT) : 0;
+	const hasForecast = forecast.some((m) => !m.isActual);
+
+	function barHeight(amount: number): number {
+		return amount === 0 ? 0 : Math.max(Math.abs(amount) * unit, MIN_BAR_HEIGHT);
+	}
+
+	return (
+		<Paper component="section">
+			<Stack gap="lg">
+				<Group justify="space-between" align="center" gap="sm">
+					<Title order={2} fz={22} fw={700}>
+						{t("forecast.monthlyChart")}
+					</Title>
+					<Group gap="md">
+						<LegendItem
+							swatch={{ background: "var(--mantine-color-leaf-5)" }}
+							label={t("forecast.surplus")}
+						/>
+						<LegendItem
+							swatch={{ background: "var(--mantine-color-tangerine-5)" }}
+							label={t("forecast.deficit")}
+						/>
+						{hasForecast && (
+							<LegendItem
+								swatch={{
+									background: stripes("leaf-3", "leaf-1"),
+									border: "1px solid var(--mantine-color-leaf-3)",
+								}}
+								label={t("forecast.projected")}
+							/>
+						)}
+					</Group>
+				</Group>
+				<Box style={{ overflowX: "auto" }}>
+					<Box
+						miw={640}
+						style={{
+							display: "grid",
+							gridTemplateColumns: "repeat(12, minmax(48px, 1fr))",
+							gap: 8,
+						}}
+					>
+						{forecast.map((m) => {
+							const isCurrent = m.month === currentMonth;
+							const up = m.balance > 0 ? barHeight(m.balance) : 0;
+							const down = m.balance < 0 ? barHeight(m.balance) : 0;
+							const upBg = !m.isActual
+								? stripes("leaf-3", "leaf-1")
+								: isCurrent
+									? "var(--mantine-color-forest-7)"
+									: "var(--mantine-color-leaf-5)";
+							const downBg = !m.isActual
+								? stripes("tangerine-3", "tangerine-1")
+								: "var(--mantine-color-tangerine-5)";
+							return (
+								<Stack key={m.month} gap={0} align="center">
+									<Text
+										className="tabular-nums"
+										h={22}
+										fz={12}
+										fw={700}
+										c={balanceTextColor(m.balance)}
+									>
+										{formatShortSigned(m.balance)}
+									</Text>
+									<Box
+										aria-hidden
+										h={upArea}
+										w="100%"
+										display="flex"
+										style={{ alignItems: "flex-end", justifyContent: "center" }}
+									>
+										<Box
+											w="70%"
+											maw={44}
+											h={up}
+											style={{
+												background: upBg,
+												borderRadius: "8px 8px 2px 2px",
+											}}
+										/>
+									</Box>
+									<Box aria-hidden h={2} w="100%" bg={palette.border} />
+									<Box
+										aria-hidden
+										h={downArea}
+										w="100%"
+										display="flex"
+										style={{
+											alignItems: "flex-start",
+											justifyContent: "center",
+										}}
+									>
+										<Box
+											w="70%"
+											maw={44}
+											h={down}
+											style={{
+												background: downBg,
+												borderRadius: "2px 2px 8px 8px",
+											}}
+										/>
+									</Box>
+									<Text
+										mt={6}
+										fz={13}
+										fw={isCurrent ? 800 : 500}
+										c={isCurrent ? undefined : "dimmed"}
+										tt="capitalize"
+									>
+										{monthName(m.year, m.month, locale, "short")}
+									</Text>
+								</Stack>
+							);
+						})}
+					</Box>
+				</Box>
+			</Stack>
+		</Paper>
+	);
+}
+
+const thStyle = {
+	padding: "12px 16px",
+	fontSize: 13,
+	fontWeight: 700,
+	textTransform: "uppercase",
+	letterSpacing: "0.04em",
+	color: "var(--mantine-color-dimmed)",
+	whiteSpace: "nowrap",
+} as const;
+
+const tdStyle = {
+	padding: "12px 16px",
+	whiteSpace: "nowrap",
+} as const;
+
+interface MonthlyTableProps {
+	forecast: MonthForecast[];
+	currentMonth: number | null;
+	locale: string;
+}
+
+function MonthlyTable({ forecast, currentMonth, locale }: MonthlyTableProps) {
+	const { t } = useTranslation();
+	const { income, expense, savings } = budgetTypeTones;
+	return (
+		<Paper component="section" p={0} style={{ overflow: "hidden" }}>
+			<Box
+				px="lg"
+				py={20}
+				style={{ borderBottom: `1px solid ${palette.divider}` }}
+			>
+				<Title order={2} fz={22} fw={700}>
+					{t("forecast.monthlyDetail")}
+				</Title>
+			</Box>
+			<Table.ScrollContainer minWidth={760} type="native">
+				<Table
+					className="tabular-nums"
+					fz={15}
+					verticalSpacing={0}
+					horizontalSpacing={0}
+					borderColor={palette.divider}
+					styles={{ th: thStyle, td: tdStyle }}
+				>
+					<Table.Thead bg={palette.surfaceMuted}>
+						<Table.Tr>
+							<Table.Th scope="col">{t("forecast.month")}</Table.Th>
+							<Table.Th scope="col" ta="right">
+								{t("forecast.income")}
+							</Table.Th>
+							<Table.Th scope="col" ta="right">
+								{t("forecast.expenses")}
+							</Table.Th>
+							<Table.Th scope="col" ta="right">
+								{t("forecast.savings")}
+							</Table.Th>
+							<Table.Th scope="col" ta="right">
+								{t("forecast.balance")}
+							</Table.Th>
+							<Table.Th scope="col" ta="right">
+								{t("forecast.cumulative")}
+							</Table.Th>
+						</Table.Tr>
+					</Table.Thead>
+					<Table.Tbody>
+						{forecast.map((m) => {
+							const isCurrent = m.month === currentMonth;
+							return (
+								<Table.Tr
+									key={m.month}
+									bg={isCurrent ? "leaf.1" : undefined}
+									aria-current={isCurrent ? "date" : undefined}
+								>
+									<Table.Td>
+										<Group gap={8} wrap="nowrap">
+											<Text fw={600} tt="capitalize" inherit>
+												{monthName(m.year, m.month, locale, "long")}
+											</Text>
+											{isCurrent && (
+												<Badge variant="filled" color="forest" tt="none">
+													{t("forecast.current")}
+												</Badge>
+											)}
+											{!m.isActual && (
+												<Badge
+													variant="filled"
+													bg={palette.track}
+													c="dimmed"
+													tt="none"
+													fw={600}
+												>
+													{t("forecast.projected")}
+												</Badge>
+											)}
+										</Group>
+									</Table.Td>
+									<Table.Td ta="right" c={income.text}>
+										{formatAmount(m.income)}
+									</Table.Td>
+									<Table.Td ta="right" c={expense.text}>
+										{formatAmount(m.expenses)}
+									</Table.Td>
+									<Table.Td ta="right" c={savings.text}>
+										{formatAmount(m.savings)}
+									</Table.Td>
+									<Table.Td ta="right" fw={600} c={balanceTextColor(m.balance)}>
+										{formatSignedAmount(m.balance)}
+									</Table.Td>
+									<Table.Td
+										ta="right"
+										fw={700}
+										c={balanceTextColor(m.cumulative)}
+									>
+										{formatSignedAmount(m.cumulative)}
+									</Table.Td>
+								</Table.Tr>
+							);
+						})}
+					</Table.Tbody>
+				</Table>
+			</Table.ScrollContainer>
+		</Paper>
+	);
+}
+
 function ForecastPage() {
 	const { t, i18n } = useTranslation();
 	const navigate = useNavigate();
@@ -197,6 +637,9 @@ function ForecastPage() {
 			: selectedYear < thisYear
 				? 12
 				: 0;
+	// Past years count December as "actual" too, but only this year has a
+	// month that is genuinely in progress.
+	const inProgressMonth = selectedYear === thisYear ? currentMonth : null;
 
 	const summaryQuery = useSummary(
 		selectedYear,
@@ -230,6 +673,10 @@ function ForecastPage() {
 
 	const yearProgress = monthsElapsedRatio(selectedYear) * 100;
 
+	function shareOfIncome(amount: number): number {
+		return totalIncome > 0 ? Math.abs(amount) / totalIncome : 0;
+	}
+
 	function navigateYear(delta: number) {
 		navigate({
 			to: "/summary",
@@ -238,270 +685,122 @@ function ForecastPage() {
 	}
 
 	return (
-		<div className="mx-auto flex h-full max-w-5xl flex-col overflow-auto p-3 sm:p-6">
-			<Group justify="space-between" mb="lg">
-				<Title order={2} c="white">
-					{t("forecast.title")}
-				</Title>
-				<Group gap="xs">
-					<ActionIcon
-						variant="subtle"
-						color="white"
-						onClick={() => navigateYear(-1)}
+		<div className="h-full overflow-auto">
+			<Stack
+				maw={1240}
+				mx="auto"
+				px={{ base: "md", sm: "lg" }}
+				py={{ base: "md", sm: "xl" }}
+				gap="lg"
+			>
+				<PageHeader
+					title={t("forecast.title")}
+					subtitle={t("forecast.subtitle")}
+					actions={<YearStepper year={selectedYear} onChange={navigateYear} />}
+				/>
+
+				{isLoading && (
+					<Group justify="center" py="xl">
+						<Loader />
+					</Group>
+				)}
+
+				{isError && (
+					<Alert
+						icon={<IconAlertCircle size={16} />}
+						color="tangerine"
+						title={t("common.error")}
 					>
-						<IconChevronLeft size={20} />
-					</ActionIcon>
-					<Text c="white" fw={700} size="lg">
-						{selectedYear}
-					</Text>
-					<ActionIcon
-						variant="subtle"
-						color="white"
-						onClick={() => navigateYear(1)}
-					>
-						<IconChevronRight size={20} />
-					</ActionIcon>
-				</Group>
-			</Group>
+						{t("forecast.fetchError")}
+					</Alert>
+				)}
 
-			{isLoading && (
-				<div className="flex items-center justify-center py-12">
-					<Loader color="green" />
-				</div>
-			)}
-
-			{isError && (
-				<Alert
-					icon={<IconAlertCircle size={16} />}
-					color="red"
-					title={t("common.error")}
-				>
-					{t("forecast.fetchError")}
-				</Alert>
-			)}
-
-			{!isLoading && !isError && (
-				<Stack gap="xl">
-					{/* Year progress */}
-					<Stack gap={4}>
-						<Text size="xs" c="dimmed">
-							{t("forecast.yearProgress", {
-								percent: Math.round(yearProgress),
-							})}
-						</Text>
-						<Progress value={yearProgress} color="green" size="sm" />
-					</Stack>
-
-					{/* Key metrics */}
-					<Grid gap="xs" align="stretch">
-						<Grid.Col span={{ base: 6 }}>
-							<Stack
-								gap={2}
-								p="sm"
-								justify="center"
-								style={{
-									borderRadius: 8,
-									backgroundColor: "rgba(255,255,255,0.05)",
-									height: "100%",
-								}}
+				{!isLoading && !isError && (
+					<>
+						<SimpleGrid cols={{ base: 1, md: 3 }} spacing="md">
+							<HeroCard
+								variant="filled"
+								title={t("forecast.dailyBudget")}
+								titleAside={
+									<Badge
+										variant="filled"
+										color="gold.5"
+										c="gold.9"
+										tt="none"
+										fw={700}
+									>
+										{t("forecast.remainingDays", { count: remainingDays })}
+									</Badge>
+								}
 							>
-								<Text size="xs" c="dimmed" ta="center">
-									{t("forecast.dailyBudget")}
-								</Text>
-								<Text
-									size="xl"
-									fw={700}
-									ta="center"
-									c={amountColor(dailyBudget)}
-								>
-									{formatAmount(dailyBudget)}
-								</Text>
-								<Text size="xs" c="dimmed" ta="center">
-									{t("forecast.remainingDays", {
-										count: remainingDays,
-									})}
-								</Text>
-							</Stack>
-						</Grid.Col>
-						<Grid.Col span={{ base: 6 }}>
-							<Stack
-								gap={2}
-								p="sm"
-								justify="center"
-								style={{
-									borderRadius: 8,
-									backgroundColor: "rgba(255,255,255,0.05)",
-									height: "100%",
-								}}
-							>
-								<Text size="xs" c="dimmed" ta="center">
-									{t("forecast.endOfYearBalance")}
-								</Text>
-								<Text
-									size="xl"
-									fw={700}
-									ta="center"
-									c={amountColor(endOfYearBalance)}
-								>
-									{formatAmount(endOfYearBalance)}
-								</Text>
-							</Stack>
-						</Grid.Col>
-					</Grid>
+								<BigAmount value={formatAmount(dailyBudget)} />
+								<Stack gap={6} mt="auto">
+									<Text size="sm" c="forest.1">
+										{t("forecast.yearProgress", {
+											percent: Math.round(yearProgress),
+										})}
+									</Text>
+									<Progress
+										value={yearProgress}
+										color="gold.5"
+										size={8}
+										styles={{
+											root: {
+												backgroundColor: "var(--mantine-color-forest-8)",
+											},
+										}}
+									/>
+								</Stack>
+							</HeroCard>
 
-					{/* Yearly totals */}
-					<Grid gap="xs">
-						<Grid.Col span={{ base: 12, xs: 4 }}>
-							<Stack
-								gap={2}
-								p="xs"
-								style={{
-									borderRadius: 8,
-									backgroundColor: "rgba(255,255,255,0.05)",
-								}}
-							>
-								<Text size="xs" c="dimmed" ta="center">
-									{t("forecast.totalIncome")}
+							<HeroCard title={t("forecast.endOfYearBalance")}>
+								<BigAmount
+									value={formatSignedAmount(endOfYearBalance)}
+									color={balanceTextColor(endOfYearBalance)}
+								/>
+								<Text size="sm" c="dimmed">
+									{t("forecast.endOfYearHint")}
 								</Text>
-								<Text size="sm" fw={700} ta="center" c="green">
-									{formatAmount(totalIncome)}
-								</Text>
-							</Stack>
-						</Grid.Col>
-						<Grid.Col span={{ base: 12, xs: 4 }}>
-							<Stack
-								gap={2}
-								p="xs"
-								style={{
-									borderRadius: 8,
-									backgroundColor: "rgba(255,255,255,0.05)",
-								}}
-							>
-								<Text size="xs" c="dimmed" ta="center">
-									{t("forecast.totalExpenses")}
-								</Text>
-								<Text size="sm" fw={700} ta="center" c="red">
-									{formatAmount(totalExpenses)}
-								</Text>
-							</Stack>
-						</Grid.Col>
-						<Grid.Col span={{ base: 12, xs: 4 }}>
-							<Stack
-								gap={2}
-								p="xs"
-								style={{
-									borderRadius: 8,
-									backgroundColor: "rgba(255,255,255,0.05)",
-								}}
-							>
-								<Text size="xs" c="dimmed" ta="center">
-									{t("forecast.totalSavings")}
-								</Text>
-								<Text size="sm" fw={700} ta="center" c="blue">
-									{formatAmount(totalSavings)}
-								</Text>
-							</Stack>
-						</Grid.Col>
-					</Grid>
+							</HeroCard>
 
-					{/* Monthly forecast table */}
-					<div
-						style={{
-							borderRadius: 8,
-							overflowX: "auto",
-						}}
-					>
-						<Table
-							highlightOnHover
-							styles={{
-								table: {
-									backgroundColor: "transparent",
-								},
-								th: {
-									color: "rgba(255,255,255,0.6)",
-									borderColor: "rgba(255,255,255,0.1)",
-									backgroundColor: "rgba(255,255,255,0.05)",
-								},
-								td: {
-									borderColor: "rgba(255,255,255,0.06)",
-								},
-							}}
-						>
-							<Table.Thead>
-								<Table.Tr>
-									<Table.Th>{t("forecast.month")}</Table.Th>
-									<Table.Th ta="right">{t("forecast.income")}</Table.Th>
-									<Table.Th ta="right">{t("forecast.expenses")}</Table.Th>
-									<Table.Th ta="right">{t("forecast.savings")}</Table.Th>
-									<Table.Th ta="right">{t("forecast.balance")}</Table.Th>
-									<Table.Th ta="right">{t("forecast.cumulative")}</Table.Th>
-								</Table.Tr>
-							</Table.Thead>
-							<Table.Tbody>
-								{forecast.map((m, idx) => {
-									const monthLabel = new Date(
-										m.year,
-										m.month - 1,
-									).toLocaleDateString(i18n.language, {
-										month: "long",
-									});
-									const isCurrent = m.month === currentMonth;
-									const rowBg = isCurrent
-										? "rgba(76, 204, 119, 0.12)"
-										: idx % 2 === 1
-											? "rgba(255,255,255,0.03)"
-											: "transparent";
-									return (
-										<Table.Tr key={m.month} style={{ backgroundColor: rowBg }}>
-											<Table.Td>
-												<Text
-													size="sm"
-													c="white"
-													fw={isCurrent ? 700 : 400}
-													style={{ textTransform: "capitalize" }}
-												>
-													{monthLabel}
-													{m.isActual ? "" : ` (${t("forecast.projected")})`}
-												</Text>
-											</Table.Td>
-											<Table.Td>
-												<Text size="sm" ta="right" c="green">
-													{formatAmount(m.income)}
-												</Text>
-											</Table.Td>
-											<Table.Td>
-												<Text size="sm" ta="right" c="red">
-													{formatAmount(m.expenses)}
-												</Text>
-											</Table.Td>
-											<Table.Td>
-												<Text size="sm" ta="right" c="blue">
-													{formatAmount(m.savings)}
-												</Text>
-											</Table.Td>
-											<Table.Td>
-												<Text size="sm" ta="right" c={amountColor(m.balance)}>
-													{formatAmount(m.balance)}
-												</Text>
-											</Table.Td>
-											<Table.Td>
-												<Text
-													size="sm"
-													fw={700}
-													ta="right"
-													c={amountColor(m.cumulative)}
-												>
-													{formatAmount(m.cumulative)}
-												</Text>
-											</Table.Td>
-										</Table.Tr>
-									);
-								})}
-							</Table.Tbody>
-						</Table>
-					</div>
-				</Stack>
-			)}
+							<HeroCard
+								title={t("forecast.totalsTitle", { year: selectedYear })}
+							>
+								<TotalRow
+									label={t("forecast.totalIncome")}
+									amount={totalIncome}
+									ratio={totalIncome > 0 ? 1 : 0}
+									tone={budgetTypeTones.income}
+								/>
+								<TotalRow
+									label={t("forecast.totalExpenses")}
+									amount={totalExpenses}
+									ratio={shareOfIncome(totalExpenses)}
+									tone={budgetTypeTones.expense}
+								/>
+								<TotalRow
+									label={t("forecast.totalSavings")}
+									amount={totalSavings}
+									ratio={shareOfIncome(totalSavings)}
+									tone={budgetTypeTones.savings}
+								/>
+							</HeroCard>
+						</SimpleGrid>
+
+						<BalanceChart
+							forecast={forecast}
+							currentMonth={inProgressMonth}
+							locale={i18n.language}
+						/>
+
+						<MonthlyTable
+							forecast={forecast}
+							currentMonth={inProgressMonth}
+							locale={i18n.language}
+						/>
+					</>
+				)}
+			</Stack>
 		</div>
 	);
 }

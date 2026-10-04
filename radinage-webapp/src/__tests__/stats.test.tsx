@@ -186,6 +186,18 @@ describe("StatsPage", () => {
 		expect(barCharts).toHaveLength(1);
 	});
 
+	it("renders the balance evolution with the cumulative total", async () => {
+		await renderStatsPage();
+
+		expect(
+			await screen.findByText("Évolution de la balance"),
+		).toBeInTheDocument();
+		expect(screen.getByTestId("area-chart")).toBeInTheDocument();
+
+		const pageText = (document.body.textContent ?? "").replace(/\s/g, "");
+		expect(pageText).toMatch(/Cumulsurlapériode:3400,00/);
+	});
+
 	it("shows error alert on API failure", async () => {
 		apiFetchMock.mockReset();
 		apiFetchMock.mockRejectedValue(new Error("Network error"));
@@ -238,13 +250,18 @@ describe("StatsPage", () => {
 			expect(screen.getByText("Revenus")).toBeInTheDocument();
 		});
 
-		const pageText = (document.body.textContent ?? "").replace(/\s/g, "");
-		// Income card must show 1500, expenses card -400. Without the fix the
-		// page would show +1100 as expenses, no income, and a positive balance.
-		expect(pageText).toMatch(/Revenus1500,00/);
-		expect(pageText).toMatch(/Dépenses-400,00/);
+		const tileAmount = (label: string) =>
+			(
+				screen.getByText(label).closest(".mantine-Paper-root")?.textContent ??
+				""
+			)
+				.replace(/\s/g, "")
+				.match(/-?\d+,\d{2}€$/)?.[0];
+		// Without the fix the page would show +1100 as expenses and no income.
+		expect(tileAmount("Revenus")).toBe("1500,00€");
+		expect(tileAmount("Dépenses")).toBe("-400,00€");
 		// Balance = 1500 - 400 + 0 = 1100 (not 1100 on the expense side).
-		expect(pageText).toMatch(/Balance1100,00/);
+		expect(tileAmount("Balance")).toBe("1100,00€");
 	});
 
 	it("handles empty summary response", async () => {

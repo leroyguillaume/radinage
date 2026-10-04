@@ -3,57 +3,70 @@ import {
 	Alert,
 	Badge,
 	Button,
-	Card,
 	Group,
 	Loader,
 	Modal,
+	Paper,
+	Progress,
 	SegmentedControl,
 	SimpleGrid,
 	Stack,
 	Text,
 	TextInput,
 	Title,
+	Tooltip,
 } from "@mantine/core";
 import {
 	IconAlertCircle,
 	IconEdit,
+	IconFilter,
 	IconPlayerPlay,
 	IconPlus,
 	IconSearch,
 	IconTrash,
 } from "@tabler/icons-react";
 import { createFileRoute } from "@tanstack/react-router";
-import { useMemo, useState } from "react";
+import { type ReactNode, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { BudgetModal } from "@/components/BudgetModal";
-import { useApplyBudget, useBudgets, useDeleteBudget } from "@/lib/hooks";
-import type { ApplyBudgetResponse, BudgetResponse } from "@/lib/types";
+import { PageHeader } from "@/components/PageHeader";
+import {
+	type BudgetProgress,
+	computeBudgetProgress,
+	sumOperationsByBudget,
+} from "@/lib/budget-progress";
+import { formatAmount } from "@/lib/format";
+import {
+	useApplyBudget,
+	useBudgets,
+	useDeleteBudget,
+	useMonthlyOperations,
+} from "@/lib/hooks";
+import { budgetTypeTones } from "@/lib/tones";
+import type {
+	ApplyBudgetResponse,
+	BudgetResponse,
+	BudgetType,
+} from "@/lib/types";
+import { headingFont, palette } from "@/theme";
 
 export const Route = createFileRoute("/budgets")({
 	component: BudgetsPage,
 });
 
-function budgetTypeColor(type: string): string {
-	switch (type) {
-		case "income":
-			return "green";
-		case "expense":
-			return "red";
-		case "savings":
-			return "blue";
-		default:
-			return "gray";
-	}
-}
-
-function formatAmount(amount: string): string {
-	return new Intl.NumberFormat("fr-FR", {
-		style: "currency",
-		currency: "EUR",
-	}).format(Number(amount));
-}
-
 type BudgetSortKey = "label" | "type" | "amount";
+type BudgetTypeFilter = "all" | BudgetType;
+
+const sortKeys: BudgetSortKey[] = ["label", "type", "amount"];
+const typeFilters: BudgetTypeFilter[] = ["all", "expense", "income", "savings"];
+
+function isSortKey(value: string): value is BudgetSortKey {
+	return sortKeys.some((k) => k === value);
+}
+
+function isTypeFilter(value: string): value is BudgetTypeFilter {
+	return typeFilters.some((f) => f === value);
+}
 
 function getCurrentAmount(budget: BudgetResponse): number {
 	if (budget.kind.type === "occasional") return Number(budget.kind.amount);
@@ -61,8 +74,13 @@ function getCurrentAmount(budget: BudgetResponse): number {
 }
 
 function BudgetsPage() {
-	const { t } = useTranslation();
+	const { t, i18n } = useTranslation();
+	const [now] = useState(() => new Date());
+	const year = now.getFullYear();
+	const month = now.getMonth() + 1;
+
 	const budgetsQuery = useBudgets();
+	const operationsQuery = useMonthlyOperations(year, month);
 	const deleteBudget = useDeleteBudget();
 	const applyBudget = useApplyBudget();
 
@@ -74,7 +92,11 @@ function BudgetsPage() {
 		Record<string, ApplyBudgetResponse>
 	>({});
 	const [applyConfirm, setApplyConfirm] = useState<BudgetResponse | null>(null);
+	const [deleteConfirm, setDeleteConfirm] = useState<BudgetResponse | null>(
+		null,
+	);
 	const [sortKey, setSortKey] = useState<BudgetSortKey>("label");
+	const [typeFilter, setTypeFilter] = useState<BudgetTypeFilter>("all");
 	const [search, setSearch] = useState("");
 
 	function handleEdit(budget: BudgetResponse) {
@@ -87,8 +109,10 @@ function BudgetsPage() {
 		setModalOpened(true);
 	}
 
-	async function handleDelete(budget: BudgetResponse) {
-		await deleteBudget.mutateAsync(budget.id);
+	async function handleDeleteConfirmed() {
+		if (!deleteConfirm) return;
+		await deleteBudget.mutateAsync(deleteConfirm.id);
+		setDeleteConfirm(null);
 	}
 
 	async function handleApplyConfirmed(force: boolean) {
@@ -101,13 +125,23 @@ function BudgetsPage() {
 		setApplyConfirm(null);
 	}
 
-	const budgets = useMemo(() => {
-		const all = budgetsQuery.data ?? [];
-		const filtered = search
-			? all.filter((b) => b.label.toLowerCase().includes(search.toLowerCase()))
-			: all;
+	const linkedTotals = useMemo(
+		() =>
+			operationsQuery.data
+				? sumOperationsByBudget(operationsQuery.data.operations)
+				: null,
+		[operationsQuery.data],
+	);
 
-		return [...filtered].sort((a, b) => {
+	const budgets = useMemo(() => {
+		const query = search.toLowerCase();
+		const filtered = (budgetsQuery.data ?? []).filter(
+			(b) =>
+				(typeFilter === "all" || b.budgetType === typeFilter) &&
+				b.label.toLowerCase().includes(query),
+		);
+
+		return filtered.sort((a, b) => {
 			switch (sortKey) {
 				case "type":
 					return a.budgetType.localeCompare(b.budgetType);
@@ -117,12 +151,12 @@ function BudgetsPage() {
 					return a.label.localeCompare(b.label);
 			}
 		});
-	}, [budgetsQuery.data, sortKey, search]);
+	}, [budgetsQuery.data, sortKey, typeFilter, search]);
 
 	if (budgetsQuery.isLoading) {
 		return (
 			<div className="flex h-full items-center justify-center">
-				<Loader color="green" />
+				<Loader />
 			</div>
 		);
 	}
@@ -132,7 +166,7 @@ function BudgetsPage() {
 			<div className="flex h-full items-center justify-center p-4">
 				<Alert
 					icon={<IconAlertCircle size={16} />}
-					color="red"
+					color="tangerine"
 					title={t("common.error")}
 				>
 					{t("budgets.fetchError")}
@@ -141,113 +175,219 @@ function BudgetsPage() {
 		);
 	}
 
+	const monthLabel = now.toLocaleDateString(i18n.language, {
+		month: "long",
+		year: "numeric",
+	});
+
 	return (
-		<div className="mx-auto h-full max-w-4xl overflow-y-auto p-3 sm:p-6">
+		<div className="h-full overflow-auto">
 			<BudgetModal
 				opened={modalOpened}
 				onClose={() => setModalOpened(false)}
 				budget={editingBudget}
 			/>
 
-			<Modal
+			<ConfirmModal
 				opened={applyConfirm !== null}
 				onClose={() => setApplyConfirm(null)}
 				title={t("budgets.applyRulesTitle")}
-				size="sm"
+				message={t("budgets.applyForcePrompt")}
 			>
-				<Stack>
-					<Text>{t("budgets.applyForcePrompt")}</Text>
-					<Group justify="flex-end">
-						<Button variant="subtle" onClick={() => setApplyConfirm(null)}>
-							{t("common.cancel")}
-						</Button>
-						<Button
-							variant="outline"
-							onClick={() => handleApplyConfirmed(false)}
-							loading={applyBudget.isPending}
-						>
-							{t("budgets.applySkipManual")}
-						</Button>
-						<Button
-							onClick={() => handleApplyConfirmed(true)}
-							loading={applyBudget.isPending}
-						>
-							{t("budgets.applyForceManual")}
-						</Button>
-					</Group>
-				</Stack>
-			</Modal>
-
-			<Group justify="space-between" mb="lg">
-				<Title order={2} c="white">
-					{t("budgets.title")}
-				</Title>
-				<Button leftSection={<IconPlus size={16} />} onClick={handleCreate}>
-					{t("budgets.create")}
+				<Button variant="default" onClick={() => setApplyConfirm(null)}>
+					{t("common.cancel")}
 				</Button>
-			</Group>
+				<Button
+					variant="outline"
+					onClick={() => handleApplyConfirmed(false)}
+					loading={applyBudget.isPending}
+				>
+					{t("budgets.applySkipManual")}
+				</Button>
+				<Button
+					onClick={() => handleApplyConfirmed(true)}
+					loading={applyBudget.isPending}
+				>
+					{t("budgets.applyForceManual")}
+				</Button>
+			</ConfirmModal>
 
-			<Group mb="md" gap="sm" wrap="wrap">
-				<TextInput
-					placeholder={t("common.search")}
-					leftSection={<IconSearch size={14} />}
-					value={search}
-					onChange={(e) => setSearch(e.currentTarget.value)}
-					style={{ flex: 1, minWidth: 150, maxWidth: 300 }}
-				/>
-				<SegmentedControl
-					size="xs"
-					value={sortKey}
-					onChange={(v) => setSortKey(v as BudgetSortKey)}
-					data={[
-						{ value: "label", label: t("budgets.fields.label") },
-						{ value: "type", label: t("budgets.fields.budgetType") },
-						{ value: "amount", label: t("budgets.fields.amount") },
-					]}
-				/>
-			</Group>
+			<ConfirmModal
+				opened={deleteConfirm !== null}
+				onClose={() => setDeleteConfirm(null)}
+				title={t("budgets.deleteConfirm")}
+				message={t("budgets.deleteConfirmMessage", {
+					label: deleteConfirm?.label ?? "",
+				})}
+			>
+				<Button variant="default" onClick={() => setDeleteConfirm(null)}>
+					{t("common.cancel")}
+				</Button>
+				<Button
+					color="tangerine.8"
+					leftSection={<IconTrash size={18} />}
+					onClick={handleDeleteConfirmed}
+					loading={deleteBudget.isPending}
+				>
+					{t("common.delete")}
+				</Button>
+			</ConfirmModal>
 
-			{budgets.length === 0 ? (
-				<Text c="dimmed" ta="center" mt="xl">
-					{t("common.noResults")}
-				</Text>
-			) : (
-				<SimpleGrid cols={{ base: 1, sm: 2 }} spacing="md">
-					{budgets.map((budget) => (
-						<BudgetCard
-							key={budget.id}
-							budget={budget}
-							onEdit={() => handleEdit(budget)}
-							onDelete={() => handleDelete(budget)}
-							onApply={() => setApplyConfirm(budget)}
-							applyResult={applyResults[budget.id] ?? null}
-						/>
-					))}
-				</SimpleGrid>
-			)}
+			<Stack
+				maw={1240}
+				mx="auto"
+				px={{ base: "md", sm: "lg" }}
+				py={{ base: "md", sm: "xl" }}
+				gap="lg"
+			>
+				<PageHeader
+					title={t("budgets.title")}
+					subtitle={t("budgets.subtitle", { month: monthLabel })}
+					actions={
+						<Button leftSection={<IconPlus size={20} />} onClick={handleCreate}>
+							{t("budgets.create")}
+						</Button>
+					}
+				/>
+
+				<Group gap="sm" wrap="wrap" align="center">
+					<TextInput
+						placeholder={t("common.search")}
+						aria-label={t("common.search")}
+						leftSection={<IconSearch size={20} />}
+						value={search}
+						onChange={(e) => setSearch(e.currentTarget.value)}
+						style={{ flex: "1 1 280px" }}
+					/>
+					<SegmentedControl
+						radius="xl"
+						size="md"
+						aria-label={t("budgets.filterByType")}
+						value={typeFilter}
+						onChange={(v) => {
+							if (isTypeFilter(v)) setTypeFilter(v);
+						}}
+						data={typeFilters.map((f) => ({
+							value: f,
+							label: t(`budgets.filters.${f}`),
+						}))}
+					/>
+					<SegmentedControl
+						radius="xl"
+						size="md"
+						aria-label={t("budgets.sortBy")}
+						value={sortKey}
+						onChange={(v) => {
+							if (isSortKey(v)) setSortKey(v);
+						}}
+						data={[
+							{ value: "label", label: t("budgets.fields.label") },
+							{ value: "type", label: t("budgets.fields.budgetType") },
+							{ value: "amount", label: t("budgets.fields.amount") },
+						]}
+					/>
+				</Group>
+
+				{budgets.length === 0 ? (
+					<Text c="dimmed" ta="center" mt="xl">
+						{t("common.noResults")}
+					</Text>
+				) : (
+					<SimpleGrid cols={{ base: 1, sm: 2, lg: 3 }} spacing="md">
+						{budgets.map((budget) => (
+							<BudgetCard
+								key={budget.id}
+								budget={budget}
+								progress={
+									linkedTotals
+										? computeBudgetProgress(
+												budget,
+												linkedTotals.get(budget.id) ?? 0,
+												year,
+												month,
+											)
+										: null
+								}
+								onEdit={() => handleEdit(budget)}
+								onDelete={() => setDeleteConfirm(budget)}
+								onApply={() => setApplyConfirm(budget)}
+								applyResult={applyResults[budget.id] ?? null}
+							/>
+						))}
+					</SimpleGrid>
+				)}
+			</Stack>
 		</div>
+	);
+}
+
+function ConfirmModal({
+	opened,
+	onClose,
+	title,
+	message,
+	children,
+}: {
+	opened: boolean;
+	onClose: () => void;
+	title: string;
+	message: string;
+	children: ReactNode;
+}) {
+	return (
+		<Modal opened={opened} onClose={onClose} title={title} size="md">
+			<Stack>
+				<Text>{message}</Text>
+				<Group justify="flex-end" gap="sm">
+					{children}
+				</Group>
+			</Stack>
+		</Modal>
+	);
+}
+
+function CardAction({
+	label,
+	onClick,
+	children,
+}: {
+	label: string;
+	onClick: () => void;
+	children: ReactNode;
+}) {
+	return (
+		<Tooltip label={label}>
+			<ActionIcon
+				variant="subtle"
+				color="gray"
+				size="xl"
+				radius="md"
+				onClick={onClick}
+				aria-label={label}
+			>
+				{children}
+			</ActionIcon>
+		</Tooltip>
 	);
 }
 
 function BudgetCard({
 	budget,
+	progress,
 	onEdit,
 	onDelete,
 	onApply,
 	applyResult,
 }: {
 	budget: BudgetResponse;
+	progress: BudgetProgress | null;
 	onEdit: () => void;
 	onDelete: () => void;
 	onApply: () => void;
 	applyResult: ApplyBudgetResponse | null;
 }) {
 	const { t } = useTranslation();
-
-	const amount =
-		budget.kind.type === "occasional"
-			? budget.kind.amount
-			: budget.kind.currentPeriod.amount;
+	const tone = budgetTypeTones[budget.budgetType];
 
 	const kindLabel =
 		budget.kind.type === "occasional"
@@ -255,70 +395,67 @@ function BudgetCard({
 			: `${t("budgets.kinds.recurring")} — ${t(`budgets.recurrences.${budget.kind.recurrence}`)}`;
 
 	return (
-		<Card
-			padding="md"
-			radius="md"
-			style={{
-				backgroundColor: "rgba(255,255,255,0.05)",
-				border: "1px solid rgba(255,255,255,0.1)",
-			}}
-		>
-			<Group justify="space-between" mb="xs">
-				<Text fw={600} c="white" size="lg">
-					{budget.label}
-				</Text>
-				<Group gap="xs">
-					{budget.rules.length > 0 && (
-						<ActionIcon
-							variant="subtle"
-							color="green"
-							onClick={onApply}
-							aria-label={t("budgets.applyRules")}
-						>
-							<IconPlayerPlay size={16} />
-						</ActionIcon>
-					)}
-					<ActionIcon
-						variant="subtle"
-						color="white"
-						onClick={onEdit}
-						aria-label={t("common.edit")}
-					>
-						<IconEdit size={16} />
-					</ActionIcon>
-					<ActionIcon
-						variant="subtle"
-						color="red"
-						onClick={onDelete}
-						aria-label={t("common.delete")}
-					>
-						<IconTrash size={16} />
-					</ActionIcon>
-				</Group>
-			</Group>
-
-			<Stack gap="xs">
-				<Group gap="xs">
-					<Badge color={budgetTypeColor(budget.budgetType)} size="sm">
-						{t(`budgets.types.${budget.budgetType}`)}
-					</Badge>
-					<Badge variant="outline" color="gray" size="sm">
-						{kindLabel}
-					</Badge>
+		<Paper component="article" aria-label={budget.label} p="lg">
+			<Stack gap="md">
+				<Group
+					justify="space-between"
+					align="flex-start"
+					wrap="nowrap"
+					gap="xs"
+				>
+					<Group gap={6} wrap="wrap">
+						<Badge color={tone.color} size="md">
+							{t(`budgets.types.${budget.budgetType}`)}
+						</Badge>
+						<Badge color="gray" size="md">
+							{kindLabel}
+						</Badge>
+					</Group>
+					<Group gap={0} wrap="nowrap" mt={-8} mr={-8}>
+						{budget.rules.length > 0 && (
+							<CardAction label={t("budgets.applyRules")} onClick={onApply}>
+								<IconPlayerPlay size={18} />
+							</CardAction>
+						)}
+						<CardAction label={t("common.edit")} onClick={onEdit}>
+							<IconEdit size={18} />
+						</CardAction>
+						<CardAction label={t("common.delete")} onClick={onDelete}>
+							<IconTrash size={18} />
+						</CardAction>
+					</Group>
 				</Group>
 
-				<Text c="white" fw={500} size="xl">
-					{formatAmount(amount)}
-				</Text>
-
-				{budget.rules.length > 0 && (
-					<Text c="dimmed" size="sm">
-						{t("budgets.rulesCount", { count: budget.rules.length })}
+				<Group justify="space-between" align="baseline" wrap="nowrap" gap="sm">
+					<Title order={2} fz={22} fw={700} lh={1.2}>
+						{budget.label}
+					</Title>
+					<Text
+						ff={headingFont}
+						fz={22}
+						fw={700}
+						className="tabular-nums"
+						style={{ whiteSpace: "nowrap" }}
+					>
+						{formatAmount(Math.abs(getCurrentAmount(budget)))}
 					</Text>
+				</Group>
+
+				{progress && (
+					<BudgetProgressBar progress={progress} toneColor={tone.color} />
 				)}
 
+				<Group gap={6} wrap="nowrap">
+					<IconFilter size={18} color="var(--mantine-color-dimmed)" />
+					<Text size="sm" c="dimmed">
+						{budget.rules.length > 0
+							? t("budgets.rulesCount", { count: budget.rules.length })
+							: t("budgets.noRules")}
+					</Text>
+				</Group>
+
 				{applyResult && (
-					<Text c="green" size="sm">
+					<Text size="sm" fw={600} c={budgetTypeTones.income.text}>
 						{t("budgets.applyResult", {
 							updated: applyResult.updated,
 							skipped: applyResult.skipped,
@@ -326,6 +463,56 @@ function BudgetCard({
 					</Text>
 				)}
 			</Stack>
-		</Card>
+		</Paper>
+	);
+}
+
+function BudgetProgressBar({
+	progress,
+	toneColor,
+}: {
+	progress: BudgetProgress;
+	toneColor: string;
+}) {
+	const { t } = useTranslation();
+
+	const statusLabel: Record<BudgetProgress["status"], string> = {
+		noDue: "",
+		partial: t("budgets.progress.percent", { percent: progress.percent }),
+		reached: t("budgets.progress.reached"),
+		over: t("budgets.progress.over"),
+	};
+	const statusColor: Record<BudgetProgress["status"], string> = {
+		noDue: "dimmed",
+		partial: "dimmed",
+		reached: budgetTypeTones.income.text,
+		over: budgetTypeTones.expense.text,
+	};
+
+	return (
+		<Stack gap={6}>
+			<Group justify="space-between" gap="xs" className="tabular-nums">
+				<Text size="sm" c="dimmed">
+					{progress.status === "noDue"
+						? t("budgets.progress.noDue")
+						: t("budgets.progress.amounts", {
+								real: formatAmount(progress.real),
+								planned: formatAmount(progress.planned),
+							})}
+				</Text>
+				{statusLabel[progress.status] && (
+					<Text size="sm" fw={700} c={statusColor[progress.status]}>
+						{statusLabel[progress.status]}
+					</Text>
+				)}
+			</Group>
+			<Progress
+				value={progress.percent}
+				color={progress.status === "over" ? "tangerine.6" : `${toneColor}.5`}
+				size="md"
+				bg={palette.track}
+				aria-hidden
+			/>
+		</Stack>
 	);
 }

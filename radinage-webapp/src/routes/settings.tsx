@@ -17,6 +17,7 @@ import {
 import { createFileRoute } from "@tanstack/react-router";
 import { type FormEvent, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { PageHeader } from "@/components/PageHeader";
 import { ApiError } from "@/lib/api";
 import { useChangePassword, useExportData, useImportData } from "@/lib/hooks";
 import type { ExportDataResponse, ImportDataResponse } from "@/lib/types";
@@ -104,25 +105,31 @@ export function SettingsPage() {
 	}
 
 	return (
-		<div className="h-full overflow-y-auto p-4">
-			<Stack className="mx-auto max-w-lg" gap="lg">
-				<Title order={2} c="white">
-					{t("settings.title")}
-				</Title>
+		<div className="h-full overflow-auto">
+			<Stack
+				maw={720}
+				mx="auto"
+				px={{ base: "md", sm: "lg" }}
+				py={{ base: "md", sm: "xl" }}
+				gap="lg"
+			>
+				<PageHeader title={t("settings.title")} />
 
-				<Paper shadow="md" p="md" radius="md">
+				<Paper>
 					<form onSubmit={handleSubmit}>
 						<Stack>
-							<Title order={4}>{t("settings.changePassword")}</Title>
+							<Title order={3} fz={20}>
+								{t("settings.changePassword")}
+							</Title>
 
 							{passwordError && (
-								<Alert color="red" icon={<IconAlertCircle size={16} />}>
+								<Alert color="tangerine" icon={<IconAlertCircle size={16} />}>
 									{passwordError}
 								</Alert>
 							)}
 
 							{passwordSuccess && (
-								<Alert color="green" icon={<IconCheck size={16} />}>
+								<Alert color="leaf" icon={<IconCheck size={16} />}>
 									{t("settings.success")}
 								</Alert>
 							)}
@@ -149,32 +156,30 @@ export function SettingsPage() {
 								required
 							/>
 
-							<Button
-								type="submit"
-								loading={changePassword.isPending}
-								size="md"
-							>
+							<Button type="submit" loading={changePassword.isPending}>
 								{t("settings.submit")}
 							</Button>
 						</Stack>
 					</form>
 				</Paper>
 
-				<Paper shadow="md" p="md" radius="md">
+				<Paper>
 					<Stack>
-						<Title order={4}>{t("settings.data.title")}</Title>
+						<Title order={3} fz={20}>
+							{t("settings.data.title")}
+						</Title>
 						<Text size="sm" c="dimmed">
 							{t("settings.data.description")}
 						</Text>
 
 						{dataError && (
-							<Alert color="red" icon={<IconAlertCircle size={16} />}>
+							<Alert color="tangerine" icon={<IconAlertCircle size={16} />}>
 								{dataError}
 							</Alert>
 						)}
 
 						{dataSuccess && (
-							<Alert color="green" icon={<IconCheck size={16} />}>
+							<Alert color="leaf" icon={<IconCheck size={16} />}>
 								{t("settings.data.importSuccess", {
 									budgets: dataSuccess.importedBudgets,
 									skippedBudgets: dataSuccess.skippedBudgets,
@@ -186,7 +191,7 @@ export function SettingsPage() {
 
 						<Group grow>
 							<Button
-								variant="light"
+								variant="default"
 								leftSection={<IconDownload size={16} />}
 								loading={exportData.isPending}
 								onClick={handleExport}
@@ -194,7 +199,7 @@ export function SettingsPage() {
 								{t("settings.data.export")}
 							</Button>
 							<Button
-								variant="light"
+								variant="default"
 								leftSection={<IconUpload size={16} />}
 								loading={importData.isPending}
 								onClick={() => fileInputRef.current?.click()}
