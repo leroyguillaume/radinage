@@ -32,7 +32,7 @@ To run the services from source:
 
 - [Rust](https://www.rust-lang.org/tools/install) 1.94
 - [Node.js](https://nodejs.org/en/download) 25
-- PostgreSQL 16, or Docker to run it
+- PostgreSQL 18, or Docker to run it
 
 ### Installation
 
