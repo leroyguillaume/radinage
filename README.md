@@ -17,7 +17,6 @@ Radinage keeps a record of your bank operations and compares them with the budge
 - **Forecast**: actuals up to the current month, budgets beyond it, and the daily amount you can still spend.
 - **Statistics**: income, expenses, savings and balance over any range of months.
 - **Multi-user**: JWT authentication, an admin account and invitation links.
-- **LLM access**: an MCP server exposes the whole API as tools for AI assistants.
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for the design and the reasoning behind it.
 
@@ -64,14 +63,6 @@ The API (`radinage-api`) reads its configuration from environment variables, or 
 | `LOG_FILTER` | no | `info` | `tracing` filter directive |
 | `LOG_JSON` | no | `false` | Emit logs as JSON |
 
-The MCP server (`radinage-mcp`):
-
-| Variable | Required | Default | Description |
-| --- | --- | --- | --- |
-| `RADINAGE_API_URL` | yes | — | Base URL of the API |
-| `LISTEN_ADDR` | no | `0.0.0.0:3001` | Address the MCP server listens on |
-| `LOG_FILTER` | no | `info` | `tracing` filter directive |
-
 The webapp image (nginx):
 
 | Variable | Required | Default | Description |
@@ -84,7 +75,7 @@ Database migrations are applied by the API at startup.
 
 #### With Docker Compose
 
-This builds the three images from the [Dockerfile](Dockerfile), then starts them with PostgreSQL:
+This builds the two images from the [Dockerfile](Dockerfile), then starts them with PostgreSQL:
 
 ```bash
 docker compose --profile radinage up
@@ -94,7 +85,6 @@ docker compose --profile radinage up
 | --- | --- |
 | Webapp | <http://localhost:8080> |
 | API | <http://localhost:3000> |
-| MCP server | <http://localhost:3001> |
 | PostgreSQL | `localhost:5432` |
 
 Sign in to the webapp as `admin` with the `ADMIN_PASSWORD` set in [docker-compose.yaml](docker-compose.yaml).
@@ -123,15 +113,9 @@ npm install
 npm run dev
 ```
 
-Start the MCP server from `radinage-mcp/`, with `RADINAGE_API_URL=http://localhost:3000`:
-
-```bash
-cargo run
-```
-
 ### Deployment
 
-Images are published to GHCR for `linux/amd64` and `linux/arm64`: `ghcr.io/leroyguillaume/radinage-api`, `ghcr.io/leroyguillaume/radinage-mcp` and `ghcr.io/leroyguillaume/radinage-webapp`.
+Images are published to GHCR for `linux/amd64` and `linux/arm64`: `ghcr.io/leroyguillaume/radinage-api` and `ghcr.io/leroyguillaume/radinage-webapp`.
 
 The Helm chart reads the database connection string from an existing Secret, `radinage-db` with a `url` key by default:
 

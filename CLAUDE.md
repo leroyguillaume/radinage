@@ -1,6 +1,6 @@
 # radinage
 
-Personal bank account tracking app. Rust API + React SPA + MCP server.
+Personal bank account tracking app. Rust API + React SPA.
 
 ## Quick reference
 
@@ -15,10 +15,6 @@ radinage-api/          Rust REST API (Axum + SQLx + PostgreSQL)
   src/services/        matcher (auto-categorize), importer (CSV/Excel)
   src/error.rs         AppError type, IntoResponse impl
   migrations/          SQLx migrations (001–011)
-
-radinage-mcp/          MCP server — reads API's OpenAPI spec, exposes tools
-  src/server.rs        MCP handler
-  src/openapi.rs       OpenAPI → MCP tool generation
 
 radinage-webapp/       React 19 + TypeScript SPA
   src/routes/          File-based routes (TanStack Router)
@@ -35,7 +31,7 @@ radinage-webapp/       React 19 + TypeScript SPA
 
 ```bash
 # Rust — from project root
-cargo build                          # compile both API and MCP
+cargo build                          # compile the API
 cargo test                           # run all tests
 cargo clippy -- -D warnings          # lint (must be zero warnings)
 cargo fmt                            # format
@@ -50,7 +46,7 @@ npx biome format --write .           # auto-format
 npx biome check --fix .              # auto-fix lint
 
 # Docker
-docker compose --profile radinage up # full stack (postgres + api + mcp + webapp)
+docker compose --profile radinage up # full stack (postgres + api + webapp)
 ```
 
 ## Architecture patterns
@@ -64,7 +60,7 @@ Repositories are traits (`UserRepository`, `OperationRepository`, `BudgetReposit
 
 ---
 
-## Rust rules (radinage-api, radinage-mcp)
+## Rust rules (radinage-api)
 
 Violating any of these is a bug.
 

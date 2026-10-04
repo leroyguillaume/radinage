@@ -16,11 +16,9 @@ FROM chef AS planner
 
 COPY Cargo.toml Cargo.lock ./
 COPY radinage-api/Cargo.toml radinage-api/Cargo.toml
-COPY radinage-mcp/Cargo.toml radinage-mcp/Cargo.toml
 
-RUN mkdir -p radinage-api/src radinage-mcp/src \
+RUN mkdir -p radinage-api/src \
     && echo "fn main() {}" > radinage-api/src/main.rs \
-    && echo "fn main() {}" > radinage-mcp/src/main.rs \
     && cargo chef prepare --recipe-path recipe.json
 
 # Actual build: cook dependencies from the recipe (cached until deps change),
@@ -32,7 +30,6 @@ RUN cargo chef cook --release --recipe-path recipe.json
 
 COPY Cargo.toml Cargo.lock ./
 COPY radinage-api/ radinage-api/
-COPY radinage-mcp/ radinage-mcp/
 
 RUN cargo build --release
 
@@ -66,21 +63,6 @@ EXPOSE 3000
 HEALTHCHECK CMD ["wget", "-q", "-O", "/dev/null", "http://127.0.0.1:3000/health"]
 
 ENTRYPOINT ["radinage-api"]
-
-# =============================================================================
-# Target: radinage-mcp
-# =============================================================================
-FROM alpine:3.23 AS mcp
-
-RUN addgroup -g 65532 -S radinage && adduser -u 65532 -S radinage -G radinage
-
-COPY --from=rust-builder /usr/src/local/radinage/target/release/radinage-mcp /usr/local/bin/radinage-mcp
-
-USER 65532:65532
-
-HEALTHCHECK CMD ["wget", "-q", "-O", "/dev/null", "http://127.0.0.1:3001/health"]
-
-ENTRYPOINT ["radinage-mcp"]
 
 # =============================================================================
 # Target: radinage-webapp

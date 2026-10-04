@@ -89,26 +89,6 @@ Usage: {{ include "radinage.adminPasswordSecretName" . }}
 {{- end }}
 
 {{/*
-Radinage API URL for the MCP server.
-Defaults to the cluster-internal service: http://<release>-api:<port>/<rootPath>.
-Usage: {{ include "radinage.apiUrl" . }}
-*/}}
-{{- define "radinage.apiUrl" -}}
-{{- $url := .Values.apps.mcp.apiUrl -}}
-{{- if $url -}}
-  {{- $url -}}
-{{- else -}}
-  {{- $ctx := dict "appName" "api" "root" . -}}
-  {{- $path := trimPrefix "/" (default "" .Values.apps.api.rootPath) -}}
-  {{- if $path -}}
-    {{- printf "http://%s:%v/%s" (include "radinage.fullname" $ctx) .Values.apps.api.port $path -}}
-  {{- else -}}
-    {{- printf "http://%s:%v" (include "radinage.fullname" $ctx) .Values.apps.api.port -}}
-  {{- end -}}
-{{- end -}}
-{{- end }}
-
-{{/*
 Upstream API host:port used by the webapp nginx proxy_pass.
 Defaults to the cluster-internal service: <release>-api:<port>.
 Usage: {{ include "radinage.apiHost" . }}

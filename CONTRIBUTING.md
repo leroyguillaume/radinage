@@ -8,7 +8,7 @@ How to run the project itself is in [README.md](README.md#getting-started).
 
 | Tool | Version | Used by |
 | --- | --- | --- |
-| Rust (`rustup`) | 1.94.1, with `rustfmt` and `clippy` | API, MCP server, `cargo fmt` / `cargo clippy` hooks |
+| Rust (`rustup`) | 1.94.1, with `rustfmt` and `clippy` | API, `cargo fmt` / `cargo clippy` hooks |
 | Node.js | 25 | webapp, `biome` / `tsc` hooks |
 | Docker | with the Compose plugin | PostgreSQL for the Rust tests, image builds |
 | `pre-commit` | 4.6 | the commit gate |
@@ -95,11 +95,7 @@ export DATABASE_URL=postgresql://radinage:radinage@localhost:5432/radinage
 cargo test
 ```
 
-One crate, or one test by name:
-
-```bash
-cargo test -p radinage-api
-```
+One test by name:
 
 ```bash
 cargo test -p radinage-api matcher
@@ -154,7 +150,7 @@ Migrations 001 to 011 are excluded from `sqlfluff`: the API checksums every appl
 | --- | --- | --- | --- |
 | [quality](.github/workflows/quality.yaml) | every PR, push to `main` | `pre-commit run --all-files`, Rust tests against PostgreSQL, webapp tests | `pre-commit run --all-files`, then the commands in [Running the tests](#running-the-tests) |
 | [security](.github/workflows/security.yaml) | every PR, push to `main`, daily, manual | `trivy fs` on the lockfiles and secrets; on the daily and manual runs, `trivy image` on the latest stable release's images | `trivy fs --scanners vuln,secret --severity HIGH,CRITICAL --ignore-unfixed .` |
-| [build](.github/workflows/build.yaml) | PRs and pushes to `main` that touch the images' sources, manual | builds the three images natively for amd64 and arm64 and scans each with `trivy image`; pushes only on a manual run asked to, or from `release` | `docker build --target api .`, then `trivy image` on the result |
+| [build](.github/workflows/build.yaml) | PRs and pushes to `main` that touch the images' sources, manual | builds the two images natively for amd64 and arm64 and scans each with `trivy image`; pushes only on a manual run asked to, or from `release` | `docker build --target api .`, then `trivy image` on the result |
 | [release](.github/workflows/release.yaml) | tag `v*` | checks the tag against the committed version, runs `build` with push, creates the GitHub release with generated notes (stable tags only) | — |
 | [chart](.github/workflows/chart.yaml) | tag `chart-*`, manual | checks the tag against `Chart.yaml` and the README, publishes the chart to `oci://ghcr.io/leroyguillaume/charts` | `helm package helm/radinage` |
 

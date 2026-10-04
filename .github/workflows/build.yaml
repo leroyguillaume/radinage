@@ -10,7 +10,6 @@ on:
       - Cargo.toml
       - Cargo.lock
       - radinage-api/**
-      - radinage-mcp/**
       - radinage-webapp/**
       - nginx.conf
       - default.conf.template
@@ -22,7 +21,6 @@ on:
       - Cargo.toml
       - Cargo.lock
       - radinage-api/**
-      - radinage-mcp/**
       - radinage-webapp/**
       - nginx.conf
       - default.conf.template
@@ -66,7 +64,6 @@ jobs:
       matrix:
         target:
           - api
-          - mcp
           - webapp
         platform:
           - arch: amd64
@@ -158,7 +155,6 @@ jobs:
       matrix:
         target:
           - api
-          - mcp
           - webapp
     runs-on: ubuntu-24.04
     permissions:

@@ -71,7 +71,6 @@ jobs:
       matrix:
         target:
           - api
-          - mcp
           - webapp
     runs-on: ubuntu-24.04
     permissions:

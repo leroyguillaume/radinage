@@ -6,26 +6,21 @@ steps live in the [README](README.md); contributor tooling lives in
 
 ## Overview
 
-Radinage is three processes in front of one PostgreSQL database. The REST API
-owns every rule and every byte of data; the web app and the MCP server are two
-clients of that API, one for humans in a browser and one for AI assistants.
-Neither client talks to the database, and neither holds business logic the API
-does not enforce.
+Radinage is two processes in front of one PostgreSQL database. The REST API
+owns every rule and every byte of data; the web app is its client, for humans
+in a browser. The web app never talks to the database and holds no business
+logic the API does not enforce. Decisions that reshaped the system are recorded
+in [docs/adr/](docs/adr/).
 
 ```mermaid
 flowchart LR
     browser["Browser"]
-    mcpclient["MCP client"]
     webapp["radinage-webapp<br/>(nginx + SPA)"]
-    mcp["radinage-mcp"]
     api["radinage-api"]
     db[("PostgreSQL")]
 
     browser -->|"HTTP, static assets + /api/*"| webapp
     webapp -->|"HTTP reverse proxy, /api/* kept as-is"| api
-    mcpclient -->|"MCP streamable HTTP, Bearer JWT"| mcp
-    mcp -->|"GET /openapi.json, once at startup"| api
-    mcp -->|"HTTP + JSON, Bearer JWT forwarded"| api
     api -->|"SQL over a connection pool"| db
 ```
 
@@ -55,16 +50,7 @@ handler → service → repository → database:
   generic 500 so SQL details never reach the client.
 
 At startup it applies pending migrations, seeds the admin account if missing,
-then serves. It does not serve the web app and does not talk to the MCP
-server.
-
-**[radinage-mcp/](radinage-mcp/)**: MCP server over streamable HTTP. At
-startup it fetches the API's OpenAPI document and turns each operation into an
-MCP tool ([src/openapi.rs](radinage-mcp/src/openapi.rs)), skipping the
-login, activation and file-import operations. A tool call
-([src/server.rs](radinage-mcp/src/server.rs)) becomes one HTTP request to the
-API with the client's `Authorization` header forwarded unchanged. It holds no
-credentials, no data and no rules of its own.
+then serves. It does not serve the web app.
 
 **[radinage-webapp/](radinage-webapp/)**: React SPA. File-based routes in
 [src/routes/](radinage-webapp/src/routes/); every server call goes through
@@ -76,20 +62,19 @@ in [src/theme.ts](radinage-webapp/src/theme.ts), and
 [src/lib/tones.ts](radinage-webapp/src/lib/tones.ts) maps each budget type to
 one palette colour so income, expense and savings read the same everywhere.
 
-**Packaging**: the [Dockerfile](Dockerfile) builds three images from one
+**Packaging**: the [Dockerfile](Dockerfile) builds two images from one
 build graph, each running as UID/GID 65532:
 
 | Target   | Contains                                                                    |
 | -------- | --------------------------------------------------------------------------- |
 | `api`    | the `radinage-api` binary (musl) on Alpine                             |
-| `mcp`    | the `radinage-mcp` binary (musl) on Alpine                             |
 | `webapp` | the built SPA served by unprivileged nginx ([nginx.conf](nginx.conf), [default.conf.template](default.conf.template)) |
 
-The [Helm chart](helm/radinage/) deploys the three as separate Deployments,
+The [Helm chart](helm/radinage/) deploys the two as separate Deployments,
 each with its own Service, ServiceAccount and optional HPA, behind one Ingress
 that routes by path prefix. PostgreSQL is outside the chart: the API reads its
 connection string from an existing Secret.
-[docker-compose.yaml](docker-compose.yaml) wires the same three images to a
+[docker-compose.yaml](docker-compose.yaml) wires the same two images to a
 local PostgreSQL.
 
 ## Data flow
@@ -136,11 +121,6 @@ or substring, optionally also requiring the amount to equal the period's
 amount. Applying a budget's rules later (`POST /budgets/{id}/apply`) runs the
 same matcher over all of the user's operations.
 
-**An MCP tool call.** The MCP client sends a tool call with its own JWT; the
-server rebuilds the path, query string and JSON body from the tool arguments,
-calls the API, and returns the response body as text, or an error result
-carrying the API's status and body.
-
 ## State and persistence
 
 PostgreSQL is the only store, owned exclusively by `radinage-api`. Users own
@@ -150,9 +130,8 @@ two columns (link type and budget id) that encode `BudgetLink`: unlinked,
 manual, or auto. The schema is defined by
 [radinage-api/migrations/](radinage-api/migrations/).
 
-The API process is otherwise stateless: no session table, no cache. The MCP
-server keeps only its tool list and per-connection MCP session state in
-memory. The browser keeps the JWT and role in `localStorage`.
+The API process is otherwise stateless: no session table, no cache. The
+browser keeps the JWT and role in `localStorage`.
 
 ## Design decisions
 
@@ -175,12 +154,6 @@ JSON.
 same behind any number of API replicas. The trade-off is that a token stays
 valid until it expires: role changes, password resets and user deletion do not
 revoke tokens already issued.
-
-**The MCP surface is derived, not written.** Tools come from the OpenAPI
-document the API generates from its own routes, so a new endpoint becomes a
-tool without touching `radinage-mcp`. The cost is that tool quality depends on
-the summaries and descriptions written in the API's route definitions, and the
-tool list is frozen at MCP startup.
 
 **Same-origin web app.** nginx serves the SPA and proxies `/api/` on the same
 origin, so the browser needs no CORS and the API address is a deployment
@@ -207,11 +180,7 @@ that defines flags, environment variables and defaults together.
   `BudgetKind::validate_no_overlap` before writing.
 - **The SPA always calls `/api`.** Whatever sits in front of the API must
   either strip that prefix or forward it to an API whose root path is `api`.
-- **The MCP server's API URL includes the API's root path**, since it fetches
-  `<url>/openapi.json` and builds tool URLs by appending operation paths.
-- **The API must be reachable when `radinage-mcp` starts**: it exits if the
-  OpenAPI document cannot be fetched.
-- **All three images run as UID/GID 65532** and never as root.
+- **Both images run as UID/GID 65532** and never as root.
 
 ## Limitations
 
@@ -222,6 +191,4 @@ that defines flags, environment variables and defaults together.
   inserted row; large statements are slow rather than failing.
 - Duplicate detection is exact on (date, amount, label); two genuinely
   distinct operations sharing all three are treated as one.
-- The MCP server does not expose file import, login or account activation; a
-  client needs a JWT obtained elsewhere.
 - Tokens cannot be revoked before expiry.
