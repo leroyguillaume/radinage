@@ -6,6 +6,7 @@ import type {
 	BudgetResponse,
 	CreateUserResponse,
 	ExportDataResponse,
+	ForecastMonthBreakdown,
 	ForecastResponse,
 	ImportDataResponse,
 	MonthlyOperationsResponse,
@@ -13,6 +14,7 @@ import type {
 	OperationSplitRequest,
 	ResetPasswordResponse,
 	SummaryResponse,
+	YearMonth,
 } from "@/lib/types";
 
 export function useMonthlyOperations(year: number, month: number) {
@@ -51,6 +53,20 @@ export function useForecast(
 			apiFetch<ForecastResponse>(
 				`/forecast?fromYear=${fromYear}&fromMonth=${fromMonth}&months=${months}`,
 			),
+	});
+}
+
+/** Budget-by-budget breakdown of one forecast month; idle while `month` is null. */
+export function useForecastMonth(month: YearMonth | null) {
+	return useQuery({
+		queryKey: ["forecast", "month", month?.year, month?.month],
+		queryFn: () =>
+			month === null
+				? Promise.reject(new Error("no month selected"))
+				: apiFetch<ForecastMonthBreakdown>(
+						`/forecast/${month.year}/${month.month}`,
+					),
+		enabled: month !== null,
 	});
 }
 

@@ -37,7 +37,8 @@ handler → service → repository → database:
   budget an operation belongs to, [importer.rs](radinage-api/src/services/importer.rs)
   turns a CSV or XLSX file into rows, and
   [forecast.rs](radinage-api/src/services/forecast.rs) projects the
-  month-by-month balance behind `GET /forecast`. All are pure functions over
+  month-by-month balance behind `GET /forecast` and its budget-by-budget
+  breakdown behind `GET /forecast/{year}/{month}`. All are pure functions over
   domain values, with no I/O.
 - [src/repositories/](radinage-api/src/repositories/) define one trait per
   aggregate (`UserRepository`, `OperationRepository`, `BudgetRepository`), each
@@ -207,7 +208,14 @@ can still be spent per day outside any budget without ending the horizon below
 zero: the unbudgeted forecast is added back because that spending is what the
 amount pays for. It stays negative when the budgets alone end in the red and is
 null once the horizon is over. `firstNegativeMonth` is the
-first month whose running balance is below zero. Keeping this in the API gives
+first month whose running balance is below zero. `GET /forecast/{year}/{month}`
+breaks one month down per budget (`expected`, `actual`, `remaining`, and
+`projected` = actual + remaining, so a past month projects what was linked, the
+current month adds what is not reached yet and a future month projects the
+expected amount) plus the unbudgeted line (`actual` and `forecast`). It runs
+the same per-month projection as `GET /forecast` over the same data, so its
+`totals` are that month's figures there by construction rather than by a
+second sum that could drift. Keeping this in the API gives
 a single, tested definition of the numbers; the web app only formats them.
 
 **Same-origin web app.** nginx serves the SPA and proxies `/api/` on the same

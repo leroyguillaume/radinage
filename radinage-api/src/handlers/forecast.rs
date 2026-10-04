@@ -1,21 +1,24 @@
 use crate::{
     AppState,
     auth::middleware::AuthUser,
-    domain::budget::YearMonth,
+    domain::budget::{Budget, BudgetType, YearMonth},
     error::{AppError, AppResult},
-    repositories::{BudgetRepository, OperationRepository, UserRepository},
+    repositories::{BudgetRepository, OperationRepository, SummaryRow, UserRepository},
     services::forecast::{
-        Flows, Forecast, ForecastInput, ForecastMonth, MonthStatus, balance_adjustment_window,
-        compute_forecast, horizon, starting_balance, unbudgeted_history,
+        BudgetBreakdown, Flows, Forecast, ForecastInput, ForecastMonth, MonthBreakdown,
+        MonthStatus, UnbudgetedBreakdown, balance_adjustment_window, compute_forecast, horizon,
+        month_breakdown, starting_balance, unbudgeted_history,
     },
 };
 use axum::{
     Json,
-    extract::{Query, State},
+    extract::{Path, Query, State},
 };
+use chrono::NaiveDate;
 use rust_decimal::Decimal;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 const MAX_FORECAST_MONTHS: u32 = 24;
 
@@ -180,6 +183,68 @@ impl From<Forecast> for ForecastResponse {
     }
 }
 
+/// Operations and budgets a forecast over `from..=end` is computed from.
+struct ForecastData {
+    rows: Vec<SummaryRow>,
+    /// Rows of the unbudgeted-rate history window, when `rows` does not cover it.
+    extra_history: Option<Vec<SummaryRow>>,
+    budgets: Vec<Budget>,
+}
+
+impl ForecastData {
+    async fn load<U, O: OperationRepository, B: BudgetRepository>(
+        state: &AppState<U, O, B>,
+        user_id: Uuid,
+        (start, end): (NaiveDate, NaiveDate),
+        today: NaiveDate,
+    ) -> AppResult<Self> {
+        let rows = state
+            .operation_repo
+            .list_for_summary(user_id, start, end)
+            .await?;
+        let (history_start, history_end) = unbudgeted_history(today);
+        let extra_history = if start <= history_start && history_end <= end {
+            None
+        } else {
+            Some(
+                state
+                    .operation_repo
+                    .list_for_summary(user_id, history_start, history_end)
+                    .await?,
+            )
+        };
+        let budgets = state.budget_repo.list_all_for_user(user_id).await?;
+        Ok(Self {
+            rows,
+            extra_history,
+            budgets,
+        })
+    }
+
+    fn input(
+        &self,
+        from: YearMonth,
+        months: usize,
+        today: NaiveDate,
+        starting_balance: Option<Decimal>,
+    ) -> ForecastInput<'_> {
+        ForecastInput {
+            from,
+            months,
+            today,
+            budgets: &self.budgets,
+            rows: &self.rows,
+            history: self.extra_history.as_deref().unwrap_or(&self.rows),
+            starting_balance,
+        }
+    }
+}
+
+/// First and last days of the `months` months starting at `from`, `None` when out of range.
+fn horizon_dates(from: YearMonth, months: usize) -> Option<(NaiveDate, NaiveDate)> {
+    Some((from.first_day()?, horizon(from, months).last()?.last_day()?))
+}
+
 pub async fn get_forecast<U: UserRepository, O: OperationRepository, B: BudgetRepository>(
     State(state): State<AppState<U, O, B>>,
     auth_user: AuthUser,
@@ -190,38 +255,17 @@ pub async fn get_forecast<U: UserRepository, O: OperationRepository, B: BudgetRe
             "months must be between 1 and {MAX_FORECAST_MONTHS}"
         )));
     }
-    let invalid =
-        || AppError::BadRequest(format!("invalid month: {}-{}", q.from_year, q.from_month));
     let from = YearMonth::new(q.from_year, q.from_month);
     let months = q.months as usize;
-    let start = from.first_day().ok_or_else(invalid)?;
-    let end = horizon(from, months)
-        .last()
-        .and_then(YearMonth::last_day)
-        .ok_or_else(invalid)?;
+    let (start, end) = horizon_dates(from, months).ok_or_else(|| invalid_month(from))?;
 
     let today = chrono::Local::now().date_naive();
-    let rows = state
-        .operation_repo
-        .list_for_summary(auth_user.id, start, end)
-        .await?;
-    let (history_start, history_end) = unbudgeted_history(today);
-    let extra_history = if start <= history_start && history_end <= end {
-        None
-    } else {
-        Some(
-            state
-                .operation_repo
-                .list_for_summary(auth_user.id, history_start, history_end)
-                .await?,
-        )
-    };
-    let budgets = state.budget_repo.list_all_for_user(auth_user.id).await?;
+    let data = ForecastData::load(&state, auth_user.id, (start, end), today).await?;
     let starting_balance = match state.user_repo.find_balance(auth_user.id).await? {
         None => None,
         Some(balance) => Some(match balance_adjustment_window(balance.date, start) {
             Some((first, last)) if start <= first && last <= end => {
-                starting_balance(balance, start, &rows)
+                starting_balance(balance, start, &data.rows)
             }
             Some((first, last)) => {
                 let between = state
@@ -234,16 +278,125 @@ pub async fn get_forecast<U: UserRepository, O: OperationRepository, B: BudgetRe
         }),
     };
 
-    let forecast = compute_forecast(&ForecastInput {
-        from,
-        months,
-        today,
-        budgets: &budgets,
-        rows: &rows,
-        history: extra_history.as_deref().unwrap_or(&rows),
-        starting_balance,
-    });
+    let forecast = compute_forecast(&data.input(from, months, today, starting_balance));
     Ok(Json(forecast.into()))
+}
+
+fn invalid_month(month: YearMonth) -> AppError {
+    AppError::BadRequest(format!("invalid month: {}-{}", month.year, month.month))
+}
+
+/// Path of a single forecast month.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ForecastMonthPath {
+    pub year: i32,
+    /// Month number (1–12).
+    pub month: u32,
+}
+
+/// One budget's part in a forecast month. Amounts are signed like operations.
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct BudgetBreakdownResponse {
+    pub budget_id: Uuid,
+    pub label: String,
+    pub budget_type: BudgetType,
+    /// What the budget expects this month, null when it expects nothing.
+    #[schemars(with = "Option<String>")]
+    pub expected: Option<Decimal>,
+    /// Net of the amounts linked to the budget this month; zero for a future month.
+    #[schemars(with = "String")]
+    pub actual: Decimal,
+    /// Part of `expected` counted on top of `actual`: what is not reached yet for the current
+    /// month, all of it for a future month, zero for a past month.
+    #[schemars(with = "String")]
+    pub remaining: Decimal,
+    /// What the budget weighs in the month's forecast: `actual` + `remaining`.
+    #[schemars(with = "String")]
+    pub projected: Decimal,
+}
+
+impl From<BudgetBreakdown> for BudgetBreakdownResponse {
+    fn from(b: BudgetBreakdown) -> Self {
+        Self {
+            budget_id: b.budget_id,
+            label: b.label,
+            budget_type: b.budget_type,
+            expected: b.expected,
+            actual: b.actual,
+            remaining: b.remaining,
+            projected: b.projected,
+        }
+    }
+}
+
+/// Spending and income outside any budget in a forecast month.
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct UnbudgetedBreakdownResponse {
+    /// Net of the unbudgeted operations accounted this month; zero for a future month.
+    #[schemars(with = "String")]
+    pub actual: Decimal,
+    /// Unbudgeted spending expected at the unbudgeted rate, the month's `unbudgetedForecast`
+    /// in `GET /forecast`.
+    #[schemars(with = "String")]
+    pub forecast: Decimal,
+    /// `actual` + `forecast`.
+    #[schemars(with = "String")]
+    pub projected: Decimal,
+}
+
+impl From<UnbudgetedBreakdown> for UnbudgetedBreakdownResponse {
+    fn from(u: UnbudgetedBreakdown) -> Self {
+        Self {
+            actual: u.actual,
+            forecast: u.forecast,
+            projected: u.projected,
+        }
+    }
+}
+
+/// What one forecast month is made of, budget by budget.
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ForecastMonthBreakdownResponse {
+    pub year: i32,
+    /// Month number (1–12).
+    pub month: u32,
+    pub status: ForecastMonthStatus,
+    /// Budgets expecting or receiving something this month, by type (income, expense,
+    /// savings) then by decreasing magnitude of `projected`.
+    pub budgets: Vec<BudgetBreakdownResponse>,
+    pub unbudgeted: UnbudgetedBreakdownResponse,
+    /// The month's income, expenses, savings and balance, as in `GET /forecast`.
+    pub totals: ForecastTotalsResponse,
+}
+
+impl From<MonthBreakdown> for ForecastMonthBreakdownResponse {
+    fn from(b: MonthBreakdown) -> Self {
+        Self {
+            year: b.month.year,
+            month: b.month.month,
+            status: b.status.into(),
+            budgets: b.budgets.into_iter().map(Into::into).collect(),
+            unbudgeted: b.unbudgeted.into(),
+            totals: b.flows.into(),
+        }
+    }
+}
+
+pub async fn get_forecast_month<U, O: OperationRepository, B: BudgetRepository>(
+    State(state): State<AppState<U, O, B>>,
+    auth_user: AuthUser,
+    Path(path): Path<ForecastMonthPath>,
+) -> AppResult<Json<ForecastMonthBreakdownResponse>> {
+    let month = YearMonth::new(path.year, path.month);
+    let dates = horizon_dates(month, 1).ok_or_else(|| invalid_month(month))?;
+    let today = chrono::Local::now().date_naive();
+    let data = ForecastData::load(&state, auth_user.id, dates, today).await?;
+    let breakdown = month_breakdown(&data.input(month, 1, today, None), month);
+    Ok(Json(breakdown.into()))
 }
 
 #[cfg(test)]
@@ -784,5 +937,228 @@ mod tests {
         // 310 over the 31 days of January 2099.
         let daily_budget: Decimal = json["dailyBudget"].as_str().unwrap().parse().unwrap();
         assert_eq!(daily_budget, dec!(10));
+    }
+
+    async fn get_month(
+        operation_repo: MockOperationRepository,
+        budget_repo: MockBudgetRepository,
+        user_id: Uuid,
+        month: YearMonth,
+    ) -> axum::response::Response {
+        let app = build_test_router(make_test_state(
+            MockUserRepository::new(),
+            operation_repo,
+            budget_repo,
+        ));
+        let auth = auth_header(user_id, UserRole::User);
+        app.oneshot(json_request(
+            "GET",
+            &format!("/forecast/{}/{}", month.year, month.month),
+            None,
+            Some(&auth),
+        ))
+        .await
+        .unwrap()
+    }
+
+    fn labelled(budget: Budget, label: &str) -> Budget {
+        Budget {
+            label: label.to_string(),
+            ..budget
+        }
+    }
+
+    fn linked(budget: &Budget, date: NaiveDate, amount: Decimal) -> SummaryRow {
+        SummaryRow {
+            amount,
+            date,
+            budget_link_type: "manual".to_string(),
+            budget_id: Some(budget.id),
+            budget_type: Some(budget.budget_type.as_str().to_string()),
+        }
+    }
+
+    #[tokio::test]
+    async fn month_breakdown_lists_budgets_unbudgeted_and_totals() {
+        let user_id = Uuid::new_v4();
+        let rent = labelled(
+            monthly_budget(user_id, BudgetType::Expense, dec!(-900)),
+            "Rent",
+        );
+        let salary = labelled(
+            monthly_budget(user_id, BudgetType::Income, dec!(2000)),
+            "Salary",
+        );
+        let rent_id = rent.id;
+        let salary_id = salary.id;
+        let rows = vec![
+            linked(&rent, day(2020, 3, 2), dec!(-900)),
+            linked(&salary, day(2020, 3, 1), dec!(1990)),
+            unlinked(day(2020, 3, 10), dec!(-25.50)),
+        ];
+        let mut or = MockOperationRepository::new();
+        or.expect_list_for_summary()
+            .withf(move |uid, start, end| {
+                *uid == user_id && *start == day(2020, 3, 1) && *end == day(2020, 3, 31)
+            })
+            .times(1)
+            .returning(move |_, _, _| {
+                let rows = rows.clone();
+                Box::pin(async move { Ok(rows) })
+            });
+        expect_no_history(&mut or);
+        let mut br = MockBudgetRepository::new();
+        br.expect_list_all_for_user()
+            .withf(move |uid| *uid == user_id)
+            .returning(move |_| {
+                let budgets = vec![rent.clone(), salary.clone()];
+                Box::pin(async move { Ok(budgets) })
+            });
+
+        let resp = get_month(or, br, user_id, YearMonth::new(2020, 3)).await;
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        let json: serde_json::Value = response_json(resp).await;
+        assert_eq!(
+            json,
+            serde_json::json!({
+                "year": 2020,
+                "month": 3,
+                "status": "past",
+                "budgets": [
+                    {"budgetId": salary_id, "label": "Salary", "budgetType": "income",
+                     "expected": "2000", "actual": "1990", "remaining": "0",
+                     "projected": "1990"},
+                    {"budgetId": rent_id, "label": "Rent", "budgetType": "expense",
+                     "expected": "-900", "actual": "-900", "remaining": "0",
+                     "projected": "-900"},
+                ],
+                "unbudgeted": {"actual": "-25.50", "forecast": "0", "projected": "-25.50"},
+                "totals": {"income": "1990", "expenses": "-925.50", "savings": "0",
+                           "balance": "1064.50"},
+            })
+        );
+    }
+
+    #[tokio::test]
+    async fn month_breakdown_rejects_an_invalid_month() {
+        for month in [0, 13] {
+            let resp = get_month(
+                MockOperationRepository::new(),
+                MockBudgetRepository::new(),
+                Uuid::new_v4(),
+                YearMonth::new(2026, month),
+            )
+            .await;
+            assert_eq!(resp.status(), StatusCode::BAD_REQUEST, "{month}");
+        }
+    }
+
+    #[tokio::test]
+    async fn month_breakdown_requires_authentication() {
+        let app = build_test_router(make_test_state(
+            MockUserRepository::new(),
+            MockOperationRepository::new(),
+            MockBudgetRepository::new(),
+        ));
+        let resp = app
+            .oneshot(json_request("GET", "/forecast/2026/1", None, None))
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    /// Operation repository answering every range from the same operations, like the database.
+    fn operations(rows: Vec<SummaryRow>) -> MockOperationRepository {
+        let mut or = MockOperationRepository::new();
+        or.expect_list_for_summary()
+            .returning(move |_, start, end| {
+                let rows: Vec<_> = rows
+                    .iter()
+                    .filter(|row| (start..=end).contains(&row.date))
+                    .cloned()
+                    .collect();
+                Box::pin(async move { Ok(rows) })
+            });
+        or
+    }
+
+    #[tokio::test]
+    async fn month_breakdown_totals_match_the_forecast_months() {
+        let user_id = Uuid::new_v4();
+        let today = chrono::Local::now().date_naive();
+        let current = YearMonth::of(today);
+        let (history_start, _) = unbudgeted_history(today);
+        let previous = YearMonth::of(current.first_day().unwrap().pred_opt().unwrap());
+        let groceries = monthly_budget(user_id, BudgetType::Expense, dec!(-500));
+        let salary = monthly_budget(user_id, BudgetType::Income, dec!(2000));
+        let rows = vec![
+            unlinked(history_start, dec!(-400)),
+            linked(&groceries, previous.first_day().unwrap(), dec!(-480)),
+            linked(&salary, previous.first_day().unwrap(), dec!(2000)),
+            unlinked(previous.last_day().unwrap(), dec!(-35)),
+            linked(&groceries, current.first_day().unwrap(), dec!(-120)),
+            unlinked(current.first_day().unwrap(), dec!(15)),
+        ];
+        let budgets = vec![groceries, salary];
+        let budget_repo = || {
+            let budgets = budgets.clone();
+            let mut br = MockBudgetRepository::new();
+            br.expect_list_all_for_user().returning(move |_| {
+                let budgets = budgets.clone();
+                Box::pin(async move { Ok(budgets) })
+            });
+            br
+        };
+
+        let resp = get(
+            operations(rows.clone()),
+            budget_repo(),
+            user_id,
+            &format!(
+                "fromYear={}&fromMonth={}&months=3",
+                previous.year, previous.month
+            ),
+        )
+        .await;
+        assert_eq!(resp.status(), StatusCode::OK);
+        let forecast: ForecastResponse = response_json(resp).await;
+
+        let mut statuses = vec![];
+        for month in &forecast.months {
+            let resp = get_month(
+                operations(rows.clone()),
+                budget_repo(),
+                user_id,
+                YearMonth::new(month.year, month.month),
+            )
+            .await;
+            assert_eq!(resp.status(), StatusCode::OK);
+            let breakdown: ForecastMonthBreakdownResponse = response_json(resp).await;
+            assert_eq!(breakdown.status, month.status);
+            let totals = (
+                breakdown.totals.income,
+                breakdown.totals.expenses,
+                breakdown.totals.savings,
+                breakdown.totals.balance,
+            );
+            assert_eq!(
+                totals,
+                (month.income, month.expenses, month.savings, month.balance),
+                "{}-{}",
+                month.year,
+                month.month
+            );
+            assert_eq!(breakdown.unbudgeted.forecast, month.unbudgeted_forecast);
+            statuses.push(month.status);
+        }
+        assert_eq!(
+            statuses,
+            [
+                ForecastMonthStatus::Past,
+                ForecastMonthStatus::Current,
+                ForecastMonthStatus::Future
+            ]
+        );
     }
 }

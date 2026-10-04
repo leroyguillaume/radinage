@@ -13,6 +13,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { i18n } from "@/i18n";
 import type {
+	ForecastMonthBreakdown,
 	ForecastMonthStatus,
 	ForecastResponse,
 	YearMonth,
@@ -138,9 +139,17 @@ const typicalMonth = (): MonthFlows => ({
 
 function setupMocks(
 	forecastOf: (year: number, month: number, count: number) => ForecastResponse,
+	breakdownOf?: (
+		year: number,
+		month: number,
+	) => Promise<ForecastMonthBreakdown>,
 ) {
 	apiFetchMock.mockReset();
 	apiFetchMock.mockImplementation((path: string) => {
+		const monthMatch = /^\/forecast\/(\d+)\/(\d+)$/.exec(path);
+		if (monthMatch && breakdownOf) {
+			return breakdownOf(Number(monthMatch[1]), Number(monthMatch[2]));
+		}
 		const match =
 			/^\/forecast\?fromYear=(\d+)&fromMonth=(\d+)&months=(\d+)$/.exec(path);
 		if (match) {
@@ -703,5 +712,163 @@ describe("SummaryPage", () => {
 		const table = await screen.findByRole("table");
 		expect(within(table).queryAllByText("Prévision")).toHaveLength(0);
 		expect(within(table).queryByText("En cours")).not.toBeInTheDocument();
+	});
+});
+
+function breakdownOf(year: number, month: number): ForecastMonthBreakdown {
+	return {
+		year,
+		month,
+		status: "future",
+		budgets: [
+			{
+				budgetId: "salary",
+				label: "Salaire",
+				budgetType: "income",
+				expected: "2500.00",
+				actual: "0",
+				remaining: "2500.00",
+				projected: "2500.00",
+			},
+			{
+				budgetId: "rent",
+				label: "Loyer",
+				budgetType: "expense",
+				expected: "-900.00",
+				actual: "0",
+				remaining: "-900.00",
+				projected: "-900.00",
+			},
+			{
+				budgetId: "savings",
+				label: "Livret",
+				budgetType: "savings",
+				expected: "-300.00",
+				actual: "0",
+				remaining: "-300.00",
+				projected: "-300.00",
+			},
+		],
+		unbudgeted: { actual: "0", forecast: "-155.00", projected: "-155.00" },
+		totals: {
+			income: "2500.00",
+			expenses: "-1055.00",
+			savings: "-300.00",
+			balance: "1145.00",
+		},
+	};
+}
+
+describe("SummaryPage month breakdown", () => {
+	beforeEach(() => {
+		setupMocks(typicalForecast, (year, month) =>
+			Promise.resolve(breakdownOf(year, month)),
+		);
+	});
+
+	function chartSection(): HTMLElement {
+		const heading = screen.getByRole("heading", {
+			name: "Balance mois par mois",
+		});
+		return heading.closest("section") as HTMLElement;
+	}
+
+	async function openDrawer(): Promise<HTMLElement> {
+		return screen.findByRole("dialog", { name: "mars 2027" });
+	}
+
+	it("opens the month from the table and lists budgets by type, unbudgeted and totals", async () => {
+		const user = userEvent.setup();
+		await renderSummaryPage("?year=2027");
+		const table = await screen.findByRole("table");
+
+		await user.click(
+			within(table).getByRole("button", { name: "Détail de mars 2027" }),
+		);
+
+		const drawer = await openDrawer();
+		expect(apiFetchMock).toHaveBeenCalledWith("/forecast/2027/3");
+		const scope = within(drawer);
+		const groups = scope
+			.getAllByRole("heading", { level: 3 })
+			.map((h) => h.textContent);
+		expect(groups).toEqual([
+			"Revenu",
+			"Dépense",
+			"Épargne",
+			"Hors budget",
+			"Totaux du mois",
+		]);
+		const rent = scope.getByText("Loyer").closest("li") as HTMLElement;
+		expect(compact(rent)).toContain("-900,00€");
+		expect(compact(rent)).toContain("Prévu-900,00€");
+		expect(compact(rent)).toContain("Réel0,00€");
+		const unbudgeted = scope
+			.getByRole("heading", { name: "Hors budget" })
+			.closest("section") as HTMLElement;
+		expect(compact(unbudgeted)).toContain("Estimé-155,00€");
+		const totals = scope
+			.getByRole("heading", { name: "Totaux du mois" })
+			.closest("section") as HTMLElement;
+		expect(compact(totals)).toContain("Balance+1145,00€");
+	});
+
+	it("opens the month from a chart column", async () => {
+		const user = userEvent.setup();
+		await renderSummaryPage("?year=2027");
+		await screen.findByRole("table");
+
+		await user.click(
+			within(chartSection()).getByRole("button", {
+				name: "Détail de mars 2027",
+			}),
+		);
+
+		expect(within(await openDrawer()).getByText("Salaire")).toBeInTheDocument();
+	});
+
+	it("opens with the keyboard and closes with Escape", async () => {
+		const user = userEvent.setup();
+		await renderSummaryPage("?year=2027");
+		const table = await screen.findByRole("table");
+		const button = within(table).getByRole("button", {
+			name: "Détail de mars 2027",
+		});
+
+		button.focus();
+		await user.keyboard("{Enter}");
+		await openDrawer();
+
+		await user.keyboard("{Escape}");
+		await waitFor(() => {
+			expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+		});
+	});
+
+	it("shows a loader then an error when the breakdown fails", async () => {
+		let fail: (error: Error) => void = () => {};
+		setupMocks(
+			typicalForecast,
+			() =>
+				new Promise((_, reject) => {
+					fail = reject;
+				}),
+		);
+		const user = userEvent.setup();
+		await renderSummaryPage("?year=2027");
+		const table = await screen.findByRole("table");
+
+		await user.click(
+			within(table).getByRole("button", { name: "Détail de mars 2027" }),
+		);
+
+		const drawer = await openDrawer();
+		expect(within(drawer).queryByText("Salaire")).not.toBeInTheDocument();
+		fail(new Error("boom"));
+		expect(
+			await within(drawer).findByText(
+				"Impossible de charger le détail du mois",
+			),
+		).toBeInTheDocument();
 	});
 });

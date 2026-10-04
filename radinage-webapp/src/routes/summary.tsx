@@ -13,6 +13,7 @@ import {
 	Table,
 	Text,
 	Title,
+	UnstyledButton,
 } from "@mantine/core";
 import {
 	IconAlertCircle,
@@ -21,10 +22,15 @@ import {
 	IconChevronRight,
 } from "@tabler/icons-react";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { type CSSProperties, type ReactNode, useId } from "react";
+import { type CSSProperties, type ReactNode, useId, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { ForecastMonthDrawer } from "@/components/ForecastMonthDrawer";
 import { PageHeader } from "@/components/PageHeader";
-import { formatAmount, formatSignedAmount } from "@/lib/format";
+import {
+	formatAmount,
+	formatMonthYear,
+	formatSignedAmount,
+} from "@/lib/format";
 import { useForecast } from "@/lib/hooks";
 import { balanceTextColor, budgetTypeTones, type Tone } from "@/lib/tones";
 import type {
@@ -115,13 +121,6 @@ function monthName(
 ): string {
 	return new Date(year, month - 1).toLocaleDateString(locale, {
 		month: style,
-	});
-}
-
-function monthYearName({ year, month }: YearMonth, locale: string): string {
-	return new Date(year, month - 1).toLocaleDateString(locale, {
-		month: "long",
-		year: "numeric",
 	});
 }
 
@@ -343,6 +342,7 @@ interface ForecastViewProps {
 	locale: string;
 	firstNegativeMonth: YearMonth | null;
 	showYear: boolean;
+	onSelectMonth: (month: YearMonth) => void;
 }
 
 function FirstNegativeMarker() {
@@ -367,6 +367,7 @@ function BalanceChart({
 	locale,
 	firstNegativeMonth,
 	showYear,
+	onSelectMonth,
 }: ForecastViewProps) {
 	const { t } = useTranslation();
 	const maxPositive = Math.max(0, ...forecast.map((m) => m.balance));
@@ -433,12 +434,17 @@ function BalanceChart({
 								? stripes("tangerine-3", "tangerine-1")
 								: "var(--mantine-color-tangerine-5)";
 							return (
-								<Stack
+								<UnstyledButton
 									key={`${m.year}-${m.month}`}
-									gap={0}
-									align="center"
+									aria-label={t("forecast.breakdown.openMonth", {
+										month: formatMonthYear(m, locale),
+									})}
+									onClick={() => onSelectMonth(m)}
+									display="flex"
 									bg={isFirstNegative ? "tangerine.0" : undefined}
 									style={{
+										flexDirection: "column",
+										alignItems: "center",
 										borderRadius: 8,
 										outline: isFirstNegative
 											? "2px solid var(--mantine-color-tangerine-5)"
@@ -514,7 +520,7 @@ function BalanceChart({
 											{m.year}
 										</Text>
 									)}
-								</Stack>
+								</UnstyledButton>
 							);
 						})}
 					</Box>
@@ -544,6 +550,7 @@ function MonthlyTable({
 	locale,
 	firstNegativeMonth,
 	showYear,
+	onSelectMonth,
 }: ForecastViewProps) {
 	const { t } = useTranslation();
 	const { income, expense, savings } = budgetTypeTones;
@@ -602,14 +609,26 @@ function MonthlyTable({
 												: undefined
 									}
 									aria-current={isCurrent ? "date" : undefined}
+									onClick={() => onSelectMonth(m)}
+									style={{ cursor: "pointer" }}
 								>
 									<Table.Td>
 										<Group gap={8} wrap="nowrap">
-											<Text fw={600} tt="capitalize" inherit>
+											<UnstyledButton
+												aria-label={t("forecast.breakdown.openMonth", {
+													month: formatMonthYear(m, locale),
+												})}
+												onClick={() => onSelectMonth(m)}
+												mih={44}
+												fw={600}
+												tt="capitalize"
+												td="underline"
+												style={{ textUnderlineOffset: 3 }}
+											>
 												{showYear
-													? monthYearName(m, locale)
+													? formatMonthYear(m, locale)
 													: monthName(m.year, m.month, locale, "long")}
-											</Text>
+											</UnstyledButton>
 											{isCurrent && (
 												<Badge variant="filled" color="forest" tt="none">
 													{t("forecast.current")}
@@ -690,6 +709,7 @@ function ForecastPage() {
 		rolling ? ROLLING_MONTHS : 12,
 	);
 	const { isLoading, isError } = forecastQuery;
+	const [selectedMonth, setSelectedMonth] = useState<YearMonth | null>(null);
 
 	const forecast = (forecastQuery.data?.months ?? []).map(toMonthForecast);
 	const totals = forecastQuery.data?.totals;
@@ -791,7 +811,7 @@ function ForecastPage() {
 								icon={<IconAlertTriangle size={16} />}
 								color="tangerine"
 								title={t("forecast.firstNegativeTitle", {
-									month: monthYearName(firstNegativeMonth, i18n.language),
+									month: formatMonthYear(firstNegativeMonth, i18n.language),
 								})}
 							>
 								{t("forecast.firstNegativeText")}
@@ -925,6 +945,7 @@ function ForecastPage() {
 							locale={i18n.language}
 							firstNegativeMonth={firstNegativeMonth}
 							showYear={showYear}
+							onSelectMonth={setSelectedMonth}
 						/>
 
 						<MonthlyTable
@@ -932,10 +953,15 @@ function ForecastPage() {
 							locale={i18n.language}
 							firstNegativeMonth={firstNegativeMonth}
 							showYear={showYear}
+							onSelectMonth={setSelectedMonth}
 						/>
 					</>
 				)}
 			</Stack>
+			<ForecastMonthDrawer
+				month={selectedMonth}
+				onClose={() => setSelectedMonth(null)}
+			/>
 		</div>
 	);
 }

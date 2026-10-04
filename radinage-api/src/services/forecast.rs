@@ -11,6 +11,7 @@ use crate::{
 use chrono::{Datelike, Months, NaiveDate};
 use rust_decimal::{Decimal, RoundingStrategy};
 use std::ops::AddAssign;
+use uuid::Uuid;
 
 /// Position of a month relative to today.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -260,16 +261,12 @@ pub fn compute_forecast(input: &ForecastInput<'_>) -> Forecast {
     let mut totals = Flows::default();
     let months: Vec<ForecastMonth> = horizon(input.from, input.months)
         .map(|month| {
-            let status = MonthStatus::of(month, input.today);
             let MonthProjection {
-                mut flows,
+                status,
+                flows,
                 committed,
-            } = project_month(input, month, status);
-            let unbudgeted_forecast = unbudgeted_forecast(
-                unbudgeted_rate,
-                days_to_forecast(month, status, input.today),
-            );
-            flows.expenses += unbudgeted_forecast;
+                unbudgeted_forecast,
+            } = project_month(input, month, unbudgeted_rate);
             cumulative += flows.balance();
             totals += flows;
             ForecastMonth {
@@ -301,42 +298,160 @@ pub fn compute_forecast(input: &ForecastInput<'_>) -> Forecast {
 }
 
 struct MonthProjection {
+    status: MonthStatus,
+    /// Projected flows, `unbudgeted_forecast` included.
     flows: Flows,
     committed: Decimal,
+    unbudgeted_forecast: Decimal,
 }
 
 /// Flows of one month: what was accounted for past months; for the current month, that
-/// plus what each budget still expects; what the budgets expect for future months.
+/// plus what each budget still expects; what the budgets expect for future months. The
+/// unbudgeted spending forecast at `unbudgeted_rate` is added to the expenses.
 fn project_month(
     input: &ForecastInput<'_>,
     month: YearMonth,
-    status: MonthStatus,
+    unbudgeted_rate: Decimal,
 ) -> MonthProjection {
-    let month_rows = || {
-        input
-            .rows
-            .iter()
-            .filter(move |row| YearMonth::of(row.date) == month)
-    };
-    match status {
-        MonthStatus::Past => MonthProjection {
-            flows: actual_flows(month_rows()),
-            committed: Decimal::ZERO,
-        },
+    let status = MonthStatus::of(month, input.today);
+    let (mut flows, committed) = match status {
+        MonthStatus::Past => (actual_flows(month_rows(input.rows, month)), Decimal::ZERO),
         MonthStatus::Current => {
-            let mut flows = actual_flows(month_rows());
+            let mut flows = actual_flows(month_rows(input.rows, month));
             let mut committed = Decimal::ZERO;
             for budget in input.budgets {
                 let remaining = budget_progress(budget, month, input.rows).remaining;
                 flows.add_budgeted(budget.budget_type, remaining);
                 committed += remaining;
             }
-            MonthProjection { flows, committed }
+            (flows, committed)
         }
-        MonthStatus::Future => MonthProjection {
-            flows: expected_flows(input.budgets, month),
-            committed: Decimal::ZERO,
+        MonthStatus::Future => (expected_flows(input.budgets, month), Decimal::ZERO),
+    };
+    let unbudgeted_forecast = unbudgeted_forecast(
+        unbudgeted_rate,
+        days_to_forecast(month, status, input.today),
+    );
+    flows.expenses += unbudgeted_forecast;
+    MonthProjection {
+        status,
+        flows,
+        committed,
+        unbudgeted_forecast,
+    }
+}
+
+fn month_rows(rows: &[SummaryRow], month: YearMonth) -> impl Iterator<Item = &SummaryRow> {
+    rows.iter()
+        .filter(move |row| YearMonth::of(row.date) == month)
+}
+
+/// One budget's line in a [`MonthBreakdown`], amounts signed like operations.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BudgetBreakdown {
+    pub budget_id: Uuid,
+    pub label: String,
+    pub budget_type: BudgetType,
+    /// What the budget expects this month, `None` when it expects nothing.
+    pub expected: Option<Decimal>,
+    /// Net of the amounts linked to the budget this month; zero for a future month.
+    pub actual: Decimal,
+    /// Part of `expected` still counted on top of `actual`: what is not reached yet for the
+    /// current month, all of it for a future month, nothing for a past month.
+    pub remaining: Decimal,
+    /// What the budget weighs in the month's forecast: `actual + remaining`.
+    pub projected: Decimal,
+}
+
+/// The unbudgeted line of a [`MonthBreakdown`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct UnbudgetedBreakdown {
+    /// Net of the unbudgeted amounts accounted this month; zero for a future month.
+    pub actual: Decimal,
+    /// Unbudgeted spending expected at the unbudgeted rate (see [`ForecastMonth`]).
+    pub forecast: Decimal,
+    /// `actual + forecast`.
+    pub projected: Decimal,
+}
+
+/// What one month of the forecast is made of, budget by budget.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MonthBreakdown {
+    pub month: YearMonth,
+    pub status: MonthStatus,
+    /// Budgets expecting or receiving something this month, by type (income, expense,
+    /// savings) then by decreasing magnitude of `projected`.
+    pub budgets: Vec<BudgetBreakdown>,
+    pub unbudgeted: UnbudgetedBreakdown,
+    /// The month's flows, identical to the same month in [`compute_forecast`].
+    pub flows: Flows,
+}
+
+/// Breakdown of `month` from the same input and the same projection as [`compute_forecast`],
+/// so `flows` matches that month of a forecast whose horizon contains it.
+pub fn month_breakdown(input: &ForecastInput<'_>, month: YearMonth) -> MonthBreakdown {
+    let rate = unbudgeted_rate(input.history, input.today);
+    let MonthProjection {
+        status,
+        flows,
+        unbudgeted_forecast,
+        ..
+    } = project_month(input, month, rate);
+    let accounted: &[SummaryRow] = match status {
+        MonthStatus::Future => &[],
+        MonthStatus::Past | MonthStatus::Current => input.rows,
+    };
+    let mut budgets: Vec<BudgetBreakdown> = input
+        .budgets
+        .iter()
+        .filter_map(|budget| {
+            let progress = budget_progress(budget, month, accounted);
+            if progress.expected.unwrap_or_default().is_zero() && progress.actual.is_zero() {
+                return None;
+            }
+            let remaining = match status {
+                MonthStatus::Past => Decimal::ZERO,
+                MonthStatus::Current | MonthStatus::Future => progress.remaining,
+            };
+            Some(BudgetBreakdown {
+                budget_id: budget.id,
+                label: budget.label.clone(),
+                budget_type: budget.budget_type,
+                expected: progress.expected,
+                actual: progress.actual,
+                remaining,
+                projected: progress.actual + remaining,
+            })
+        })
+        .collect();
+    budgets.sort_by(|a, b| {
+        type_rank(a.budget_type)
+            .cmp(&type_rank(b.budget_type))
+            .then_with(|| b.projected.abs().cmp(&a.projected.abs()))
+            .then_with(|| a.label.cmp(&b.label))
+    });
+    let unbudgeted_actual: Decimal = month_rows(accounted, month)
+        .filter(|row| row.category() == Some(SummaryCategory::Unbudgeted))
+        .map(|row| row.amount)
+        .sum();
+    MonthBreakdown {
+        month,
+        status,
+        budgets,
+        unbudgeted: UnbudgetedBreakdown {
+            actual: unbudgeted_actual,
+            forecast: unbudgeted_forecast,
+            projected: unbudgeted_actual + unbudgeted_forecast,
         },
+        flows,
+    }
+}
+
+fn type_rank(budget_type: BudgetType) -> u8 {
+    match budget_type {
+        BudgetType::Income => 0,
+        BudgetType::Expense => 1,
+        BudgetType::Savings => 2,
     }
 }
 
@@ -1218,5 +1333,256 @@ mod tests {
             starting_balance: Some(dec!(12)),
         });
         assert_eq!(forecast.end_balance, dec!(12));
+    }
+
+    mod breakdown {
+        use super::*;
+
+        const TODAY: (i32, u32, u32) = (2026, 3, 12);
+
+        fn today() -> NaiveDate {
+            date(TODAY.0, TODAY.1, TODAY.2)
+        }
+
+        fn budget(
+            label: &str,
+            budget_type: BudgetType,
+            amount: Decimal,
+            start: YearMonth,
+        ) -> Budget {
+            let mut budget = monthly_budget(budget_type, amount);
+            budget.label = label.to_string();
+            if let BudgetKind::Recurring { current_period, .. } = &mut budget.kind {
+                current_period.start = start;
+            }
+            budget
+        }
+
+        struct Fixture {
+            budgets: Vec<Budget>,
+            rows: Vec<SummaryRow>,
+        }
+
+        impl Fixture {
+            /// Salary, rent, groceries and savings since 2020, plus a holiday budget that only
+            /// starts in June 2026; operations from December 2025 to April 2026.
+            fn new() -> Self {
+                let since = YearMonth::new(2020, 1);
+                let salary = budget("Salary", BudgetType::Income, dec!(2000), since);
+                let groceries = budget("Groceries", BudgetType::Expense, dec!(-500), since);
+                let rent = budget("Rent", BudgetType::Expense, dec!(-900), since);
+                let savings = budget("Savings", BudgetType::Savings, dec!(-200), since);
+                let holidays = budget(
+                    "Holidays",
+                    BudgetType::Expense,
+                    dec!(-100),
+                    YearMonth::new(2026, 6),
+                );
+                let rows = vec![
+                    // History: 900 of unbudgeted spending over the 90 days of Dec-Feb.
+                    row(date(2025, 12, 5), dec!(-300), None),
+                    row(date(2026, 1, 5), dec!(-300), None),
+                    row(date(2026, 2, 5), dec!(-300), None),
+                    row(date(2026, 2, 6), dec!(50), None),
+                    linked(date(2026, 2, 1), dec!(2000), &salary),
+                    linked(date(2026, 2, 3), dec!(-900), &rent),
+                    linked(date(2026, 2, 9), dec!(-520), &groceries),
+                    linked(date(2026, 2, 20), dec!(-80), &holidays),
+                    // Current month.
+                    linked(date(2026, 3, 2), dec!(-950), &rent),
+                    linked(date(2026, 3, 8), dec!(-330), &groceries),
+                    row(date(2026, 3, 10), dec!(-40), None),
+                    // Already accounted in a future month: ignored by the forecast.
+                    linked(date(2026, 4, 1), dec!(-999), &rent),
+                    row(date(2026, 4, 1), dec!(-999), None),
+                ];
+                Self {
+                    budgets: vec![savings, groceries, holidays, salary, rent],
+                    rows,
+                }
+            }
+
+            fn input(&self, from: YearMonth, months: usize) -> ForecastInput<'_> {
+                ForecastInput {
+                    from,
+                    months,
+                    today: today(),
+                    budgets: &self.budgets,
+                    rows: &self.rows,
+                    history: &self.rows,
+                    starting_balance: Some(dec!(1000)),
+                }
+            }
+
+            fn breakdown(&self, month: YearMonth) -> MonthBreakdown {
+                month_breakdown(&self.input(month, 1), month)
+            }
+        }
+
+        type Line<'a> = (&'a str, Option<Decimal>, Decimal, Decimal, Decimal);
+
+        fn lines(breakdown: &MonthBreakdown) -> Vec<Line<'_>> {
+            breakdown
+                .budgets
+                .iter()
+                .map(|b| {
+                    (
+                        b.label.as_str(),
+                        b.expected,
+                        b.actual,
+                        b.remaining,
+                        b.projected,
+                    )
+                })
+                .collect()
+        }
+
+        #[test]
+        fn past_month_projects_what_was_linked() {
+            let breakdown = Fixture::new().breakdown(YearMonth::new(2026, 2));
+            assert_eq!(breakdown.status, MonthStatus::Past);
+            assert_eq!(
+                lines(&breakdown),
+                vec![
+                    ("Salary", Some(dec!(2000)), dec!(2000), dec!(0), dec!(2000)),
+                    ("Rent", Some(dec!(-900)), dec!(-900), dec!(0), dec!(-900)),
+                    (
+                        "Groceries",
+                        Some(dec!(-500)),
+                        dec!(-520),
+                        dec!(0),
+                        dec!(-520)
+                    ),
+                    // Linked although it expects nothing yet.
+                    ("Holidays", None, dec!(-80), dec!(0), dec!(-80)),
+                    ("Savings", Some(dec!(-200)), dec!(0), dec!(0), dec!(0)),
+                ]
+            );
+            assert_eq!(
+                breakdown.unbudgeted,
+                UnbudgetedBreakdown {
+                    actual: dec!(-250),
+                    forecast: dec!(0),
+                    projected: dec!(-250),
+                }
+            );
+        }
+
+        #[test]
+        fn current_month_adds_what_is_not_reached_yet() {
+            let breakdown = Fixture::new().breakdown(YearMonth::new(2026, 3));
+            assert_eq!(breakdown.status, MonthStatus::Current);
+            assert_eq!(
+                lines(&breakdown),
+                vec![
+                    ("Salary", Some(dec!(2000)), dec!(0), dec!(2000), dec!(2000)),
+                    // Exceeded: nothing more expected.
+                    ("Rent", Some(dec!(-900)), dec!(-950), dec!(0), dec!(-950)),
+                    (
+                        "Groceries",
+                        Some(dec!(-500)),
+                        dec!(-330),
+                        dec!(-170),
+                        dec!(-500)
+                    ),
+                    ("Savings", Some(dec!(-200)), dec!(0), dec!(-200), dec!(-200)),
+                ]
+            );
+            // -10 a day over the 19 days after the 12th.
+            assert_eq!(
+                breakdown.unbudgeted,
+                UnbudgetedBreakdown {
+                    actual: dec!(-40),
+                    forecast: dec!(-190),
+                    projected: dec!(-230),
+                }
+            );
+        }
+
+        #[test]
+        fn future_month_projects_what_is_expected() {
+            let breakdown = Fixture::new().breakdown(YearMonth::new(2026, 4));
+            assert_eq!(breakdown.status, MonthStatus::Future);
+            assert_eq!(
+                lines(&breakdown),
+                vec![
+                    ("Salary", Some(dec!(2000)), dec!(0), dec!(2000), dec!(2000)),
+                    ("Rent", Some(dec!(-900)), dec!(0), dec!(-900), dec!(-900)),
+                    (
+                        "Groceries",
+                        Some(dec!(-500)),
+                        dec!(0),
+                        dec!(-500),
+                        dec!(-500)
+                    ),
+                    ("Savings", Some(dec!(-200)), dec!(0), dec!(-200), dec!(-200)),
+                ]
+            );
+            assert_eq!(
+                breakdown.unbudgeted,
+                UnbudgetedBreakdown {
+                    actual: dec!(0),
+                    forecast: dec!(-300),
+                    projected: dec!(-300),
+                }
+            );
+        }
+
+        #[test]
+        fn budgets_expecting_nothing_and_receiving_nothing_are_omitted() {
+            let fixture = Fixture::new();
+            let has_holidays = |month| {
+                fixture
+                    .breakdown(month)
+                    .budgets
+                    .iter()
+                    .any(|b| b.label == "Holidays")
+            };
+            assert!(has_holidays(YearMonth::new(2026, 2)), "linked");
+            assert!(!has_holidays(YearMonth::new(2026, 3)), "nothing at all");
+            assert!(has_holidays(YearMonth::new(2026, 6)), "expected");
+        }
+
+        #[test]
+        fn budgets_are_sorted_by_type_then_by_projected_magnitude() {
+            let fixture = Fixture::new();
+            for month in horizon(YearMonth::new(2026, 1), 6) {
+                let budgets = fixture.breakdown(month).budgets;
+                let keys: Vec<_> = budgets
+                    .iter()
+                    .map(|b| (type_rank(b.budget_type), -b.projected.abs()))
+                    .collect();
+                let mut sorted = keys.clone();
+                sorted.sort();
+                assert_eq!(keys, sorted, "{month:?}");
+            }
+        }
+
+        #[test]
+        fn totals_match_the_forecast_month_and_add_up_the_lines() {
+            let fixture = Fixture::new();
+            let forecast = compute_forecast(&fixture.input(YearMonth::new(2026, 2), 3));
+            let statuses: Vec<_> = forecast.months.iter().map(|m| m.status).collect();
+            assert_eq!(
+                statuses,
+                [MonthStatus::Past, MonthStatus::Current, MonthStatus::Future]
+            );
+            for month in &forecast.months {
+                let breakdown = fixture.breakdown(month.month);
+                assert_eq!(breakdown.flows, month.flows, "{:?}", month.month);
+                assert_eq!(
+                    breakdown.unbudgeted.forecast, month.unbudgeted_forecast,
+                    "{:?}",
+                    month.month
+                );
+                let lines: Decimal = breakdown.budgets.iter().map(|b| b.projected).sum();
+                assert_eq!(
+                    lines + breakdown.unbudgeted.projected,
+                    month.flows.balance(),
+                    "{:?}",
+                    month.month
+                );
+            }
+        }
     }
 }
