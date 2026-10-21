@@ -32,7 +32,12 @@ import {
 	formatSignedAmount,
 } from "@/lib/format";
 import { useForecast } from "@/lib/hooks";
-import { balanceTextColor, budgetTypeTones, type Tone } from "@/lib/tones";
+import {
+	balanceTextColor,
+	budgetTypeTones,
+	neutralTone,
+	type Tone,
+} from "@/lib/tones";
 import type {
 	ForecastMonth,
 	ForecastMonthStatus,
@@ -287,19 +292,42 @@ interface TotalRowProps {
 	tone: Tone;
 }
 
+interface AmountLineProps {
+	label: string;
+	amount: string;
+	dot: string;
+	color: string;
+}
+
+function AmountLine({ label, amount, dot, color }: AmountLineProps) {
+	return (
+		<Group justify="space-between" align="baseline" wrap="nowrap" gap="xs">
+			<Group gap={8} wrap="nowrap">
+				<Box w={10} h={10} bg={dot} style={{ borderRadius: 3, flex: "none" }} />
+				<Text fw={600}>{label}</Text>
+			</Group>
+			<Text
+				className="tabular-nums"
+				fw={700}
+				c={color}
+				style={{ whiteSpace: "nowrap" }}
+			>
+				{amount}
+			</Text>
+		</Group>
+	);
+}
+
 function TotalRow({ label, amount, ratio, tone }: TotalRowProps) {
 	const width = Math.round(Math.min(1, Math.max(0, ratio)) * 100);
 	return (
 		<Stack gap={6}>
-			<Group justify="space-between" align="baseline" wrap="nowrap" gap="xs">
-				<Group gap={8} wrap="nowrap">
-					<Box w={10} h={10} bg={tone.fill} style={{ borderRadius: 3 }} />
-					<Text fw={600}>{label}</Text>
-				</Group>
-				<Text className="tabular-nums" fw={700} c={tone.text}>
-					{formatAmount(amount)}
-				</Text>
-			</Group>
+			<AmountLine
+				label={label}
+				amount={formatAmount(amount)}
+				dot={tone.fill}
+				color={tone.text}
+			/>
 			<Box
 				aria-hidden
 				h={6}
@@ -730,6 +758,8 @@ function ForecastPage() {
 	const unbudgetedRate = Number(forecastQuery.data?.unbudgetedRate ?? 0);
 	const forecastsUnbudgeted = forecast.some((m) => m.unbudgetedForecast !== 0);
 
+	const surplus = totalIncome + totalExpenses;
+
 	const showYear =
 		firstMonth !== undefined &&
 		lastMonth !== undefined &&
@@ -737,6 +767,15 @@ function ForecastPage() {
 	const horizonEnd = lastMonth
 		? longDate(new Date(lastMonth.year, lastMonth.month, 0), i18n.language)
 		: "";
+
+	const savedLine = (
+		<AmountLine
+			label={t("forecast.savedBy", { date: horizonEnd })}
+			amount={formatAmount(-totalSavings)}
+			dot={budgetTypeTones.savings.fill}
+			color={budgetTypeTones.savings.text}
+		/>
+	);
 
 	const periodProgress =
 		horizonDays > 0 ? ((horizonDays - daysLeft) / horizonDays) * 100 : 0;
@@ -870,38 +909,60 @@ function ForecastPage() {
 								</Stack>
 							</HeroCard>
 
-							<HeroCard
-								title={
-									rawStartingBalance !== null
-										? t("forecast.projectedBalance", { date: horizonEnd })
-										: rolling
-											? t("forecast.endOfPeriodBalance", { date: horizonEnd })
-											: t("forecast.endOfYearBalance")
-								}
-							>
-								<BigAmount
-									value={formatSignedAmount(endBalance)}
-									color={balanceTextColor(endBalance)}
-								/>
-								<Text size="sm" c="dimmed">
-									{rawStartingBalance !== null
-										? t("forecast.projectedBalanceHint")
-										: rolling
-											? t("forecast.endOfPeriodHint")
-											: t("forecast.endOfYearHint")}
-								</Text>
-								{rawStartingBalance !== null && firstMonth && (
-									<Text size="xs" c="dimmed" mt="auto">
-										{t("forecast.startingBalance", {
-											date: longDate(
-												new Date(firstMonth.year, firstMonth.month - 1, 1),
-												i18n.language,
-											),
-											amount: formatAmount(rawStartingBalance),
-										})}
+							{rawStartingBalance !== null ? (
+								<HeroCard
+									title={t("forecast.projectedBalance", { date: horizonEnd })}
+								>
+									<BigAmount
+										value={formatSignedAmount(endBalance)}
+										color={balanceTextColor(endBalance)}
+									/>
+									<Text size="sm" c="dimmed">
+										{t("forecast.projectedBalanceHint")}
 									</Text>
-								)}
-							</HeroCard>
+									<Stack gap="xs" mt="auto">
+										{savedLine}
+										{firstMonth && (
+											<Text size="xs" c="dimmed">
+												{t("forecast.startingBalance", {
+													date: longDate(
+														new Date(firstMonth.year, firstMonth.month - 1, 1),
+														i18n.language,
+													),
+													amount: formatAmount(rawStartingBalance),
+												})}
+											</Text>
+										)}
+									</Stack>
+								</HeroCard>
+							) : (
+								<HeroCard
+									title={
+										rolling
+											? t("forecast.rollingSurplusTitle", {
+													count: forecast.length,
+												})
+											: t("forecast.surplusTitle", { year: selectedYear })
+									}
+								>
+									<BigAmount
+										value={formatSignedAmount(surplus)}
+										color={balanceTextColor(surplus)}
+									/>
+									<Text size="sm" c="dimmed">
+										{t("forecast.surplusHint")}
+									</Text>
+									<Stack gap="xs" mt="auto">
+										{savedLine}
+										<AmountLine
+											label={t("forecast.surplusLeftOnAccount")}
+											amount={formatSignedAmount(endBalance)}
+											dot={neutralTone.fill}
+											color={balanceTextColor(endBalance)}
+										/>
+									</Stack>
+								</HeroCard>
+							)}
 
 							<HeroCard
 								title={

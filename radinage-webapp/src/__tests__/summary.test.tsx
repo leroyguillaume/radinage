@@ -294,14 +294,16 @@ describe("SummaryPage period mode", () => {
 		await renderSummaryPage("?mode=rolling");
 
 		const card = await screen.findByRole("region", {
-			name: "Balance au 30 septembre 2027",
+			name: "Excédent sur 12 mois",
 		});
-		expect(compact(card)).toMatch(/àlafindelapériode/);
+		expect(compact(card)).toMatch(/Épargnéd'icile30septembre20273600,00/);
 		expect(
 			screen.getByRole("region", { name: "Totaux sur 12 mois" }),
 		).toBeInTheDocument();
 		expect(screen.getByText(/Progression de la période/)).toBeInTheDocument();
-		expect(screen.queryByText("Balance fin d'année")).not.toBeInTheDocument();
+		expect(
+			screen.queryByRole("region", { name: "Excédent 2026" }),
+		).not.toBeInTheDocument();
 	});
 
 	it("shows the projected balance at the end of the rolling period", async () => {
@@ -326,7 +328,7 @@ describe("SummaryPage period mode", () => {
 
 		expect(
 			await screen.findByRole("region", {
-				name: "Balance on September 30, 2027",
+				name: "12-month surplus",
 			}),
 		).toBeInTheDocument();
 		expect(
@@ -368,7 +370,9 @@ describe("SummaryPage", () => {
 		await waitFor(() => {
 			expect(screen.getByText("Budget / jour")).toBeInTheDocument();
 		});
-		expect(screen.getByText("Balance fin d'année")).toBeInTheDocument();
+		expect(
+			screen.getByText(`Excédent ${new Date().getFullYear()}`),
+		).toBeInTheDocument();
 		// "Revenus", "Dépenses", "Épargne" appear in both cards and table headers
 		expect(screen.getAllByText("Revenus").length).toBeGreaterThanOrEqual(1);
 		expect(screen.getAllByText("Dépenses").length).toBeGreaterThanOrEqual(1);
@@ -481,7 +485,7 @@ describe("SummaryPage", () => {
 		});
 	});
 
-	it("shows the server's monthly flows, totals and end-of-year balance", async () => {
+	it("shows the server's monthly flows, totals and surplus", async () => {
 		setupMocks((year) =>
 			makeForecast(year, (month) =>
 				month === 1
@@ -493,9 +497,9 @@ describe("SummaryPage", () => {
 		await renderSummaryPage("?year=2025");
 
 		const card = await screen.findByRole("region", {
-			name: "Balance fin d'année",
+			name: "Excédent 2025",
 		});
-		expect((card.textContent ?? "").replace(/\s/g, "")).toMatch(/\+667,00/);
+		expect(compact(card)).toMatch(/\+667,00/);
 		const totals = screen.getByRole("region", { name: /Totaux/ });
 		const totalsText = (totals.textContent ?? "").replace(/\s/g, "");
 		expect(totalsText).toMatch(/1234,00/);
@@ -527,7 +531,36 @@ describe("SummaryPage", () => {
 		const text = (card.textContent ?? "").replace(/\s/g, "");
 		expect(text).toMatch(/\+1667,00/);
 		expect(text).toMatch(/Soldeau1janvier2025:1000,00/);
-		expect(screen.queryByText("Balance fin d'année")).not.toBeInTheDocument();
+		expect(
+			screen.queryByRole("region", { name: /^Excédent/ }),
+		).not.toBeInTheDocument();
+	});
+
+	it("splits the surplus between savings and what is left on the account", async () => {
+		await renderSummaryPage("?year=2025");
+
+		const card = await screen.findByRole("region", { name: "Excédent 2025" });
+		const text = compact(card);
+		expect(text).toMatch(/\+19200,00€Cequireste/);
+		expect(text).toMatch(/Épargnéd'icile31décembre20253600,00/);
+		expect(text).toMatch(/Restantsurlecompte\+15600,00/);
+	});
+
+	it("shows the period's savings next to the projected balance without adding them", async () => {
+		setupMocks((year) =>
+			makeForecast(year, typicalMonth, { startingBalance: "1000.00" }),
+		);
+
+		await renderSummaryPage("?year=2025");
+
+		const card = await screen.findByRole("region", {
+			name: "Solde prévu au 31 décembre 2025",
+		});
+		const text = compact(card);
+		expect(text).toMatch(/\+16600,00/);
+		expect(text).toMatch(/Épargnéd'icile31décembre20253600,00/);
+		expect(text).not.toMatch(/Restantsurlecompte/);
+		expect(text).not.toMatch(/20200,00/);
 	});
 
 	it("shows the projected balance title in English too", async () => {
@@ -538,11 +571,10 @@ describe("SummaryPage", () => {
 
 		await renderSummaryPage("?year=2025");
 
-		expect(
-			await screen.findByRole("region", {
-				name: "Projected balance on December 31, 2025",
-			}),
-		).toBeInTheDocument();
+		const card = await screen.findByRole("region", {
+			name: "Projected balance on December 31, 2025",
+		});
+		expect(compact(card)).toMatch(/SavedbyDecember31,20253600,00/);
 	});
 
 	it("shows what the budgets still expect in the current month's row", async () => {
