@@ -105,7 +105,8 @@ pub struct Forecast {
     /// horizon below zero; `None` when no day is left. Negative when the budgets alone already
     /// end in the red.
     pub daily_budget: Option<Decimal>,
-    /// First month whose cumulative balance is below zero.
+    /// First current or future month whose cumulative balance is below zero (see
+    /// [`first_negative_month`]).
     pub first_negative_month: Option<YearMonth>,
 }
 
@@ -281,10 +282,7 @@ pub fn compute_forecast(input: &ForecastInput<'_>) -> Forecast {
         .collect();
     let days_left = days_left(input.from, input.months, input.today);
     let unbudgeted_total: Decimal = months.iter().map(|m| m.unbudgeted_forecast).sum();
-    let first_negative_month = months
-        .iter()
-        .find(|m| m.cumulative < Decimal::ZERO)
-        .map(|m| m.month);
+    let first_negative_month = first_negative_month(&months);
     Forecast {
         daily_budget: daily_budget(cumulative, unbudgeted_total, days_left),
         months,
@@ -295,6 +293,15 @@ pub fn compute_forecast(input: &ForecastInput<'_>) -> Forecast {
         days_left,
         first_negative_month,
     }
+}
+
+/// First month still ahead (current or future) whose cumulative balance is below zero. A
+/// past month is history, not a warning: one that dipped into the red is skipped.
+pub fn first_negative_month(months: &[ForecastMonth]) -> Option<YearMonth> {
+    months
+        .iter()
+        .find(|m| m.status != MonthStatus::Past && m.cumulative < Decimal::ZERO)
+        .map(|m| m.month)
 }
 
 struct MonthProjection {
@@ -1131,43 +1138,83 @@ mod tests {
     }
 
     #[test]
-    fn first_negative_month_is_the_first_cumulative_below_zero() {
-        // (case, monthly balances from 2026-01, all past, expected)
-        let cases: [(&str, Vec<Decimal>, Option<YearMonth>); 5] = [
-            ("never negative", vec![dec!(100), dec!(-100), dec!(0)], None),
+    fn first_negative_month_is_the_first_cumulative_below_zero_still_ahead() {
+        use MonthStatus::{Current, Future, Past};
+        // (case, (status, cumulative) per month from 2026-01, expected)
+        let cases = [
             (
-                "negative from the first month",
-                vec![dec!(-1), dec!(500), dec!(-100)],
+                "never negative",
+                vec![(Past, dec!(100)), (Current, dec!(0)), (Future, dec!(50))],
+                None,
+            ),
+            (
+                "negative from the current month",
+                vec![(Current, dec!(-1)), (Future, dec!(500))],
                 Some(YearMonth::new(2026, 1)),
             ),
             (
                 "negative several times: the first one",
-                vec![dec!(100), dec!(-150), dec!(200), dec!(-300)],
+                vec![
+                    (Current, dec!(100)),
+                    (Future, dec!(-50)),
+                    (Future, dec!(-300)),
+                ],
                 Some(YearMonth::new(2026, 2)),
             ),
             (
-                "negative balance but positive cumulative",
-                vec![dec!(300), dec!(-200), dec!(-100)],
+                "past dip skipped",
+                vec![
+                    (Past, dec!(-200)),
+                    (Current, dec!(300)),
+                    (Future, dec!(400)),
+                ],
                 None,
+            ),
+            (
+                "past dip skipped, later one kept",
+                vec![
+                    (Past, dec!(-200)),
+                    (Current, dec!(300)),
+                    (Future, dec!(-10)),
+                ],
+                Some(YearMonth::new(2026, 3)),
             ),
             ("empty horizon", vec![], None),
         ];
-        for (case, balances, expected) in cases {
-            let rows: Vec<_> = horizon(YearMonth::new(2026, 1), balances.len())
-                .zip(&balances)
-                .map(|(month, amount)| row(month.first_day().unwrap(), *amount, None))
+        for (case, months, expected) in cases {
+            let months: Vec<_> = horizon(YearMonth::new(2026, 1), months.len())
+                .zip(months)
+                .map(|(month, (status, cumulative))| ForecastMonth {
+                    month,
+                    status,
+                    flows: Flows::default(),
+                    committed: Decimal::ZERO,
+                    unbudgeted_forecast: Decimal::ZERO,
+                    cumulative,
+                })
                 .collect();
-            let forecast = compute_forecast(&ForecastInput {
-                from: YearMonth::new(2026, 1),
-                months: balances.len(),
-                today: date(2027, 1, 1),
-                budgets: &[],
-                rows: &rows,
-                history: &[],
-                starting_balance: None,
-            });
-            assert_eq!(forecast.first_negative_month, expected, "{case}");
+            assert_eq!(first_negative_month(&months), expected, "{case}");
         }
+    }
+
+    #[test]
+    fn a_past_dip_into_the_red_is_not_a_first_negative_month() {
+        // January ends at -100, February brings it back to +400.
+        let rows = [
+            row(date(2026, 1, 10), dec!(-100), None),
+            row(date(2026, 2, 1), dec!(500), None),
+        ];
+        let forecast = compute_forecast(&ForecastInput {
+            from: YearMonth::new(2026, 1),
+            months: 2,
+            today: date(2026, 2, 28),
+            budgets: &[],
+            rows: &rows,
+            history: &[],
+            starting_balance: None,
+        });
+        assert_eq!(forecast.months[0].cumulative, dec!(-100));
+        assert_eq!(forecast.first_negative_month, None);
     }
 
     #[test]

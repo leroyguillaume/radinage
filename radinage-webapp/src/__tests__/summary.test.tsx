@@ -86,7 +86,8 @@ function makeForecastFrom(
 		} = flowsOf(month);
 		const balance = income + expenses + savings;
 		cumulative += balance;
-		if (cumulative < 0 && firstNegativeMonth === null) {
+		const status = statusOf(year, month);
+		if (status !== "past" && cumulative < 0 && firstNegativeMonth === null) {
 			firstNegativeMonth = { year, month };
 		}
 		totals.income += income;
@@ -95,7 +96,7 @@ function makeForecastFrom(
 		return {
 			year,
 			month,
-			status: statusOf(year, month),
+			status,
 			income: money(income),
 			expenses: money(expenses),
 			savings: money(savings),
@@ -732,6 +733,22 @@ describe("SummaryPage", () => {
 
 	it("shows no red warning when the balance stays positive", async () => {
 		await renderSummaryPage();
+
+		await screen.findByRole("table");
+		expect(screen.queryByText(/Solde négatif/)).not.toBeInTheDocument();
+		expect(screen.queryByText("Passage dans le rouge")).not.toBeInTheDocument();
+	});
+
+	it("does not warn about a past month that dipped into the red", async () => {
+		setupMocks((year) =>
+			makeForecast(year, (month) =>
+				month === 1
+					? { income: 0, expenses: -200, savings: 0 }
+					: { income: 100, expenses: 0, savings: 0 },
+			),
+		);
+
+		await renderSummaryPage("?year=2026");
 
 		await screen.findByRole("table");
 		expect(screen.queryByText(/Solde négatif/)).not.toBeInTheDocument();
