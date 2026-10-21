@@ -87,7 +87,12 @@ function makeForecastFrom(
 		const balance = income + expenses + savings;
 		cumulative += balance;
 		const status = statusOf(year, month);
-		if (status !== "past" && cumulative < 0 && firstNegativeMonth === null) {
+		if (
+			startingBalance !== null &&
+			status !== "past" &&
+			cumulative < 0 &&
+			firstNegativeMonth === null
+		) {
 			firstNegativeMonth = { year, month };
 		}
 		totals.income += income;
@@ -211,6 +216,12 @@ afterEach(() => {
 
 function compact(element: HTMLElement): string {
 	return (element.textContent ?? "").replace(/\s/g, "");
+}
+
+function redFromMarch(month: number) {
+	return month < 3
+		? { income: 100, expenses: 0, savings: 0 }
+		: { income: 0, expenses: -250, savings: 0 };
 }
 
 describe("SummaryPage period mode", () => {
@@ -700,11 +711,7 @@ describe("SummaryPage", () => {
 
 	it("warns about the first month in the red and highlights it", async () => {
 		setupMocks((year) =>
-			makeForecast(year, (month) =>
-				month < 3
-					? { income: 100, expenses: 0, savings: 0 }
-					: { income: 0, expenses: -250, savings: 0 },
-			),
+			makeForecast(year, redFromMarch, { startingBalance: "0.00" }),
 		);
 
 		await renderSummaryPage("?year=2027");
@@ -739,12 +746,25 @@ describe("SummaryPage", () => {
 		expect(screen.queryByText("Passage dans le rouge")).not.toBeInTheDocument();
 	});
 
+	it("does not warn without a recorded account balance", async () => {
+		setupMocks((year) => makeForecast(year, redFromMarch));
+
+		await renderSummaryPage("?year=2027");
+
+		await screen.findByRole("table");
+		expect(screen.queryByText(/Solde négatif/)).not.toBeInTheDocument();
+		expect(screen.queryByText("Passage dans le rouge")).not.toBeInTheDocument();
+	});
+
 	it("does not warn about a past month that dipped into the red", async () => {
 		setupMocks((year) =>
-			makeForecast(year, (month) =>
-				month === 1
-					? { income: 0, expenses: -200, savings: 0 }
-					: { income: 100, expenses: 0, savings: 0 },
+			makeForecast(
+				year,
+				(month) =>
+					month === 1
+						? { income: 0, expenses: -200, savings: 0 }
+						: { income: 100, expenses: 0, savings: 0 },
+				{ startingBalance: "0.00" },
 			),
 		);
 

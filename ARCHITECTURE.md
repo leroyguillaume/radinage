@@ -225,7 +225,8 @@ amount pays for. It stays negative when the budgets alone end in the red and is
 null once the horizon is over. `firstNegativeMonth` is the
 first current or future month whose running balance is below zero: it is a
 warning about what is ahead, so a past month that dipped into the red and
-recovered does not raise it. `GET /forecast/{year}/{month}`
+recovered does not raise it. It is null when no balance is recorded: a running
+balance started from zero says nothing about the account going into the red. `GET /forecast/{year}/{month}`
 breaks one month down per budget (`expected`, `actual`, `remaining`, and
 `projected` = actual + remaining, so a past month projects what was linked, the
 current month adds what is not reached yet and a future month projects the
