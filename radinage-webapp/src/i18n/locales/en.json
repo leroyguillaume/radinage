@@ -24,6 +24,13 @@
 		"linkBudget": "Link to budget",
 		"unlinkBudget": "Unlink from budget",
 		"ignoreOperation": "Ignore operation",
+		"unignoreOperation": "Stop ignoring",
+		"showIgnored": "Show ignored",
+		"ignored": {
+			"title": "Ignored operations",
+			"hint": "Left out of totals, budgets and forecasts",
+			"empty": "No ignored operations this month"
+		},
 		"editEffectiveDate": "Edit effective date",
 		"clearEffectiveDate": "Clear effective date",
 		"previousMonth": "Previous month",

@@ -8,7 +8,7 @@ use crate::{
 };
 use axum::{
     Json,
-    extract::{Path, State},
+    extract::{Path, Query, State},
 };
 use chrono::NaiveDate;
 use schemars::JsonSchema;
@@ -22,10 +22,19 @@ pub struct MonthlyOperationsResponse {
     pub operations: Vec<OperationResponse>,
 }
 
+#[derive(Debug, Deserialize, Default, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct MonthlyOperationsQuery {
+    /// Include ignored operations in results (default: false).
+    #[serde(default)]
+    pub include_ignored: bool,
+}
+
 pub async fn get_monthly_operations<U, O: OperationRepository, B, P>(
     State(state): State<AppState<U, O, B, P>>,
     auth_user: AuthUser,
     Path((year, month)): Path<(i32, u32)>,
+    Query(q): Query<MonthlyOperationsQuery>,
 ) -> AppResult<Json<MonthlyOperationsResponse>> {
     let user_id = auth_user.id;
 
@@ -43,7 +52,7 @@ pub async fn get_monthly_operations<U, O: OperationRepository, B, P>(
         order: SortOrder::Desc,
         limit: i64::MAX,
         offset: 0,
-        include_ignored: false,
+        include_ignored: q.include_ignored,
     };
 
     let (ops, _total) = state.operation_repo.list(user_id, &params).await?;
@@ -138,6 +147,35 @@ mod tests {
         assert_eq!(resp.status(), StatusCode::OK);
         let json: MonthlyOperationsResponse = response_json(resp).await;
         assert_eq!(json.operations.len(), 2);
+    }
+
+    async fn requested_include_ignored(uri: &str) -> bool {
+        let user_id = Uuid::new_v4();
+        let mut or = MockOperationRepository::new();
+        let (tx, rx) = std::sync::mpsc::channel();
+        or.expect_list().returning(move |_, params| {
+            tx.send(params.include_ignored).unwrap();
+            Box::pin(async { Ok((vec![], 0)) })
+        });
+        let app = build_app(or);
+
+        let auth = auth_header(user_id, UserRole::User);
+        let resp = app
+            .oneshot(json_request("GET", uri, None, Some(&auth)))
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        rx.recv().unwrap()
+    }
+
+    #[tokio::test]
+    async fn excludes_ignored_operations_by_default() {
+        assert!(!requested_include_ignored("/operations/monthly/2024/3").await);
+    }
+
+    #[tokio::test]
+    async fn includes_ignored_operations_when_requested() {
+        assert!(requested_include_ignored("/operations/monthly/2024/3?includeIgnored=true").await);
     }
 
     #[tokio::test]

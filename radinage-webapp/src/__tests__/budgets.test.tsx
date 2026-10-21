@@ -96,6 +96,7 @@ function makeLinkedOperation(
 		effectiveDate: null,
 		label: `OP ${id}`,
 		budgetLink: { type: "auto", budgetId },
+		ignored: false,
 		splits: [],
 	};
 }
@@ -586,6 +587,7 @@ describe("BudgetsPage", () => {
 					effectiveDate: null,
 					label: "RETRAIT DAB",
 					budgetLink: { type: "unlinked" },
+					ignored: false,
 					splits: [
 						{ id: "s1", amount: "-30.00", budgetId: "b1" },
 						{ id: "s2", amount: "-50.00", budgetId: "b2" },

@@ -15,6 +15,8 @@ export interface OperationResponse {
 	effectiveDate: string | null;
 	label: string;
 	budgetLink: BudgetLink;
+	/** Ignored operations are left out of every total, summary and forecast. */
+	ignored: boolean;
 	/** Parts of a split operation, in order; empty when the operation is whole. */
 	splits: OperationSplitResponse[];
 }
