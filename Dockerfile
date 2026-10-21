@@ -67,11 +67,11 @@ ENTRYPOINT ["radinage-api"]
 # =============================================================================
 # Target: radinage-webapp
 # =============================================================================
-FROM nginx:1.31.6-alpine3.24 AS webapp
+FROM nginx:1.31.7-alpine3.24 AS webapp
 
-# The nginx image lags behind Alpine security updates; these clear CVE-2026-93990
-# (libexpat) and CVE-2026-103111 (pcre2) until a newer nginx image ships them.
-RUN apk add --no-cache libexpat=2.8.5-r0 pcre2=10.49-r0 \
+# The nginx image lags behind Alpine security updates; these clear CVE-2026-77214
+# (libexpat) and CVE-2026-88806 (libx11) until a newer nginx image ships them.
+RUN apk add --no-cache libexpat=2.9.0-r0 libx11=1.8.14-r0 \
     && addgroup -g 65532 -S radinage && adduser -u 65532 -S radinage -G radinage \
     && mkdir -p /var/cache/nginx /var/run /etc/nginx/templates \
     && chown -R radinage:radinage /var/cache/nginx /var/run /etc/nginx/conf.d /etc/nginx/templates
