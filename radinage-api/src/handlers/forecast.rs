@@ -767,7 +767,19 @@ mod tests {
             })
         });
 
-        let resp = get(or, br, user_id, "fromYear=2099&fromMonth=1&months=2").await;
+        let balance = AccountBalance {
+            amount: dec!(0),
+            date: day(2098, 12, 31),
+        };
+
+        let resp = get_with_balance(
+            or,
+            br,
+            user_id,
+            Some(balance),
+            "fromYear=2099&fromMonth=1&months=2",
+        )
+        .await;
 
         assert_eq!(resp.status(), StatusCode::OK);
         let json: serde_json::Value = response_json(resp).await;

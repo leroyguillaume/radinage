@@ -106,7 +106,8 @@ pub struct Forecast {
     /// end in the red.
     pub daily_budget: Option<Decimal>,
     /// First current or future month whose cumulative balance is below zero (see
-    /// [`first_negative_month`]).
+    /// [`first_negative_month`]); `None` without a starting balance, since a running balance
+    /// started from zero says nothing about the account going into the red.
     pub first_negative_month: Option<YearMonth>,
 }
 
@@ -282,7 +283,9 @@ pub fn compute_forecast(input: &ForecastInput<'_>) -> Forecast {
         .collect();
     let days_left = days_left(input.from, input.months, input.today);
     let unbudgeted_total: Decimal = months.iter().map(|m| m.unbudgeted_forecast).sum();
-    let first_negative_month = first_negative_month(&months);
+    let first_negative_month = input
+        .starting_balance
+        .and_then(|_| first_negative_month(&months));
     Forecast {
         daily_budget: daily_budget(cumulative, unbudgeted_total, days_left),
         months,
@@ -1211,7 +1214,7 @@ mod tests {
             budgets: &[],
             rows: &rows,
             history: &[],
-            starting_balance: None,
+            starting_balance: Some(Decimal::ZERO),
         });
         assert_eq!(forecast.months[0].cumulative, dec!(-100));
         assert_eq!(forecast.first_negative_month, None);
@@ -1354,7 +1357,7 @@ mod tests {
         let without = compute_forecast(&input(None));
         assert_eq!(without.starting_balance, None);
         assert_eq!(without.end_balance, dec!(-2000));
-        assert_eq!(without.first_negative_month, Some(YearMonth::new(2099, 1)));
+        assert_eq!(without.first_negative_month, None);
 
         let with = compute_forecast(&input(Some(dec!(1500))));
         assert_eq!(with.starting_balance, Some(dec!(1500)));
