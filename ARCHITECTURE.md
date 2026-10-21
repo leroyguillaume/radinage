@@ -41,9 +41,11 @@ handler → service → repository → database:
   breakdown behind `GET /forecast/{year}/{month}`. All are pure functions over
   domain values, with no I/O.
 - [src/repositories/](radinage-api/src/repositories/) define one trait per
-  aggregate (`UserRepository`, `OperationRepository`, `BudgetRepository`), each
+  aggregate (`UserRepository`, `OperationRepository`, `BudgetRepository`,
+  `ImportProfileRepository`), each
   with a `Pg*` implementation and a mockall-generated mock for handler tests.
-- [src/domain/](radinage-api/src/domain/) holds users, operations and budgets,
+- [src/domain/](radinage-api/src/domain/) holds users, operations, budgets and
+  import profiles,
   including the `BudgetLink` and `BudgetKind` enums that carry most of the
   domain's shape.
 - [src/auth/](radinage-api/src/auth/) hashes passwords with Argon2 and issues
@@ -100,6 +102,7 @@ sequenceDiagram
     participant I as services/importer.rs
     participant R as OperationRepository
     participant M as services/matcher.rs
+    participant P as ImportProfileRepository
     SPA->>H: POST /operations/import (multipart: file + column mapping)
     H->>I: parse_csv / parse_xlsx (by file extension)
     I-->>H: parsed rows + per-row errors
@@ -110,6 +113,9 @@ sequenceDiagram
         H->>R: insert
         H->>M: match_operation(op, all user budgets)
         H->>R: set_auto_link (when a budget matches)
+    end
+    opt profileId sent
+        H->>P: mark_used(profile, user)
     end
     H-->>SPA: imported, skipped, duplicateRows, errors
 ```
@@ -123,6 +129,15 @@ if set, otherwise its date) and whose rule matches the label by prefix, suffix
 or substring, optionally also requiring the amount to equal the period's
 amount. Applying a budget's rules later (`POST /budgets/{id}/apply`) runs the
 same matcher over all of the user's operations.
+
+The column mapping travels with every import request, even when the web app
+took it from an import profile: the profile only fills the form and, through
+`profileId`, records its last use so the most recent one is offered first.
+The import itself stays self-contained, and a failure to record that use is
+logged without failing an import whose operations are already stored. The web
+app picks a profile's columns from `POST /operations/import/preview`, which
+reads a sample file with the same CSV and XLSX readers as the import, so the
+preview shows the cells exactly as the import will see them.
 
 ## State and persistence
 

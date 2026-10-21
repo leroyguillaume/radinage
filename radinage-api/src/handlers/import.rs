@@ -4,31 +4,39 @@ use crate::{
     domain::operation::{BudgetLink, Operation},
     error::{AppError, AppResult},
     handlers::operations::auto_match_operation,
-    repositories::{BudgetRepository, OperationRepository},
-    services::importer::{ImportParams, ParsedRow, RowError, parse_csv, parse_xlsx},
+    repositories::{BudgetRepository, ImportProfileRepository, OperationRepository},
+    services::importer::{
+        ImportParams, ParsedRow, RowError, is_spreadsheet, parse_csv, parse_xlsx, preview_rows,
+    },
 };
 use aide::OperationInput;
 use aide::openapi;
-use axum::extract::{FromRequest, Multipart, Request};
+use axum::extract::{FromRequest, Multipart, Request, multipart::Field};
 use axum::{Json, extract::State, http::StatusCode};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use std::marker::PhantomData;
 use uuid::Uuid;
 
-/// Wrapper around `Multipart` that implements `OperationInput` for aide schema generation.
-pub struct MultipartBody(pub Multipart);
+/// Number of leading rows a preview returns.
+pub const PREVIEW_ROWS: usize = 10;
 
-impl<S: Send + Sync> FromRequest<S> for MultipartBody {
+/// Wrapper around `Multipart` that documents its fields as `T` in the OpenAPI schema.
+pub struct MultipartBody<T = ImportMultipartSchema>(pub Multipart, PhantomData<T>);
+
+impl<S: Send + Sync, T> FromRequest<S> for MultipartBody<T> {
     type Rejection = <Multipart as FromRequest<S>>::Rejection;
 
     async fn from_request(req: Request, state: &S) -> Result<Self, Self::Rejection> {
-        Multipart::from_request(req, state).await.map(MultipartBody)
+        Multipart::from_request(req, state)
+            .await
+            .map(|multipart| MultipartBody(multipart, PhantomData))
     }
 }
 
-impl OperationInput for MultipartBody {
+impl<T: JsonSchema> OperationInput for MultipartBody<T> {
     fn operation_input(ctx: &mut aide::generate::GenContext, operation: &mut openapi::Operation) {
-        let schema = ctx.schema.subschema_for::<ImportMultipartSchema>();
+        let schema = ctx.schema.subschema_for::<T>();
         operation.request_body = Some(aide::openapi::ReferenceOr::Item(openapi::RequestBody {
             content: indexmap::indexmap! {
                 "multipart/form-data".to_string() => openapi::MediaType {
@@ -44,7 +52,7 @@ impl OperationInput for MultipartBody {
 
 #[derive(Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-struct ImportMultipartSchema {
+pub struct ImportMultipartSchema {
     /// The file to import (CSV or XLSX)
     #[allow(dead_code)]
     file: String,
@@ -63,6 +71,26 @@ struct ImportMultipartSchema {
     /// Number of leading rows to skip before the first data row, including the header (default 0)
     #[allow(dead_code)]
     skip_lines: Option<usize>,
+    /// Import profile the parameters come from, recorded as its last use (optional)
+    #[allow(dead_code)]
+    profile_id: Option<Uuid>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct PreviewMultipartSchema {
+    /// The file to preview (CSV or XLSX)
+    #[allow(dead_code)]
+    file: String,
+}
+
+/// The first rows of a file, read the way an import reads them.
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportPreviewResponse {
+    /// Up to 10 leading rows, header and skippable lines included, every cell as text.
+    /// Rows may have different lengths.
+    pub rows: Vec<Vec<String>>,
 }
 
 /// Result of a bulk import operation.
@@ -79,10 +107,15 @@ pub struct ImportResponse {
     pub errors: Vec<RowError>,
 }
 
-pub async fn import_operations<U, O: OperationRepository, B: BudgetRepository>(
-    State(state): State<AppState<U, O, B>>,
+pub async fn import_operations<
+    U,
+    O: OperationRepository,
+    B: BudgetRepository,
+    P: ImportProfileRepository,
+>(
+    State(state): State<AppState<U, O, B, P>>,
     auth_user: AuthUser,
-    MultipartBody(mut multipart): MultipartBody,
+    MultipartBody(mut multipart, _): MultipartBody,
 ) -> AppResult<(StatusCode, Json<ImportResponse>)> {
     let user_id = auth_user.id;
     let mut file_bytes: Option<Vec<u8>> = None;
@@ -92,6 +125,7 @@ pub async fn import_operations<U, O: OperationRepository, B: BudgetRepository>(
     let mut date_col: Option<usize> = None;
     let mut date_format: Option<String> = None;
     let mut skip_lines: Option<usize> = None;
+    let mut profile_id: Option<Uuid> = None;
 
     while let Some(field) = multipart
         .next_field()
@@ -101,14 +135,9 @@ pub async fn import_operations<U, O: OperationRepository, B: BudgetRepository>(
         let name = field.name().unwrap_or("").to_string();
         match name.as_str() {
             "file" => {
-                file_name = field.file_name().map(|s| s.to_string());
-                file_bytes = Some(
-                    field
-                        .bytes()
-                        .await
-                        .map_err(|e| AppError::BadRequest(format!("file read error: {e}")))?
-                        .to_vec(),
-                );
+                let (name, bytes) = read_file_field(field).await?;
+                file_name = name;
+                file_bytes = Some(bytes);
             }
             "labelCol" => {
                 label_col = Some(parse_usize_field(
@@ -152,6 +181,15 @@ pub async fn import_operations<U, O: OperationRepository, B: BudgetRepository>(
                     "skipLines",
                 )?);
             }
+            "profileId" => {
+                let text = field
+                    .text()
+                    .await
+                    .map_err(|e| AppError::BadRequest(format!("profileId read error: {e}")))?;
+                profile_id = Some(text.trim().parse().map_err(|_| {
+                    AppError::BadRequest("invalid profileId: expected a UUID".to_string())
+                })?);
+            }
             _ => {}
         }
     }
@@ -170,8 +208,7 @@ pub async fn import_operations<U, O: OperationRepository, B: BudgetRepository>(
     };
     let name = file_name.unwrap_or_default();
 
-    let is_xlsx = name.ends_with(".xlsx") || name.ends_with(".xls");
-    let result = if is_xlsx {
+    let result = if is_spreadsheet(&name) {
         parse_xlsx(&bytes, &params)
     } else {
         parse_csv(&bytes, &params)
@@ -256,6 +293,16 @@ pub async fn import_operations<U, O: OperationRepository, B: BudgetRepository>(
         }
     }
 
+    if let Some(profile_id) = profile_id
+        && let Err(e) = state
+            .import_profile_repo
+            .mark_used(profile_id, user_id)
+            .await
+    {
+        // The operations are in: failing the request now would invite a duplicate retry.
+        tracing::warn!(%profile_id, error = %e, "could not record import profile use");
+    }
+
     Ok((
         StatusCode::OK,
         Json(ImportResponse {
@@ -265,6 +312,35 @@ pub async fn import_operations<U, O: OperationRepository, B: BudgetRepository>(
             errors,
         }),
     ))
+}
+
+pub async fn preview_import(
+    _auth_user: AuthUser,
+    MultipartBody(mut multipart, _): MultipartBody<PreviewMultipartSchema>,
+) -> AppResult<Json<ImportPreviewResponse>> {
+    while let Some(field) = multipart
+        .next_field()
+        .await
+        .map_err(|e| AppError::BadRequest(format!("multipart error: {e}")))?
+    {
+        if field.name() == Some("file") {
+            let (name, bytes) = read_file_field(field).await?;
+            let spreadsheet = is_spreadsheet(&name.unwrap_or_default());
+            let rows =
+                preview_rows(&bytes, spreadsheet, PREVIEW_ROWS).map_err(AppError::BadRequest)?;
+            return Ok(Json(ImportPreviewResponse { rows }));
+        }
+    }
+    Err(AppError::BadRequest("missing file field".to_string()))
+}
+
+async fn read_file_field(field: Field<'_>) -> AppResult<(Option<String>, Vec<u8>)> {
+    let name = field.file_name().map(ToString::to_string);
+    let bytes = field
+        .bytes()
+        .await
+        .map_err(|e| AppError::BadRequest(format!("file read error: {e}")))?;
+    Ok((name, bytes.to_vec()))
 }
 
 fn parse_usize_field(value: &str, field_name: &str) -> Result<usize, AppError> {
@@ -283,8 +359,14 @@ mod tests {
             budget::{Budget, BudgetKind, BudgetType},
             user::UserRole,
         },
-        repositories::{MockBudgetRepository, MockOperationRepository, MockUserRepository},
-        test_util::{auth_header, build_test_router, make_test_state, response_json},
+        repositories::{
+            MockBudgetRepository, MockImportProfileRepository, MockOperationRepository,
+            MockUserRepository,
+        },
+        test_util::{
+            auth_header, build_test_router, make_test_state, make_test_state_with_profiles,
+            response_json,
+        },
     };
     use axum::body::Body;
     use chrono::Utc;
@@ -366,10 +448,23 @@ mod tests {
         params: &ImportParams,
         auth: &str,
     ) -> Request<Body> {
-        let body_bytes = multipart_body(boundary, file_name, file_bytes, params);
+        multipart_request(
+            "/operations/import",
+            boundary,
+            multipart_body(boundary, file_name, file_bytes, params),
+            auth,
+        )
+    }
+
+    fn multipart_request(
+        uri: &str,
+        boundary: &str,
+        body_bytes: Vec<u8>,
+        auth: &str,
+    ) -> Request<Body> {
         Request::builder()
             .method("POST")
-            .uri("/operations/import")
+            .uri(uri)
             .header(
                 "content-type",
                 format!("multipart/form-data; boundary={boundary}"),
@@ -830,5 +925,185 @@ mod tests {
         assert_eq!(json.imported, 0);
         assert_eq!(json.skipped, 2);
         assert_eq!(json.duplicate_rows, vec![2, 3]);
+    }
+
+    /// Insert an extra text field before the closing boundary of a multipart body.
+    fn with_text_field(mut body: Vec<u8>, boundary: &str, name: &str, value: &str) -> Vec<u8> {
+        let closing = format!("--{boundary}--\r\n").into_bytes();
+        body.truncate(body.len() - closing.len());
+        add_text_field(&mut body, boundary.as_bytes(), name, value);
+        body.extend_from_slice(&closing);
+        body
+    }
+
+    fn file_only_body(boundary: &str, file_name: &str, file_bytes: &[u8]) -> Vec<u8> {
+        let mut body = format!(
+            "--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; \
+             filename=\"{file_name}\"\r\nContent-Type: application/octet-stream\r\n\r\n"
+        )
+        .into_bytes();
+        body.extend_from_slice(file_bytes);
+        body.extend_from_slice(format!("\r\n--{boundary}--\r\n").as_bytes());
+        body
+    }
+
+    fn empty_import_repos() -> (MockOperationRepository, MockBudgetRepository) {
+        let mut op_repo = MockOperationRepository::new();
+        op_repo
+            .expect_exists_by_fields()
+            .returning(|_, _, _, _| Box::pin(async { Ok(true) }));
+        (op_repo, MockBudgetRepository::new())
+    }
+
+    #[tokio::test]
+    async fn import_with_profile_id_records_its_use() {
+        let user_id = Uuid::new_v4();
+        let profile_id = Uuid::new_v4();
+        let (op_repo, budget_repo) = empty_import_repos();
+        let mut profile_repo = MockImportProfileRepository::new();
+        profile_repo
+            .expect_mark_used()
+            .withf(move |id, uid| *id == profile_id && *uid == user_id)
+            .times(1)
+            .returning(|_, _| Box::pin(async { Ok(()) }));
+        let app = build_test_router(make_test_state_with_profiles(
+            MockUserRepository::new(),
+            op_repo,
+            budget_repo,
+            profile_repo,
+        ));
+
+        let csv = b"label,amount,date\nGroceries,-50.00,15/01/2024\n";
+        let body = with_text_field(
+            multipart_body("b", "ops.csv", csv, &default_import_params()),
+            "b",
+            "profileId",
+            &profile_id.to_string(),
+        );
+        let auth = auth_header(user_id, UserRole::User);
+        let resp = app
+            .oneshot(multipart_request("/operations/import", "b", body, &auth))
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn import_still_succeeds_when_recording_profile_use_fails() {
+        let (op_repo, budget_repo) = empty_import_repos();
+        let mut profile_repo = MockImportProfileRepository::new();
+        profile_repo
+            .expect_mark_used()
+            .returning(|_, _| Box::pin(async { Err(AppError::Internal("down".to_string())) }));
+        let app = build_test_router(make_test_state_with_profiles(
+            MockUserRepository::new(),
+            op_repo,
+            budget_repo,
+            profile_repo,
+        ));
+
+        let csv = b"label,amount,date\nGroceries,-50.00,15/01/2024\n";
+        let body = with_text_field(
+            multipart_body("b", "ops.csv", csv, &default_import_params()),
+            "b",
+            "profileId",
+            &Uuid::new_v4().to_string(),
+        );
+        let auth = auth_header(Uuid::new_v4(), UserRole::User);
+        let resp = app
+            .oneshot(multipart_request("/operations/import", "b", body, &auth))
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        let json: ImportResponse = response_json(resp).await;
+        assert_eq!(json.skipped, 1);
+    }
+
+    #[tokio::test]
+    async fn import_with_invalid_profile_id_is_a_bad_request() {
+        let app = build_test_router(make_test_state(
+            MockUserRepository::new(),
+            MockOperationRepository::new(),
+            MockBudgetRepository::new(),
+        ));
+        let body = with_text_field(
+            multipart_body("b", "ops.csv", b"", &default_import_params()),
+            "b",
+            "profileId",
+            "not-a-uuid",
+        );
+        let auth = auth_header(Uuid::new_v4(), UserRole::User);
+        let resp = app
+            .oneshot(multipart_request("/operations/import", "b", body, &auth))
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    }
+
+    fn preview_app() -> axum::Router {
+        build_test_router(make_test_state(
+            MockUserRepository::new(),
+            MockOperationRepository::new(),
+            MockBudgetRepository::new(),
+        ))
+    }
+
+    #[tokio::test]
+    async fn preview_returns_leading_rows_as_text() {
+        let csv = (0..15).fold(String::from("Date,Label,Amount\n"), |acc, i| {
+            acc + &format!("0{}/01/2024,Op {i},-1\n", i % 9 + 1)
+        });
+        let auth = auth_header(Uuid::new_v4(), UserRole::User);
+        let resp = preview_app()
+            .oneshot(multipart_request(
+                "/operations/import/preview",
+                "b",
+                file_only_body("b", "ops.csv", csv.as_bytes()),
+                &auth,
+            ))
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        let json: ImportPreviewResponse = response_json(resp).await;
+        assert_eq!(json.rows.len(), PREVIEW_ROWS);
+        assert_eq!(json.rows[0], ["Date", "Label", "Amount"]);
+        assert_eq!(json.rows[1], ["01/01/2024", "Op 0", "-1"]);
+    }
+
+    #[tokio::test]
+    async fn preview_unreadable_spreadsheet_is_a_bad_request() {
+        let auth = auth_header(Uuid::new_v4(), UserRole::User);
+        let resp = preview_app()
+            .oneshot(multipart_request(
+                "/operations/import/preview",
+                "b",
+                file_only_body("b", "ops.xlsx", b"not a workbook"),
+                &auth,
+            ))
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn preview_requires_auth() {
+        let resp = preview_app()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/operations/import/preview")
+                    .header("content-type", "multipart/form-data; boundary=b")
+                    .body(Body::from(file_only_body("b", "ops.csv", b"a,b\n")))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
     }
 }

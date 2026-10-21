@@ -1,4 +1,5 @@
 pub mod budget;
+pub mod import_profile;
 pub mod operation;
 pub mod user;
 
@@ -6,6 +7,7 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 
 pub use budget::{BudgetRepository, BudgetSortField, ListBudgetsParams, PgBudgetRepository};
+pub use import_profile::{ImportProfileRepository, PgImportProfileRepository};
 pub use operation::{
     ListOperationsParams, OperationRepository, OperationSortField, PgOperationRepository,
     SummaryCategory, SummaryRow,
@@ -35,6 +37,8 @@ impl SortOrder {
 
 #[cfg(test)]
 pub use budget::MockBudgetRepository;
+#[cfg(test)]
+pub use import_profile::MockImportProfileRepository;
 #[cfg(test)]
 pub use operation::MockOperationRepository;
 #[cfg(test)]

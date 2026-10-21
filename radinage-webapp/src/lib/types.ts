@@ -210,5 +210,36 @@ export interface ImportDataResponse {
 	skippedBudgets: number;
 	importedOperations: number;
 	skippedOperations: number;
+	importedImportProfiles: number;
+	skippedImportProfiles: number;
 	importedBalance: boolean;
+}
+
+/** A named bank statement layout; columns are 0-based indexes. */
+export interface ImportProfileResponse {
+	id: string;
+	name: string;
+	labelCol: number;
+	amountCol: number;
+	dateCol: number;
+	dateFormat: string;
+	skipLines: number;
+	lastUsedAt: string | null;
+	createdAt: string;
+}
+
+export type ImportProfileRequest = Omit<
+	ImportProfileResponse,
+	"id" | "lastUsedAt" | "createdAt"
+>;
+
+export interface ImportPreviewResponse {
+	/** Leading rows of the file, header included; rows may differ in length. */
+	rows: string[][];
+}
+
+export interface ImportResult {
+	imported: number;
+	skipped: number;
+	errors: { row: number; reason: string }[];
 }

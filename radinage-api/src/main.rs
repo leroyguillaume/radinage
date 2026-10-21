@@ -18,17 +18,21 @@ use aide::{
 use axum::{Extension, Json, Router, response::Html, routing::get};
 use clap::Parser;
 use config::Config;
-use repositories::{PgBudgetRepository, PgOperationRepository, PgUserRepository, UserRepository};
+use repositories::{
+    PgBudgetRepository, PgImportProfileRepository, PgOperationRepository, PgUserRepository,
+    UserRepository,
+};
 use std::sync::Arc;
 use tower_http::cors::{AllowOrigin, Any, CorsLayer};
 use tower_http::trace::TraceLayer;
 use tracing_subscriber::{EnvFilter, fmt, prelude::*};
 
 /// Inner application state holding repositories and configuration.
-pub struct AppStateInner<U, O, B> {
+pub struct AppStateInner<U, O, B, P> {
     pub user_repo: U,
     pub operation_repo: O,
     pub budget_repo: B,
+    pub import_profile_repo: P,
     pub config: Config,
 }
 
@@ -36,11 +40,11 @@ pub struct AppStateInner<U, O, B> {
 ///
 /// Wrapped in [`Arc`] so that it is cheaply cloneable (required by Axum)
 /// without requiring `Clone` on the repository implementations.
-pub struct AppState<U, O, B> {
-    inner: Arc<AppStateInner<U, O, B>>,
+pub struct AppState<U, O, B, P> {
+    inner: Arc<AppStateInner<U, O, B, P>>,
 }
 
-impl<U, O, B> Clone for AppState<U, O, B> {
+impl<U, O, B, P> Clone for AppState<U, O, B, P> {
     fn clone(&self) -> Self {
         Self {
             inner: Arc::clone(&self.inner),
@@ -48,34 +52,46 @@ impl<U, O, B> Clone for AppState<U, O, B> {
     }
 }
 
-impl<U, O, B> std::ops::Deref for AppState<U, O, B> {
-    type Target = AppStateInner<U, O, B>;
+impl<U, O, B, P> std::ops::Deref for AppState<U, O, B, P> {
+    type Target = AppStateInner<U, O, B, P>;
     fn deref(&self) -> &Self::Target {
         &self.inner
     }
 }
 
-impl<U, O, B> AppState<U, O, B> {
-    pub fn new(user_repo: U, operation_repo: O, budget_repo: B, config: Config) -> Self {
+impl<U, O, B, P> AppState<U, O, B, P> {
+    pub fn new(
+        user_repo: U,
+        operation_repo: O,
+        budget_repo: B,
+        import_profile_repo: P,
+        config: Config,
+    ) -> Self {
         Self {
             inner: Arc::new(AppStateInner {
                 user_repo,
                 operation_repo,
                 budget_repo,
+                import_profile_repo,
                 config,
             }),
         }
     }
 }
 
-impl<U, O, B> axum::extract::FromRef<AppState<U, O, B>> for Config {
-    fn from_ref(state: &AppState<U, O, B>) -> Config {
+impl<U, O, B, P> axum::extract::FromRef<AppState<U, O, B, P>> for Config {
+    fn from_ref(state: &AppState<U, O, B, P>) -> Config {
         state.config.clone()
     }
 }
 
 /// Concrete application state used in production.
-pub type ProdAppState = AppState<PgUserRepository, PgOperationRepository, PgBudgetRepository>;
+pub type ProdAppState = AppState<
+    PgUserRepository,
+    PgOperationRepository,
+    PgBudgetRepository,
+    PgImportProfileRepository,
+>;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -108,7 +124,8 @@ async fn main() -> anyhow::Result<()> {
     let state = AppState::new(
         user_repo,
         PgOperationRepository::new(pool.clone()),
-        PgBudgetRepository::new(pool),
+        PgBudgetRepository::new(pool.clone()),
+        PgImportProfileRepository::new(pool),
         config.clone(),
     );
 
@@ -137,11 +154,12 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-pub(crate) fn build_router<U, O, B>(state: AppState<U, O, B>) -> Router
+pub(crate) fn build_router<U, O, B, P>(state: AppState<U, O, B, P>) -> Router
 where
     U: repositories::UserRepository + 'static,
     O: repositories::OperationRepository + 'static,
     B: repositories::BudgetRepository + 'static,
+    P: repositories::ImportProfileRepository + 'static,
 {
     aide::generate::on_error(|error| {
         tracing::warn!("aide schema generation error: {error}");
@@ -183,6 +201,11 @@ where
             Tag {
                 name: "Budgets".to_string(),
                 description: Some("Manage budget categories used to classify spending. Each budget has a type (expense, income, or savings), a scheduling kind (recurring with periods, or occasional for a single month), and optional auto-matching rules to link operations automatically.".to_string()),
+                ..Tag::default()
+            },
+            Tag {
+                name: "Import profiles".to_string(),
+                description: Some("Manage the named file layouts a user imports bank statements with: which columns hold the label, the amount and the date, the date format, and how many leading rows to skip. Profiles are listed most recently used first.".to_string()),
                 ..Tag::default()
             },
             Tag {
@@ -311,8 +334,17 @@ where
             post_with(handlers::import::import_operations, |op| {
                 op.tag("Operations")
                     .summary("Import operations from a file (CSV/XLSX)")
-                    .description("Bulk-import bank operations from a CSV or XLSX file uploaded as multipart form data. Duplicate operations (same date, amount, and label) are automatically skipped. Returns the number of imported and skipped operations.")
+                    .description("Bulk-import bank operations from a CSV or XLSX file uploaded as multipart form data. Duplicate operations (same date, amount, and label) are automatically skipped. Returns the number of imported and skipped operations. When `profileId` names one of the user's import profiles, the import is recorded as its last use; the columns, date format and skipped lines still come from the request.")
                     .id("importOperations")
+            }),
+        )
+        .api_route(
+            "/operations/import/preview",
+            post_with(handlers::import::preview_import, |op| {
+                op.tag("Operations")
+                    .summary("Preview the first rows of a file to import")
+                    .description("Read the first 10 rows of a CSV or XLSX file uploaded as multipart form data, header and skippable lines included, every cell as text, the way an import reads the file. Nothing is stored. Used to pick the columns of an import profile. Returns 400 when the file cannot be read.")
+                    .id("previewImport")
             }),
         )
         .api_route(
@@ -425,6 +457,38 @@ where
                     .summary("Apply budget rules to operations")
                     .description("Run the matcher rules of a budget against all unlinked operations of the authenticated user. Operations whose label matches the budget's rules are automatically linked to it. Split operations are never touched. Returns the number of newly linked operations.")
                     .id("applyBudget")
+            }),
+        )
+        // Import profiles
+        .api_route(
+            "/import-profiles",
+            get_with(handlers::import_profiles::list_import_profiles, |op| {
+                op.tag("Import profiles")
+                    .summary("List import profiles")
+                    .description("Retrieve all import profiles of the authenticated user, most recently used first, then never-used ones by name. A user has at most MAX_IMPORT_PROFILES_PER_USER profiles.")
+                    .id("listImportProfiles")
+            })
+            .post_with(handlers::import_profiles::create_import_profile, |op| {
+                op.tag("Import profiles")
+                    .summary("Create an import profile")
+                    .description("Create a named import profile. The name is trimmed and must be unique for the user (409 otherwise); the label, amount and date columns must be distinct and the date format a valid strftime pattern (400 otherwise). Returns 409 once the user has MAX_IMPORT_PROFILES_PER_USER profiles.")
+                    .id("createImportProfile")
+                    .response::<201, Json<handlers::import_profiles::ImportProfileResponse>>()
+            }),
+        )
+        .api_route(
+            "/import-profiles/{id}",
+            put_with(handlers::import_profiles::update_import_profile, |op| {
+                op.tag("Import profiles")
+                    .summary("Update an import profile")
+                    .description("Replace every field of an import profile, with the same rules as creation. Returns 404 if the profile does not exist or belongs to another user.")
+                    .id("updateImportProfile")
+            })
+            .delete_with(handlers::import_profiles::delete_import_profile, |op| {
+                op.tag("Import profiles")
+                    .summary("Delete an import profile")
+                    .description("Permanently delete an import profile. Operations imported with it are kept. Returns 404 if the profile does not exist or belongs to another user.")
+                    .id("deleteImportProfile")
             }),
         )
         // Monthly operations
@@ -542,7 +606,10 @@ pub(crate) mod test_util {
         config::Config,
         domain::user::UserRole,
         handlers,
-        repositories::{MockBudgetRepository, MockOperationRepository, MockUserRepository},
+        repositories::{
+            MockBudgetRepository, MockImportProfileRepository, MockOperationRepository,
+            MockUserRepository,
+        },
     };
     use axum::{Router, routing};
     use http::Request;
@@ -550,8 +617,12 @@ pub(crate) mod test_util {
     use uuid::Uuid;
 
     /// Concrete test state using mock repositories.
-    pub type TestState =
-        AppState<MockUserRepository, MockOperationRepository, MockBudgetRepository>;
+    pub type TestState = AppState<
+        MockUserRepository,
+        MockOperationRepository,
+        MockBudgetRepository,
+        MockImportProfileRepository,
+    >;
 
     pub fn make_test_config() -> Config {
         Config {
@@ -565,6 +636,7 @@ pub(crate) mod test_util {
             admin_password: "admin123".to_string(),
             cors_origins: Vec::new(),
             max_budgets_per_user: 100,
+            max_import_profiles_per_user: 20,
             root_path: String::new(),
             webapp_url: "http://localhost:5173".to_string(),
         }
@@ -576,7 +648,31 @@ pub(crate) mod test_util {
         op_repo: MockOperationRepository,
         budget_repo: MockBudgetRepository,
     ) -> TestState {
-        AppState::new(user_repo, op_repo, budget_repo, make_test_config())
+        make_test_state_with_profiles(user_repo, op_repo, budget_repo, no_import_profiles())
+    }
+
+    /// A profile repository holding none, for tests that only read profiles in passing.
+    pub fn no_import_profiles() -> MockImportProfileRepository {
+        let mut repo = MockImportProfileRepository::new();
+        repo.expect_list()
+            .returning(|_| Box::pin(async { Ok(Vec::new()) }));
+        repo
+    }
+
+    /// Build a test state from mock repositories, import profiles included.
+    pub fn make_test_state_with_profiles(
+        user_repo: MockUserRepository,
+        op_repo: MockOperationRepository,
+        budget_repo: MockBudgetRepository,
+        profile_repo: MockImportProfileRepository,
+    ) -> TestState {
+        AppState::new(
+            user_repo,
+            op_repo,
+            budget_repo,
+            profile_repo,
+            make_test_config(),
+        )
     }
 
     /// Build an Axum router wired to mock repositories.
@@ -615,6 +711,20 @@ pub(crate) mod test_util {
             .route(
                 "/operations/import",
                 routing::post(handlers::import::import_operations),
+            )
+            .route(
+                "/operations/import/preview",
+                routing::post(handlers::import::preview_import),
+            )
+            .route(
+                "/import-profiles",
+                routing::get(handlers::import_profiles::list_import_profiles)
+                    .post(handlers::import_profiles::create_import_profile),
+            )
+            .route(
+                "/import-profiles/{id}",
+                routing::put(handlers::import_profiles::update_import_profile)
+                    .delete(handlers::import_profiles::delete_import_profile),
             )
             .route(
                 "/operations/{id}",

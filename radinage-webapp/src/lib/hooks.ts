@@ -9,6 +9,10 @@ import type {
 	ForecastMonthBreakdown,
 	ForecastResponse,
 	ImportDataResponse,
+	ImportPreviewResponse,
+	ImportProfileRequest,
+	ImportProfileResponse,
+	ImportResult,
 	MonthlyOperationsResponse,
 	OperationResponse,
 	OperationSplitRequest,
@@ -348,6 +352,87 @@ export function useDeleteBudget() {
 			apiFetch<void>(`/budgets/${id}`, { method: "DELETE" }),
 		onSuccess: () => {
 			queryClient.invalidateQueries({ queryKey: ["budgets"] });
+		},
+	});
+}
+
+const importProfilesKey = ["import-profiles"];
+
+/** Import profiles, most recently used first. */
+export function useImportProfiles() {
+	return useQuery({
+		queryKey: importProfilesKey,
+		queryFn: () => apiFetch<ImportProfileResponse[]>("/import-profiles"),
+	});
+}
+
+export function useSaveImportProfile() {
+	const queryClient = useQueryClient();
+	return useMutation({
+		mutationFn: ({ id, body }: { id?: string; body: ImportProfileRequest }) =>
+			apiFetch<ImportProfileResponse>(
+				id === undefined ? "/import-profiles" : `/import-profiles/${id}`,
+				{
+					method: id === undefined ? "POST" : "PUT",
+					body: JSON.stringify(body),
+				},
+			),
+		onSuccess: () => {
+			queryClient.invalidateQueries({ queryKey: importProfilesKey });
+		},
+	});
+}
+
+export function useDeleteImportProfile() {
+	const queryClient = useQueryClient();
+	return useMutation({
+		mutationFn: (id: string) =>
+			apiFetch<void>(`/import-profiles/${id}`, { method: "DELETE" }),
+		onSuccess: () => {
+			queryClient.invalidateQueries({ queryKey: importProfilesKey });
+		},
+	});
+}
+
+export function useImportPreview() {
+	return useMutation({
+		mutationFn: (file: File) => {
+			const body = new FormData();
+			body.append("file", file);
+			return apiFetch<ImportPreviewResponse>("/operations/import/preview", {
+				method: "POST",
+				body,
+			});
+		},
+	});
+}
+
+export function useImportOperations() {
+	const queryClient = useQueryClient();
+	return useMutation({
+		mutationFn: ({
+			file,
+			profile,
+		}: {
+			file: File;
+			profile: ImportProfileResponse;
+		}) => {
+			const body = new FormData();
+			body.append("file", file);
+			body.append("labelCol", String(profile.labelCol));
+			body.append("amountCol", String(profile.amountCol));
+			body.append("dateCol", String(profile.dateCol));
+			body.append("dateFormat", profile.dateFormat);
+			body.append("skipLines", String(profile.skipLines));
+			body.append("profileId", profile.id);
+			return apiFetch<ImportResult>("/operations/import", {
+				method: "POST",
+				body,
+			});
+		},
+		onSuccess: () => {
+			queryClient.invalidateQueries({ queryKey: ["monthly-operations"] });
+			queryClient.invalidateQueries({ queryKey: importProfilesKey });
 		},
 	});
 }

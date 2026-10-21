@@ -71,49 +71,25 @@ pub fn parse_csv(data: &[u8], params: &ImportParams) -> ImportResult {
     ImportResult { rows, errors }
 }
 
+/// Whether a file is read as a spreadsheet rather than as CSV, judging by its name.
+pub fn is_spreadsheet(file_name: &str) -> bool {
+    file_name.ends_with(".xlsx") || file_name.ends_with(".xls")
+}
+
 /// Parse an XLSX byte slice into rows.
 pub fn parse_xlsx(data: &[u8], params: &ImportParams) -> ImportResult {
-    use calamine::{Reader, open_workbook_auto_from_rs};
-    use std::io::Cursor;
+    let range = match first_sheet(data) {
+        Ok(r) => r,
+        Err(reason) => {
+            return ImportResult {
+                rows: Vec::new(),
+                errors: vec![RowError { row: 0, reason }],
+            };
+        }
+    };
 
     let mut rows = Vec::new();
     let mut errors = Vec::new();
-
-    let cursor = Cursor::new(data);
-    let mut workbook = match open_workbook_auto_from_rs(cursor) {
-        Ok(wb) => wb,
-        Err(e) => {
-            errors.push(RowError {
-                row: 0,
-                reason: format!("Failed to open workbook: {e}"),
-            });
-            return ImportResult { rows, errors };
-        }
-    };
-
-    let sheet_names: Vec<String> = workbook.sheet_names().to_vec();
-    let sheet_name = match sheet_names.first() {
-        Some(name) => name.clone(),
-        None => {
-            errors.push(RowError {
-                row: 0,
-                reason: "No sheets found".to_string(),
-            });
-            return ImportResult { rows, errors };
-        }
-    };
-
-    let range = match workbook.worksheet_range(&sheet_name) {
-        Ok(r) => r,
-        Err(e) => {
-            errors.push(RowError {
-                row: 0,
-                reason: format!("Failed to read sheet: {e}"),
-            });
-            return ImportResult { rows, errors };
-        }
-    };
-
     // Skip `skip_lines` leading rows (header included in count)
     let skip_count = params.skip_lines;
     for (row_idx, row) in range.rows().enumerate().skip(skip_count) {
@@ -125,6 +101,60 @@ pub fn parse_xlsx(data: &[u8], params: &ImportParams) -> ImportResult {
     }
 
     ImportResult { rows, errors }
+}
+
+/// The first `limit` rows of a file as text, cell by cell, with nothing skipped: what an import
+/// reads before the profile picks its columns.
+pub fn preview_rows(
+    data: &[u8],
+    spreadsheet: bool,
+    limit: usize,
+) -> Result<Vec<Vec<String>>, String> {
+    if spreadsheet {
+        let range = first_sheet(data)?;
+        return Ok(range
+            .rows()
+            .take(limit)
+            .map(|row| row.iter().map(xlsx_cell_text).collect())
+            .collect());
+    }
+    csv::ReaderBuilder::new()
+        .has_headers(false)
+        .flexible(true)
+        .from_reader(data)
+        .records()
+        .take(limit)
+        .map(|record| {
+            record
+                .map(|r| r.iter().map(|cell| cell.trim().to_string()).collect())
+                .map_err(|e| format!("CSV parse error: {e}"))
+        })
+        .collect()
+}
+
+fn first_sheet(data: &[u8]) -> Result<calamine::Range<calamine::Data>, String> {
+    use calamine::{Reader, open_workbook_auto_from_rs};
+    use std::io::Cursor;
+
+    let mut workbook = open_workbook_auto_from_rs(Cursor::new(data))
+        .map_err(|e| format!("Failed to open workbook: {e}"))?;
+    let sheet_name = workbook
+        .sheet_names()
+        .first()
+        .cloned()
+        .ok_or_else(|| "No sheets found".to_string())?;
+    workbook
+        .worksheet_range(&sheet_name)
+        .map_err(|e| format!("Failed to read sheet: {e}"))
+}
+
+fn xlsx_cell_text(cell: &calamine::Data) -> String {
+    match cell {
+        calamine::Data::DateTime(dt) => dt
+            .as_datetime()
+            .map_or_else(|| dt.to_string(), |d| d.date().to_string()),
+        other => other.to_string(),
+    }
 }
 
 /// Skip the first `n` lines from a byte slice and return the remainder.
@@ -429,6 +459,37 @@ mod tests {
         assert_eq!(result.rows.len(), 1);
         assert_eq!(result.rows[0].label, "Salaire");
         assert_eq!(result.rows[0].amount, Decimal::new(100, 0));
+    }
+
+    #[test]
+    fn preview_csv_keeps_header_and_stops_at_limit() {
+        let data = b"Date,Label,Amount\n01/01/2024, Coffee ,-3.50\n02/01/2024,Rent,-800\n";
+        let rows = preview_rows(data, false, 2).unwrap();
+        assert_eq!(
+            rows,
+            vec![
+                vec!["Date", "Label", "Amount"],
+                vec!["01/01/2024", "Coffee", "-3.50"],
+            ]
+        );
+    }
+
+    #[test]
+    fn preview_csv_keeps_ragged_rows() {
+        let rows = preview_rows(b"Account statement\na,b,c\n", false, 10).unwrap();
+        assert_eq!(rows, vec![vec!["Account statement"], vec!["a", "b", "c"]]);
+    }
+
+    #[test]
+    fn preview_invalid_spreadsheet_is_an_error() {
+        assert!(preview_rows(b"not a workbook", true, 10).is_err());
+    }
+
+    #[test]
+    fn spreadsheet_is_detected_by_extension() {
+        assert!(is_spreadsheet("releve.xlsx"));
+        assert!(is_spreadsheet("releve.xls"));
+        assert!(!is_spreadsheet("releve.csv"));
     }
 
     #[test]

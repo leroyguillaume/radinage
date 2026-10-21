@@ -46,8 +46,8 @@ fn build_invitation_link(webapp_url: &str, token: Uuid) -> String {
     format!("{base}/activate?token={token}")
 }
 
-pub async fn create_user<U: UserRepository, O, B>(
-    State(state): State<AppState<U, O, B>>,
+pub async fn create_user<U: UserRepository, O, B, P>(
+    State(state): State<AppState<U, O, B, P>>,
     auth_user: AuthUser,
     Json(body): Json<CreateUserRequest>,
 ) -> AppResult<(StatusCode, Json<UserResponse>)> {
@@ -99,8 +99,8 @@ pub struct SearchUserEntry {
     pub username: String,
 }
 
-pub async fn search_users<U: UserRepository, O, B>(
-    State(state): State<AppState<U, O, B>>,
+pub async fn search_users<U: UserRepository, O, B, P>(
+    State(state): State<AppState<U, O, B, P>>,
     auth_user: AuthUser,
     Query(params): Query<SearchUsersParams>,
 ) -> AppResult<Json<Vec<SearchUserEntry>>> {
@@ -134,8 +134,8 @@ pub struct ResetPasswordResponse {
     pub reset_link: String,
 }
 
-pub async fn reset_password<U: UserRepository, O, B>(
-    State(state): State<AppState<U, O, B>>,
+pub async fn reset_password<U: UserRepository, O, B, P>(
+    State(state): State<AppState<U, O, B, P>>,
     auth_user: AuthUser,
     Json(body): Json<ResetPasswordRequest>,
 ) -> AppResult<Json<ResetPasswordResponse>> {
@@ -168,8 +168,8 @@ pub async fn reset_password<U: UserRepository, O, B>(
     }))
 }
 
-pub async fn delete_user<U: UserRepository, O, B>(
-    State(state): State<AppState<U, O, B>>,
+pub async fn delete_user<U: UserRepository, O, B, P>(
+    State(state): State<AppState<U, O, B, P>>,
     auth_user: AuthUser,
     Path(id): Path<Uuid>,
 ) -> AppResult<StatusCode> {
@@ -198,8 +198,8 @@ pub struct ChangePasswordRequest {
     pub new_password: String,
 }
 
-pub async fn change_password<U: UserRepository, O, B>(
-    State(state): State<AppState<U, O, B>>,
+pub async fn change_password<U: UserRepository, O, B, P>(
+    State(state): State<AppState<U, O, B, P>>,
     auth_user: AuthUser,
     Json(body): Json<ChangePasswordRequest>,
 ) -> AppResult<StatusCode> {
@@ -254,8 +254,8 @@ impl From<AccountBalance> for AccountBalanceResponse {
     }
 }
 
-pub async fn get_balance<U: UserRepository, O, B>(
-    State(state): State<AppState<U, O, B>>,
+pub async fn get_balance<U: UserRepository, O, B, P>(
+    State(state): State<AppState<U, O, B, P>>,
     auth_user: AuthUser,
 ) -> AppResult<Json<AccountBalanceResponse>> {
     let balance = state
@@ -266,8 +266,8 @@ pub async fn get_balance<U: UserRepository, O, B>(
     Ok(Json(balance.into()))
 }
 
-pub async fn update_balance<U: UserRepository, O, B>(
-    State(state): State<AppState<U, O, B>>,
+pub async fn update_balance<U: UserRepository, O, B, P>(
+    State(state): State<AppState<U, O, B, P>>,
     auth_user: AuthUser,
     Json(body): Json<UpdateAccountBalanceRequest>,
 ) -> AppResult<Json<AccountBalanceResponse>> {
@@ -286,8 +286,8 @@ pub async fn update_balance<U: UserRepository, O, B>(
     Ok(Json(balance.into()))
 }
 
-pub async fn delete_balance<U: UserRepository, O, B>(
-    State(state): State<AppState<U, O, B>>,
+pub async fn delete_balance<U: UserRepository, O, B, P>(
+    State(state): State<AppState<U, O, B, P>>,
     auth_user: AuthUser,
 ) -> AppResult<StatusCode> {
     state.user_repo.clear_balance(auth_user.id).await?;

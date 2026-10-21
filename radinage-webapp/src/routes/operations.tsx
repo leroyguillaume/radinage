@@ -45,7 +45,6 @@ import { type ReactNode, useId, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { BudgetInitialValues } from "@/components/BudgetModal";
 import { BudgetModal } from "@/components/BudgetModal";
-import type { ImportResult } from "@/components/ImportModal";
 import { ImportModal } from "@/components/ImportModal";
 import { SplitOperationModal } from "@/components/SplitOperationModal";
 import { StatTile } from "@/components/StatTile";
@@ -77,6 +76,7 @@ import {
 import type {
 	BudgetResponse,
 	BudgetType,
+	ImportResult,
 	OperationResponse,
 } from "@/lib/types";
 import { headingFont, palette } from "@/theme";

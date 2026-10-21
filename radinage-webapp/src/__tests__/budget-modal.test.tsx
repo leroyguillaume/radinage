@@ -10,20 +10,7 @@ import {
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-
-async function selectMantineOption(inputName: RegExp, optionLabel: string) {
-	const input = screen.getByRole("combobox", { name: inputName });
-	// Focus then click to ensure combobox opens
-	fireEvent.focus(input);
-	fireEvent.click(input);
-	const option = await screen.findByRole("option", { name: optionLabel });
-	fireEvent.click(option);
-	// Wait for the dropdown to close and state to settle
-	await waitFor(() => {
-		expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
-	});
-}
-
+import { selectMantineOption } from "@/__tests__/mantine";
 import { BudgetModal } from "@/components/BudgetModal";
 import { i18n } from "@/i18n";
 import type { BudgetResponse } from "@/lib/types";
