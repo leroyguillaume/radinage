@@ -7,7 +7,7 @@ aide = { version = "0.16.0-alpha.3", features = ["axum", "axum-json", "axum-quer
 anyhow = "1.0"
 argon2 = "0.6"
 axum = { version = "0.8", features = ["multipart"] }
-axum-extra = { version = "0.10", features = ["typed-header"] }
+axum-extra = { version = "0.12", features = ["typed-header"] }
 calamine = { version = "0.36", features = ["dates"] }
 chrono = { version = "0.4", features = ["serde"] }
 clap = { version = "4.6", features = ["derive", "env"] }
