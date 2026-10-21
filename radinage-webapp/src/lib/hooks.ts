@@ -21,13 +21,22 @@ import type {
 	YearMonth,
 } from "@/lib/types";
 
-export function useMonthlyOperations(year: number, month: number) {
+export function useMonthlyOperations(
+	year: number,
+	month: number,
+	includeIgnored = false,
+) {
 	return useQuery({
-		queryKey: ["monthly-operations", year, month],
+		queryKey: ["monthly-operations", year, month, includeIgnored],
 		queryFn: () =>
 			apiFetch<MonthlyOperationsResponse>(
-				`/operations/monthly/${year}/${month}`,
+				`/operations/monthly/${year}/${month}${includeIgnored ? "?includeIgnored=true" : ""}`,
 			),
+		// Toggling `includeIgnored` keeps the month on screen instead of a loader.
+		placeholderData: (previous, previousQuery) =>
+			previousQuery?.queryKey[1] === year && previousQuery.queryKey[2] === month
+				? previous
+				: undefined,
 	});
 }
 
@@ -175,19 +184,6 @@ export function useUpdateEffectiveDate() {
 	});
 }
 
-export function useIgnoreOperation() {
-	const queryClient = useQueryClient();
-	return useMutation({
-		mutationFn: (opId: string) =>
-			apiFetch<OperationResponse>(`/operations/${opId}/ignore`, {
-				method: "PUT",
-			}),
-		onSuccess: () => {
-			queryClient.invalidateQueries({ queryKey: ["monthly-operations"] });
-		},
-	});
-}
-
 function useInvalidateMonthlyData() {
 	const queryClient = useQueryClient();
 	return () => {
@@ -195,6 +191,17 @@ function useInvalidateMonthlyData() {
 		queryClient.invalidateQueries({ queryKey: ["summary"] });
 		queryClient.invalidateQueries({ queryKey: ["forecast"] });
 	};
+}
+
+export function useSetOperationIgnored() {
+	const invalidate = useInvalidateMonthlyData();
+	return useMutation({
+		mutationFn: ({ opId, ignored }: { opId: string; ignored: boolean }) =>
+			apiFetch<OperationResponse>(`/operations/${opId}/ignore`, {
+				method: ignored ? "PUT" : "DELETE",
+			}),
+		onSuccess: invalidate,
+	});
 }
 
 export function useSplitOperation() {

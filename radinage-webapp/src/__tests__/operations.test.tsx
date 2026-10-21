@@ -40,6 +40,7 @@ const mockMonthlyResponse: MonthlyOperationsResponse = {
 			effectiveDate: null,
 			label: "Groceries",
 			budgetLink: { type: "manual", budgetId: "b1" },
+			ignored: false,
 			splits: [],
 		},
 		{
@@ -49,6 +50,7 @@ const mockMonthlyResponse: MonthlyOperationsResponse = {
 			effectiveDate: null,
 			label: "Restaurant",
 			budgetLink: { type: "manual", budgetId: "b1" },
+			ignored: false,
 			splits: [],
 		},
 		{
@@ -58,6 +60,7 @@ const mockMonthlyResponse: MonthlyOperationsResponse = {
 			effectiveDate: null,
 			label: "Electricity",
 			budgetLink: { type: "unlinked" },
+			ignored: false,
 			splits: [],
 		},
 		{
@@ -67,6 +70,7 @@ const mockMonthlyResponse: MonthlyOperationsResponse = {
 			effectiveDate: null,
 			label: "Salary",
 			budgetLink: { type: "auto", budgetId: "b2" },
+			ignored: false,
 			splits: [],
 		},
 	],
@@ -159,7 +163,13 @@ function setupMocks(
 		apiCalls.push({ path, options: opts });
 
 		if (path.startsWith("/operations/monthly/")) {
-			return Promise.resolve(operations);
+			return Promise.resolve(
+				path.includes("includeIgnored=true")
+					? operations
+					: {
+							operations: operations.operations.filter((op) => !op.ignored),
+						},
+			);
 		}
 		if (path.startsWith("/forecast")) {
 			return Promise.resolve(forecastResponse);
@@ -174,6 +184,7 @@ function setupMocks(
 				effectiveDate: null,
 				label: "Op",
 				budgetLink: { type: "unlinked" },
+				ignored: false,
 				splits: [],
 			});
 		}
@@ -637,6 +648,7 @@ describe("MonthlyOperationsPage", () => {
 					effectiveDate: null,
 					label: "Groceries",
 					budgetLink: { type: "manual", budgetId: "b1" },
+					ignored: false,
 					splits: [],
 				},
 				{
@@ -646,6 +658,7 @@ describe("MonthlyOperationsPage", () => {
 					effectiveDate: null,
 					label: "Bus ticket",
 					budgetLink: { type: "manual", budgetId: "b4" },
+					ignored: false,
 					splits: [],
 				},
 				{
@@ -655,6 +668,7 @@ describe("MonthlyOperationsPage", () => {
 					effectiveDate: null,
 					label: "Salary",
 					budgetLink: { type: "auto", budgetId: "b2" },
+					ignored: false,
 					splits: [],
 				},
 				{
@@ -664,6 +678,7 @@ describe("MonthlyOperationsPage", () => {
 					effectiveDate: null,
 					label: "Freelance gig",
 					budgetLink: { type: "auto", budgetId: "b5" },
+					ignored: false,
 					splits: [],
 				},
 			],
@@ -738,6 +753,7 @@ describe("MonthlyOperationsPage", () => {
 					effectiveDate: null,
 					label: "Groceries",
 					budgetLink: { type: "manual", budgetId: "b1" },
+					ignored: false,
 					splits: [],
 				},
 				{
@@ -747,6 +763,7 @@ describe("MonthlyOperationsPage", () => {
 					effectiveDate: null,
 					label: "Bus ticket",
 					budgetLink: { type: "manual", budgetId: "b4" },
+					ignored: false,
 					splits: [],
 				},
 			],
@@ -785,6 +802,7 @@ describe("MonthlyOperationsPage", () => {
 					effectiveDate: "2026-04-20",
 					label: "Groceries",
 					budgetLink: { type: "manual" as const, budgetId: "b1" },
+					ignored: false,
 					splits: [],
 				},
 				{
@@ -794,6 +812,7 @@ describe("MonthlyOperationsPage", () => {
 					effectiveDate: null,
 					label: "Restaurant",
 					budgetLink: { type: "manual" as const, budgetId: "b1" },
+					ignored: false,
 					splits: [],
 				},
 			],
@@ -827,6 +846,7 @@ describe("MonthlyOperationsPage", () => {
 					effectiveDate: null,
 					label: "Salary",
 					budgetLink: { type: "unlinked" },
+					ignored: false,
 					splits: [],
 				},
 				{
@@ -836,6 +856,7 @@ describe("MonthlyOperationsPage", () => {
 					effectiveDate: null,
 					label: "Groceries",
 					budgetLink: { type: "unlinked" },
+					ignored: false,
 					splits: [],
 				},
 				{
@@ -845,6 +866,7 @@ describe("MonthlyOperationsPage", () => {
 					effectiveDate: null,
 					label: "Taxi",
 					budgetLink: { type: "unlinked" },
+					ignored: false,
 					splits: [],
 				},
 			],
@@ -934,6 +956,7 @@ describe("MonthlyOperationsPage", () => {
 					effectiveDate: null,
 					label: "Groceries",
 					budgetLink: { type: "manual", budgetId: "b1" },
+					ignored: false,
 					splits: [],
 				},
 			],
@@ -957,6 +980,7 @@ describe("MonthlyOperationsPage", () => {
 					effectiveDate: null,
 					label: "Salary",
 					budgetLink: { type: "auto", budgetId: "b2" },
+					ignored: false,
 					splits: [],
 				},
 			],
@@ -979,6 +1003,7 @@ describe("MonthlyOperationsPage", () => {
 					effectiveDate: null,
 					label: "Groceries",
 					budgetLink: { type: "manual", budgetId: "b1" },
+					ignored: false,
 					splits: [],
 				},
 				{
@@ -988,6 +1013,7 @@ describe("MonthlyOperationsPage", () => {
 					effectiveDate: null,
 					label: "CASH WITHDRAWAL",
 					budgetLink: { type: "unlinked" },
+					ignored: false,
 					splits: [
 						{ id: "s1", amount: "-30.00", budgetId: "b1" },
 						{ id: "s2", amount: "-70.00", budgetId: null },
@@ -1000,6 +1026,7 @@ describe("MonthlyOperationsPage", () => {
 					effectiveDate: null,
 					label: "Taxi",
 					budgetLink: { type: "unlinked" },
+					ignored: false,
 					splits: [],
 				},
 			],
@@ -1079,6 +1106,99 @@ describe("MonthlyOperationsPage", () => {
 			expect(
 				dialog.getByRole("textbox", { name: "Montant (Part 2)" }),
 			).toHaveValue("70,00");
+		});
+	});
+
+	describe("ignored operations", () => {
+		const operations: MonthlyOperationsResponse = {
+			operations: [
+				...mockMonthlyResponse.operations,
+				{
+					id: "op-ignored",
+					amount: "-999.00",
+					date: "2026-04-20",
+					effectiveDate: null,
+					label: "Internal transfer",
+					budgetLink: { type: "unlinked" },
+					ignored: true,
+					splits: [],
+				},
+			],
+		};
+
+		async function showIgnored() {
+			const user = userEvent.setup();
+			await user.click(
+				await screen.findByRole("switch", { name: "Afficher les ignorées" }),
+			);
+			return user;
+		}
+
+		function expensesTileText(): string {
+			const [tile] = screen.getAllByText("Dépenses");
+			return (
+				tile?.closest(".mantine-Paper-root")?.textContent?.replace(/\s/g, "") ??
+				""
+			);
+		}
+
+		it("hides ignored operations until the switch is on", async () => {
+			setupMocks({ operations });
+			await renderOperationsPage();
+			await screen.findByText("Electricity");
+
+			expect(screen.queryByText("Internal transfer")).not.toBeInTheDocument();
+			expect(screen.queryByText("Opérations ignorées")).not.toBeInTheDocument();
+		});
+
+		it("lists ignored operations in their own section, out of the totals", async () => {
+			setupMocks({ operations });
+			await renderOperationsPage();
+			await screen.findByText("Electricity");
+			const expensesBefore = expensesTileText();
+
+			await showIgnored();
+
+			const section = within(
+				await screen.findByRole("region", { name: "Opérations ignorées" }),
+			);
+			expect(await section.findByText("Internal transfer")).toBeInTheDocument();
+			expect(
+				apiCalls.some((c) =>
+					c.path.startsWith("/operations/monthly/2026/4?includeIgnored=true"),
+				),
+			).toBe(true);
+			expect(expensesTileText()).toBe(expensesBefore);
+		});
+
+		it("says so when the month has no ignored operation", async () => {
+			await renderOperationsPage();
+			await showIgnored();
+
+			expect(
+				await screen.findByText("Aucune opération ignorée ce mois-ci"),
+			).toBeInTheDocument();
+		});
+
+		it("stops ignoring an operation", async () => {
+			setupMocks({ operations });
+			await renderOperationsPage();
+			const user = await showIgnored();
+
+			const section = within(
+				await screen.findByRole("region", { name: "Opérations ignorées" }),
+			);
+			await user.click(await section.findByLabelText("Ne plus ignorer"));
+
+			await waitFor(() => {
+				expect(
+					apiCalls.find(
+						(c) =>
+							c.path === "/operations/op-ignored/ignore" &&
+							c.options?.method === "DELETE",
+					),
+				).toBeDefined();
+			});
 		});
 	});
 });

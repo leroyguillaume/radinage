@@ -13,6 +13,7 @@ import {
 	Select,
 	SimpleGrid,
 	Stack,
+	Switch,
 	Text,
 	TextInput,
 	Title,
@@ -29,6 +30,7 @@ import {
 	IconChevronDown,
 	IconChevronLeft,
 	IconChevronRight,
+	IconEye,
 	IconEyeOff,
 	IconLink,
 	IconLinkOff,
@@ -56,9 +58,9 @@ import { formatAmount, formatSignedAmount } from "@/lib/format";
 import {
 	useBudgets,
 	useForecast,
-	useIgnoreOperation,
 	useLinkBudget,
 	useMonthlyOperations,
+	useSetOperationIgnored,
 	useUnlinkBudget,
 	useUpdateEffectiveDate,
 } from "@/lib/hooks";
@@ -364,7 +366,7 @@ interface OperationHandlers {
 	onCreateBudget: (op: OperationResponse) => void;
 	onLink: (opId: string, budgetId: string) => void;
 	onUnlink: (opId: string) => void;
-	onIgnore: (opId: string) => void;
+	onSetIgnored: (opId: string, ignored: boolean) => void;
 	onSplit: (op: OperationResponse) => void;
 	onEditEffectiveDate: (
 		op: OperationResponse,
@@ -386,7 +388,8 @@ function MonthlyOperationsPage() {
 	const [splitTarget, setSplitTarget] = useState<OperationResponse | null>(
 		null,
 	);
-	const operationsQuery = useMonthlyOperations(year, month);
+	const [showIgnored, setShowIgnored] = useState(false);
+	const operationsQuery = useMonthlyOperations(year, month, showIgnored);
 	const budgetsQuery = useBudgets();
 
 	const forecastQuery = useForecast(year, month, 1);
@@ -408,7 +411,7 @@ function MonthlyOperationsPage() {
 
 	const linkBudget = useLinkBudget();
 	const unlinkBudget = useUnlinkBudget();
-	const ignoreOperation = useIgnoreOperation();
+	const setOperationIgnored = useSetOperationIgnored();
 	const updateEffectiveDate = useUpdateEffectiveDate();
 
 	function navigateMonth(delta: number) {
@@ -445,8 +448,11 @@ function MonthlyOperationsPage() {
 			)
 		: null;
 
+	const operations = operationsQuery.data?.operations ?? [];
+	const ignoredOperations = operations.filter((op) => op.ignored);
+
 	const groups = groupOperationsByBudget(
-		operationsQuery.data?.operations ?? [],
+		operations.filter((op) => !op.ignored),
 		budgetsQuery.data ?? [],
 		forecast,
 		year,
@@ -474,7 +480,8 @@ function MonthlyOperationsPage() {
 		onCreateBudget: handleCreateBudgetFromOp,
 		onLink: (opId, budgetId) => linkBudget.mutate({ opId, budgetId }),
 		onUnlink: (opId) => unlinkBudget.mutate(opId),
-		onIgnore: (opId) => ignoreOperation.mutate(opId),
+		onSetIgnored: (opId, ignored) =>
+			setOperationIgnored.mutate({ opId, ignored }),
 		onSplit: setSplitTarget,
 		onEditEffectiveDate: (op, effectiveDate) =>
 			updateEffectiveDate.mutate({ op, effectiveDate }),
@@ -555,12 +562,21 @@ function MonthlyOperationsPage() {
 							<IconChevronRight size={20} />
 						</ActionIcon>
 					</Group>
-					<Button
-						leftSection={<IconUpload size={18} />}
-						onClick={() => setImportOpened(true)}
-					>
-						{t("import.title")}
-					</Button>
+					<Group gap="md" wrap="wrap">
+						<Switch
+							size="md"
+							label={t("operations.showIgnored")}
+							checked={showIgnored}
+							onChange={(e) => setShowIgnored(e.currentTarget.checked)}
+							styles={{ body: { alignItems: "center", minHeight: 44 } }}
+						/>
+						<Button
+							leftSection={<IconUpload size={18} />}
+							onClick={() => setImportOpened(true)}
+						>
+							{t("import.title")}
+						</Button>
+					</Group>
 				</Group>
 
 				{importResult && (
@@ -606,6 +622,15 @@ function MonthlyOperationsPage() {
 							/>
 						))}
 					</>
+				)}
+
+				{showIgnored && (
+					<IgnoredOperationsCard
+						operations={ignoredOperations}
+						loading={operationsQuery.isPlaceholderData}
+						locale={i18n.language}
+						handlers={handlers}
+					/>
 				)}
 			</Stack>
 		</div>
@@ -1231,9 +1256,93 @@ function OperationRow({
 					label={t("operations.ignoreOperation")}
 					icon={<IconEyeOff size={18} />}
 					size={actionSize}
-					onClick={() => handlers.onIgnore(op.id)}
+					onClick={() => handlers.onSetIgnored(op.id, true)}
 				/>
 			</Group>
 		</Box>
+	);
+}
+
+function IgnoredOperationsCard({
+	operations,
+	loading,
+	locale,
+	handlers,
+}: {
+	operations: OperationResponse[];
+	loading: boolean;
+	locale: string;
+	handlers: OperationHandlers;
+}) {
+	const { t } = useTranslation();
+	const titleId = useId();
+	const actionSize = useOperationActionSize();
+
+	return (
+		<Paper
+			component="section"
+			p={0}
+			style={{ overflow: "hidden" }}
+			aria-labelledby={titleId}
+		>
+			<Stack gap={2} px={{ base: "md", sm: 20 }} py="md">
+				<Group gap={10} wrap="nowrap">
+					<IconEyeOff size={16} color={palette.dimmed} />
+					<Title id={titleId} order={2} fz={{ base: 19, sm: 22 }} fw={700}>
+						{t("operations.ignored.title")}
+					</Title>
+				</Group>
+				<Text size="sm" c="dimmed">
+					{t("operations.ignored.hint")}
+				</Text>
+			</Stack>
+			{loading ? (
+				<Group justify="center" pb="md">
+					<Loader size="sm" />
+				</Group>
+			) : operations.length === 0 ? (
+				<Text size="sm" c="dimmed" px={{ base: "md", sm: 20 }} pb="md">
+					{t("operations.ignored.empty")}
+				</Text>
+			) : (
+				<Box
+					component="ul"
+					m={0}
+					bg={palette.surfaceMuted}
+					className="list-none px-4 pt-1 pb-3 sm:px-5"
+					style={{ borderTop: `1px solid ${palette.divider}` }}
+				>
+					{operations.map((op) => (
+						<Box
+							component="li"
+							key={op.id}
+							className="grid grid-cols-[48px_minmax(0,1fr)_auto_auto] items-center gap-x-3 py-2 sm:grid-cols-[56px_minmax(0,1fr)_auto_auto] sm:gap-x-4"
+							style={{ borderBottom: `1px dashed ${palette.border}` }}
+						>
+							<Text size="sm" c="dimmed" className="tabular-nums">
+								{formatDate(op.effectiveDate ?? op.date, locale)}
+							</Text>
+							<Text c="dimmed" td="line-through" truncate title={op.label}>
+								{op.label}
+							</Text>
+							<Text
+								c="dimmed"
+								td="line-through"
+								className="tabular-nums"
+								style={{ whiteSpace: "nowrap" }}
+							>
+								{formatSignedAmount(Number(op.amount))}
+							</Text>
+							<OperationAction
+								label={t("operations.unignoreOperation")}
+								icon={<IconEye size={18} />}
+								size={actionSize}
+								onClick={() => handlers.onSetIgnored(op.id, false)}
+							/>
+						</Box>
+					))}
+				</Box>
+			)}
+		</Paper>
 	);
 }

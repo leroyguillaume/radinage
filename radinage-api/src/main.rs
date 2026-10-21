@@ -497,7 +497,7 @@ where
             get_with(handlers::monthly_operations::get_monthly_operations, |op| {
                 op.tag("Operations")
                     .summary("Get operations for a month")
-                    .description("Retrieve all bank operations for the given year and month (unpaginated), together with the monthly budget override amount if one is defined for that month.")
+                    .description("Retrieve all bank operations for the given year and month (unpaginated), together with the monthly budget override amount if one is defined for that month. Ignored operations are excluded unless `includeIgnored` is true.")
                     .id("getMonthlyOperations")
             }),
         )

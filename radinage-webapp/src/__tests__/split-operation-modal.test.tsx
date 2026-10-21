@@ -54,6 +54,7 @@ function makeOperation(
 		effectiveDate: null,
 		label: "RETRAIT DAB",
 		budgetLink: { type: "unlinked" },
+		ignored: false,
 		splits: [],
 		...overrides,
 	};
