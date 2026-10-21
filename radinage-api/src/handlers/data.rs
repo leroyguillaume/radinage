@@ -3,11 +3,15 @@ use crate::{
     auth::middleware::AuthUser,
     domain::{
         budget::{Budget, BudgetKind, BudgetType, Rule},
+        import_profile::{ImportProfile, ImportProfileFields},
         operation::{BudgetLink, NewOperationSplit, Operation, OperationSplit, validate_splits},
         user::AccountBalance,
     },
     error::{AppError, AppResult},
-    repositories::{BudgetRepository, OperationRepository, UserRepository},
+    handlers::import_profiles::ImportProfileRequest,
+    repositories::{
+        BudgetRepository, ImportProfileRepository, OperationRepository, UserRepository,
+    },
 };
 use axum::{Json, extract::State, http::StatusCode};
 use chrono::{DateTime, NaiveDate, Utc};
@@ -138,6 +142,44 @@ impl From<ExportAccountBalance> for AccountBalance {
     }
 }
 
+/// An import profile inside an export payload (omits `userId` and usage).
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ExportImportProfile {
+    pub name: String,
+    pub label_col: usize,
+    pub amount_col: usize,
+    pub date_col: usize,
+    pub date_format: String,
+    pub skip_lines: usize,
+}
+
+impl From<ImportProfile> for ExportImportProfile {
+    fn from(p: ImportProfile) -> Self {
+        Self {
+            name: p.fields.name,
+            label_col: p.fields.label_col,
+            amount_col: p.fields.amount_col,
+            date_col: p.fields.date_col,
+            date_format: p.fields.date_format,
+            skip_lines: p.fields.skip_lines,
+        }
+    }
+}
+
+impl From<ExportImportProfile> for ImportProfileRequest {
+    fn from(p: ExportImportProfile) -> Self {
+        Self {
+            name: p.name,
+            label_col: p.label_col,
+            amount_col: p.amount_col,
+            date_col: p.date_col,
+            date_format: p.date_format,
+            skip_lines: p.skip_lines,
+        }
+    }
+}
+
 /// Full export payload: all budgets + operations for the authenticated user.
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
@@ -150,6 +192,7 @@ pub struct ExportResponse {
     pub balance: Option<ExportAccountBalance>,
     pub budgets: Vec<ExportBudget>,
     pub operations: Vec<ExportOperation>,
+    pub import_profiles: Vec<ExportImportProfile>,
 }
 
 /// Input payload for an import request. Mirrors `ExportResponse` shape.
@@ -166,6 +209,9 @@ pub struct ImportDataRequest {
     pub budgets: Vec<ExportBudget>,
     #[serde(default)]
     pub operations: Vec<ExportOperation>,
+    /// Absent from exports made before import profiles existed.
+    #[serde(default)]
+    pub import_profiles: Vec<ExportImportProfile>,
 }
 
 /// Result of an import: how many items were created or skipped as duplicates.
@@ -176,6 +222,9 @@ pub struct ImportDataResponse {
     pub skipped_budgets: usize,
     pub imported_operations: usize,
     pub skipped_operations: usize,
+    pub imported_import_profiles: usize,
+    /// Profiles skipped because the account already has one by that name.
+    pub skipped_import_profiles: usize,
     /// Whether the payload's balance was recorded: false when it carries none or the account
     /// already has one, which is kept.
     pub imported_balance: bool,
@@ -183,14 +232,20 @@ pub struct ImportDataResponse {
 
 // ── Handlers ─────────────────────────────────────────────────────────────────
 
-pub async fn export_data<U: UserRepository, O: OperationRepository, B: BudgetRepository>(
-    State(state): State<AppState<U, O, B>>,
+pub async fn export_data<
+    U: UserRepository,
+    O: OperationRepository,
+    B: BudgetRepository,
+    P: ImportProfileRepository,
+>(
+    State(state): State<AppState<U, O, B, P>>,
     auth_user: AuthUser,
 ) -> AppResult<Json<ExportResponse>> {
     let user_id = auth_user.id;
     let balance = state.user_repo.find_balance(user_id).await?;
     let budgets = state.budget_repo.list_all_for_user(user_id).await?;
     let operations = state.operation_repo.list_all_for_user(user_id).await?;
+    let import_profiles = state.import_profile_repo.list(user_id).await?;
 
     Ok(Json(ExportResponse {
         version: EXPORT_VERSION,
@@ -198,11 +253,20 @@ pub async fn export_data<U: UserRepository, O: OperationRepository, B: BudgetRep
         balance: balance.map(Into::into),
         budgets: budgets.into_iter().map(ExportBudget::from).collect(),
         operations: operations.into_iter().map(ExportOperation::from).collect(),
+        import_profiles: import_profiles
+            .into_iter()
+            .map(ExportImportProfile::from)
+            .collect(),
     }))
 }
 
-pub async fn import_data<U: UserRepository, O: OperationRepository, B: BudgetRepository>(
-    State(state): State<AppState<U, O, B>>,
+pub async fn import_data<
+    U: UserRepository,
+    O: OperationRepository,
+    B: BudgetRepository,
+    P: ImportProfileRepository,
+>(
+    State(state): State<AppState<U, O, B, P>>,
     auth_user: AuthUser,
     Json(body): Json<ImportDataRequest>,
 ) -> AppResult<(StatusCode, Json<ImportDataResponse>)> {
@@ -218,6 +282,16 @@ pub async fn import_data<U: UserRepository, O: OperationRepository, B: BudgetRep
             AppError::BadRequest(format!("operation {}: invalid splits: {e}", op.id))
         })?;
     }
+
+    let profiles = body
+        .import_profiles
+        .into_iter()
+        .map(|p| {
+            let name = p.name.clone();
+            ImportProfileFields::try_from(ImportProfileRequest::from(p))
+                .map_err(|e| AppError::BadRequest(format!("import profile '{name}': {e}")))
+        })
+        .collect::<AppResult<Vec<_>>>()?;
 
     let user_id = auth_user.id;
 
@@ -319,6 +393,9 @@ pub async fn import_data<U: UserRepository, O: OperationRepository, B: BudgetRep
         imported_operations += 1;
     }
 
+    let (imported_import_profiles, skipped_import_profiles) =
+        import_profiles(&state.import_profile_repo, user_id, &profiles).await?;
+
     let imported_balance = match body.balance {
         Some(balance) if state.user_repo.find_balance(user_id).await?.is_none() => {
             state.user_repo.set_balance(user_id, balance.into()).await?;
@@ -334,9 +411,39 @@ pub async fn import_data<U: UserRepository, O: OperationRepository, B: BudgetRep
             skipped_budgets,
             imported_operations,
             skipped_operations,
+            imported_import_profiles,
+            skipped_import_profiles,
             imported_balance,
         }),
     ))
+}
+
+/// Create the payload's profiles the account has no profile by that name for; returns how many
+/// were imported and skipped.
+async fn import_profiles(
+    repo: &impl ImportProfileRepository,
+    user_id: Uuid,
+    incoming: &[ImportProfileFields],
+) -> AppResult<(usize, usize)> {
+    if incoming.is_empty() {
+        return Ok((0, 0));
+    }
+    let mut names: Vec<String> = repo
+        .list(user_id)
+        .await?
+        .into_iter()
+        .map(|p| p.fields.name)
+        .collect();
+    let mut imported = 0usize;
+    for profile in incoming {
+        if names.contains(&profile.name) {
+            continue;
+        }
+        repo.create(user_id, profile).await?;
+        names.push(profile.name.clone());
+        imported += 1;
+    }
+    Ok((imported, incoming.len() - imported))
 }
 
 #[cfg(test)]
@@ -347,8 +454,14 @@ mod tests {
             budget::{Budget, BudgetKind, BudgetType, CurrentPeriod, Recurrence, YearMonth},
             user::UserRole,
         },
-        repositories::{MockBudgetRepository, MockOperationRepository, MockUserRepository},
-        test_util::{auth_header, build_test_router, json_request, make_test_state, response_json},
+        repositories::{
+            MockBudgetRepository, MockImportProfileRepository, MockOperationRepository,
+            MockUserRepository,
+        },
+        test_util::{
+            auth_header, build_test_router, json_request, make_test_state,
+            make_test_state_with_profiles, response_json,
+        },
     };
     use chrono::NaiveDate;
     use rust_decimal::Decimal;
@@ -1029,6 +1142,7 @@ mod tests {
             balance: None,
             budgets: vec![ExportBudget::from(budget)],
             operations: vec![],
+            import_profiles: vec![],
         };
         let body = serde_json::to_string(&export).unwrap();
 
@@ -1157,5 +1271,133 @@ mod tests {
 
         let json = import_balance_payload(user_repo).await;
         assert!(!json.imported_balance);
+    }
+
+    fn profile_fields(name: &str) -> ImportProfileFields {
+        ImportProfileFields {
+            name: name.to_string(),
+            label_col: 1,
+            amount_col: 3,
+            date_col: 0,
+            date_format: "%d/%m/%Y".to_string(),
+            skip_lines: 1,
+        }
+    }
+
+    fn stored_profile(user_id: Uuid, name: &str) -> ImportProfile {
+        ImportProfile {
+            id: Uuid::new_v4(),
+            user_id,
+            fields: profile_fields(name),
+            last_used_at: Some(Utc::now()),
+            created_at: Utc::now(),
+        }
+    }
+
+    fn profile_json(name: &str, date_col: usize) -> serde_json::Value {
+        serde_json::json!({
+            "name": name,
+            "labelCol": 1,
+            "amountCol": 3,
+            "dateCol": date_col,
+            "dateFormat": "%d/%m/%Y",
+            "skipLines": 1
+        })
+    }
+
+    async fn import_profiles_payload(
+        profile_repo: MockImportProfileRepository,
+        profiles: serde_json::Value,
+    ) -> axum::response::Response {
+        let (op_repo, budget_repo) = empty_repos();
+        let app = build_test_router(make_test_state_with_profiles(
+            users_with_balance(None),
+            op_repo,
+            budget_repo,
+            profile_repo,
+        ));
+        let body = serde_json::json!({ "version": 1, "importProfiles": profiles }).to_string();
+        let auth = auth_header(Uuid::new_v4(), UserRole::User);
+        app.oneshot(json_request(
+            "POST",
+            "/data/import",
+            Some(&body),
+            Some(&auth),
+        ))
+        .await
+        .unwrap()
+    }
+
+    #[tokio::test]
+    async fn export_includes_import_profiles_without_usage() {
+        let user_id = Uuid::new_v4();
+        let mut profile_repo = MockImportProfileRepository::new();
+        profile_repo.expect_list().returning(move |user_id| {
+            let profile = stored_profile(user_id, "Bank");
+            Box::pin(async move { Ok(vec![profile]) })
+        });
+        let (op_repo, budget_repo) = empty_repos();
+        let app = build_test_router(make_test_state_with_profiles(
+            users_with_balance(None),
+            op_repo,
+            budget_repo,
+            profile_repo,
+        ));
+
+        let auth = auth_header(user_id, UserRole::User);
+        let resp = app
+            .oneshot(json_request("GET", "/data/export", None, Some(&auth)))
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        let json: serde_json::Value = response_json(resp).await;
+        assert_eq!(
+            json["importProfiles"],
+            serde_json::json!([profile_json("Bank", 0)])
+        );
+    }
+
+    #[tokio::test]
+    async fn import_creates_missing_profiles_and_skips_existing_by_name() {
+        let mut profile_repo = MockImportProfileRepository::new();
+        profile_repo.expect_list().returning(|user_id| {
+            let profile = stored_profile(user_id, "Bank");
+            Box::pin(async move { Ok(vec![profile]) })
+        });
+        profile_repo
+            .expect_create()
+            .withf(|_, fields| *fields == profile_fields("Savings"))
+            .times(1)
+            .returning(|user_id, fields| {
+                let created = ImportProfile {
+                    fields: fields.clone(),
+                    ..stored_profile(user_id, "")
+                };
+                Box::pin(async move { Ok(created) })
+            });
+
+        let resp = import_profiles_payload(
+            profile_repo,
+            serde_json::json!([profile_json("Bank", 0), profile_json("Savings", 0)]),
+        )
+        .await;
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        let json: ImportDataResponse = response_json(resp).await;
+        assert_eq!(json.imported_import_profiles, 1);
+        assert_eq!(json.skipped_import_profiles, 1);
+    }
+
+    #[tokio::test]
+    async fn import_rejects_an_invalid_profile_before_writing() {
+        let mut profile_repo = MockImportProfileRepository::new();
+        profile_repo.expect_create().never();
+
+        let resp =
+            import_profiles_payload(profile_repo, serde_json::json!([profile_json("Broken", 1)]))
+                .await;
+
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
     }
 }

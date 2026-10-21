@@ -192,8 +192,8 @@ struct ForecastData {
 }
 
 impl ForecastData {
-    async fn load<U, O: OperationRepository, B: BudgetRepository>(
-        state: &AppState<U, O, B>,
+    async fn load<U, O: OperationRepository, B: BudgetRepository, P>(
+        state: &AppState<U, O, B, P>,
         user_id: Uuid,
         (start, end): (NaiveDate, NaiveDate),
         today: NaiveDate,
@@ -245,8 +245,8 @@ fn horizon_dates(from: YearMonth, months: usize) -> Option<(NaiveDate, NaiveDate
     Some((from.first_day()?, horizon(from, months).last()?.last_day()?))
 }
 
-pub async fn get_forecast<U: UserRepository, O: OperationRepository, B: BudgetRepository>(
-    State(state): State<AppState<U, O, B>>,
+pub async fn get_forecast<U: UserRepository, O: OperationRepository, B: BudgetRepository, P>(
+    State(state): State<AppState<U, O, B, P>>,
     auth_user: AuthUser,
     Query(q): Query<ForecastQuery>,
 ) -> AppResult<Json<ForecastResponse>> {
@@ -386,8 +386,8 @@ impl From<MonthBreakdown> for ForecastMonthBreakdownResponse {
     }
 }
 
-pub async fn get_forecast_month<U, O: OperationRepository, B: BudgetRepository>(
-    State(state): State<AppState<U, O, B>>,
+pub async fn get_forecast_month<U, O: OperationRepository, B: BudgetRepository, P>(
+    State(state): State<AppState<U, O, B, P>>,
     auth_user: AuthUser,
     Path(path): Path<ForecastMonthPath>,
 ) -> AppResult<Json<ForecastMonthBreakdownResponse>> {

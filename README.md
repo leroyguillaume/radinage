@@ -12,7 +12,7 @@ A self-hosted personal bank account tracker: import your bank statements, sort t
 
 Radinage keeps a record of your bank operations and compares them with the budgets you plan, month by month, so the end-of-year balance is never a surprise. It does not connect to your bank: operations come from the CSV or Excel exports banks already provide.
 
-- **Operations**: import bank statements (CSV/XLSX), link operations to budgets by hand, or split one operation (a cash withdrawal, say) across several budgets.
+- **Operations**: import bank statements (CSV/XLSX) with import profiles that remember each bank's file layout, set up from a preview of a sample file; link operations to budgets by hand, or split one operation (a cash withdrawal, say) across several budgets.
 - **Budgets**: recurring (weekly, monthly, quarterly, yearly) or one-off, for expenses, income or savings, with matching rules that categorise operations automatically.
 - **Forecast**, over a calendar year or the next 12 months: starting from the account balance you record (the balance your bank shows on a given day) or from zero, actuals for past months (operations outside any budget counted as income or expense by their own sign), the current month's actuals plus what its budgets still expect, budgets beyond it, spending outside budgets at your average of the last three months, the daily amount you can still spend outside budgets without ending in the red (negative when the budgets alone already do), and the month the balance would first turn negative. Selecting a month opens its breakdown budget by budget: what each one expects, what is already linked to it and what the forecast counts, then spending outside budgets.
 - **Statistics**: income, expenses, savings and balance over any range of months.
@@ -60,6 +60,7 @@ The API (`radinage-api`) reads its configuration from environment variables, or 
 | `ROOT_PATH` | no | — | Path prefix the API is served under |
 | `JWT_EXPIRATION_SECS` | no | `86400` | Token lifetime in seconds |
 | `MAX_BUDGETS_PER_USER` | no | `100` | Maximum number of budgets per user |
+| `MAX_IMPORT_PROFILES_PER_USER` | no | `20` | Maximum number of import profiles per user |
 | `LOG_FILTER` | no | `info` | `tracing` filter directive |
 | `LOG_JSON` | no | `false` | Emit logs as JSON |
 

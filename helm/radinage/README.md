@@ -40,6 +40,7 @@ A personal bank account tracking application
 | apps.api.jwtSecret.name | string | `""` | Secret name (defaults to `<release>-jwt`) |
 | apps.api.logJson | bool | `false` | Emit logs in JSON format |
 | apps.api.maxBudgetsPerUser | string | `"100"` | Maximum number of budgets per user |
+| apps.api.maxImportProfilesPerUser | string | `"20"` | Maximum number of import profiles per user |
 | apps.api.nodeSelector | object | `{}` | API node selector — override `global.nodeSelector` |
 | apps.api.podAnnotations | object | `{}` | API pod annotations — override `global.podAnnotations` |
 | apps.api.podLabels | object | `{}` | API pod labels — override `global.podLabels` |

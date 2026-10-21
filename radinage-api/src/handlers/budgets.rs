@@ -176,8 +176,8 @@ pub struct ApplyBudgetResponse {
 
 // ── Handlers ─────────────────────────────────────────────────────────────────
 
-pub async fn list_budgets<U, O, B: BudgetRepository>(
-    State(state): State<AppState<U, O, B>>,
+pub async fn list_budgets<U, O, B: BudgetRepository, P>(
+    State(state): State<AppState<U, O, B, P>>,
     auth_user: AuthUser,
     Query(q): Query<ListBudgetsQuery>,
 ) -> AppResult<Json<Vec<BudgetResponse>>> {
@@ -195,8 +195,8 @@ pub async fn list_budgets<U, O, B: BudgetRepository>(
     Ok(Json(data))
 }
 
-pub async fn get_budget<U, O, B: BudgetRepository>(
-    State(state): State<AppState<U, O, B>>,
+pub async fn get_budget<U, O, B: BudgetRepository, P>(
+    State(state): State<AppState<U, O, B, P>>,
     auth_user: AuthUser,
     Path(id): Path<Uuid>,
 ) -> AppResult<Json<BudgetResponse>> {
@@ -204,8 +204,8 @@ pub async fn get_budget<U, O, B: BudgetRepository>(
     Ok(Json(BudgetResponse::from(budget)))
 }
 
-pub async fn create_budget<U, O, B: BudgetRepository>(
-    State(state): State<AppState<U, O, B>>,
+pub async fn create_budget<U, O, B: BudgetRepository, P>(
+    State(state): State<AppState<U, O, B, P>>,
     auth_user: AuthUser,
     Json(body): Json<CreateBudgetRequest>,
 ) -> AppResult<(StatusCode, Json<BudgetResponse>)> {
@@ -223,8 +223,8 @@ pub async fn create_budget<U, O, B: BudgetRepository>(
     Ok((StatusCode::CREATED, Json(BudgetResponse::from(budget))))
 }
 
-pub async fn update_budget<U, O, B: BudgetRepository>(
-    State(state): State<AppState<U, O, B>>,
+pub async fn update_budget<U, O, B: BudgetRepository, P>(
+    State(state): State<AppState<U, O, B, P>>,
     auth_user: AuthUser,
     Path(id): Path<Uuid>,
     Json(body): Json<CreateBudgetRequest>,
@@ -246,8 +246,8 @@ pub async fn update_budget<U, O, B: BudgetRepository>(
     Ok(Json(BudgetResponse::from(budget)))
 }
 
-pub async fn delete_budget<U, O, B: BudgetRepository>(
-    State(state): State<AppState<U, O, B>>,
+pub async fn delete_budget<U, O, B: BudgetRepository, P>(
+    State(state): State<AppState<U, O, B, P>>,
     auth_user: AuthUser,
     Path(id): Path<Uuid>,
 ) -> AppResult<StatusCode> {
@@ -258,8 +258,8 @@ pub async fn delete_budget<U, O, B: BudgetRepository>(
     Ok(StatusCode::NO_CONTENT)
 }
 
-pub async fn apply_budget<U, O: OperationRepository, B: BudgetRepository>(
-    State(state): State<AppState<U, O, B>>,
+pub async fn apply_budget<U, O: OperationRepository, B: BudgetRepository, P>(
+    State(state): State<AppState<U, O, B, P>>,
     auth_user: AuthUser,
     Path(budget_id): Path<Uuid>,
     Json(body): Json<ApplyBudgetRequest>,

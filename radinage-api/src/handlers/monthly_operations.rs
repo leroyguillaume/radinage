@@ -22,8 +22,8 @@ pub struct MonthlyOperationsResponse {
     pub operations: Vec<OperationResponse>,
 }
 
-pub async fn get_monthly_operations<U, O: OperationRepository, B>(
-    State(state): State<AppState<U, O, B>>,
+pub async fn get_monthly_operations<U, O: OperationRepository, B, P>(
+    State(state): State<AppState<U, O, B, P>>,
     auth_user: AuthUser,
     Path((year, month)): Path<(i32, u32)>,
 ) -> AppResult<Json<MonthlyOperationsResponse>> {

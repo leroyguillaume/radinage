@@ -242,8 +242,8 @@ pub fn compute_max_page(total: i64, page_size: u32) -> u32 {
 
 // ── Handlers ─────────────────────────────────────────────────────────────────
 
-pub async fn list_operations<U, O: OperationRepository, B>(
-    State(state): State<AppState<U, O, B>>,
+pub async fn list_operations<U, O: OperationRepository, B, P>(
+    State(state): State<AppState<U, O, B, P>>,
     auth_user: AuthUser,
     Query(q): Query<ListOperationsQuery>,
 ) -> AppResult<Json<PaginatedResponse<OperationResponse>>> {
@@ -277,8 +277,8 @@ pub async fn list_operations<U, O: OperationRepository, B>(
     }))
 }
 
-pub async fn get_operation<U, O: OperationRepository, B>(
-    State(state): State<AppState<U, O, B>>,
+pub async fn get_operation<U, O: OperationRepository, B, P>(
+    State(state): State<AppState<U, O, B, P>>,
     auth_user: AuthUser,
     Path(id): Path<Uuid>,
 ) -> AppResult<Json<OperationResponse>> {
@@ -286,8 +286,8 @@ pub async fn get_operation<U, O: OperationRepository, B>(
     Ok(Json(op.into()))
 }
 
-pub async fn create_operation<U, O: OperationRepository, B: BudgetRepository>(
-    State(state): State<AppState<U, O, B>>,
+pub async fn create_operation<U, O: OperationRepository, B: BudgetRepository, P>(
+    State(state): State<AppState<U, O, B, P>>,
     auth_user: AuthUser,
     Json(body): Json<CreateOperationRequest>,
 ) -> AppResult<(StatusCode, Json<OperationResponse>)> {
@@ -322,8 +322,8 @@ pub async fn create_operation<U, O: OperationRepository, B: BudgetRepository>(
     Ok((StatusCode::CREATED, Json(updated.into())))
 }
 
-pub async fn update_operation<U, O: OperationRepository, B>(
-    State(state): State<AppState<U, O, B>>,
+pub async fn update_operation<U, O: OperationRepository, B, P>(
+    State(state): State<AppState<U, O, B, P>>,
     auth_user: AuthUser,
     Path(id): Path<Uuid>,
     Json(body): Json<UpdateOperationRequest>,
@@ -352,8 +352,8 @@ pub async fn update_operation<U, O: OperationRepository, B>(
     Ok(Json(op.into()))
 }
 
-pub async fn delete_operation<U, O: OperationRepository, B>(
-    State(state): State<AppState<U, O, B>>,
+pub async fn delete_operation<U, O: OperationRepository, B, P>(
+    State(state): State<AppState<U, O, B, P>>,
     auth_user: AuthUser,
     Path(id): Path<Uuid>,
 ) -> AppResult<StatusCode> {
@@ -364,8 +364,8 @@ pub async fn delete_operation<U, O: OperationRepository, B>(
     Ok(StatusCode::NO_CONTENT)
 }
 
-pub async fn link_budget<U, O: OperationRepository, B: BudgetRepository>(
-    State(state): State<AppState<U, O, B>>,
+pub async fn link_budget<U, O: OperationRepository, B: BudgetRepository, P>(
+    State(state): State<AppState<U, O, B, P>>,
     auth_user: AuthUser,
     Path(op_id): Path<Uuid>,
     Json(body): Json<LinkBudgetRequest>,
@@ -391,8 +391,8 @@ pub async fn link_budget<U, O: OperationRepository, B: BudgetRepository>(
     Ok(Json(op.into()))
 }
 
-pub async fn unlink_budget<U, O: OperationRepository, B>(
-    State(state): State<AppState<U, O, B>>,
+pub async fn unlink_budget<U, O: OperationRepository, B, P>(
+    State(state): State<AppState<U, O, B, P>>,
     auth_user: AuthUser,
     Path(id): Path<Uuid>,
 ) -> AppResult<Json<OperationResponse>> {
@@ -408,8 +408,8 @@ pub async fn unlink_budget<U, O: OperationRepository, B>(
     Ok(Json(op.into()))
 }
 
-pub async fn ignore_operation<U, O: OperationRepository, B>(
-    State(state): State<AppState<U, O, B>>,
+pub async fn ignore_operation<U, O: OperationRepository, B, P>(
+    State(state): State<AppState<U, O, B, P>>,
     auth_user: AuthUser,
     Path(id): Path<Uuid>,
 ) -> AppResult<Json<OperationResponse>> {
@@ -424,8 +424,8 @@ pub async fn ignore_operation<U, O: OperationRepository, B>(
     Ok(Json(op.into()))
 }
 
-pub async fn unignore_operation<U, O: OperationRepository, B>(
-    State(state): State<AppState<U, O, B>>,
+pub async fn unignore_operation<U, O: OperationRepository, B, P>(
+    State(state): State<AppState<U, O, B, P>>,
     auth_user: AuthUser,
     Path(id): Path<Uuid>,
 ) -> AppResult<Json<OperationResponse>> {
@@ -440,8 +440,8 @@ pub async fn unignore_operation<U, O: OperationRepository, B>(
     Ok(Json(op.into()))
 }
 
-pub async fn replace_splits<U, O: OperationRepository, B: BudgetRepository>(
-    State(state): State<AppState<U, O, B>>,
+pub async fn replace_splits<U, O: OperationRepository, B: BudgetRepository, P>(
+    State(state): State<AppState<U, O, B, P>>,
     auth_user: AuthUser,
     Path(id): Path<Uuid>,
     Json(body): Json<ReplaceOperationSplitsRequest>,
@@ -472,8 +472,8 @@ pub async fn replace_splits<U, O: OperationRepository, B: BudgetRepository>(
     Ok(Json(op.into()))
 }
 
-pub async fn clear_splits<U, O: OperationRepository, B>(
-    State(state): State<AppState<U, O, B>>,
+pub async fn clear_splits<U, O: OperationRepository, B, P>(
+    State(state): State<AppState<U, O, B, P>>,
     auth_user: AuthUser,
     Path(id): Path<Uuid>,
 ) -> AppResult<Json<OperationResponse>> {

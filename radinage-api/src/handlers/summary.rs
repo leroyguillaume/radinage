@@ -67,8 +67,8 @@ pub struct SummaryResponse {
 
 // ── Handler ──────────────────────────────────────────────────────────────────
 
-pub async fn get_summary<U, O: OperationRepository, B>(
-    State(state): State<AppState<U, O, B>>,
+pub async fn get_summary<U, O: OperationRepository, B, P>(
+    State(state): State<AppState<U, O, B, P>>,
     auth_user: AuthUser,
     Query(q): Query<SummaryQuery>,
 ) -> AppResult<Json<SummaryResponse>> {

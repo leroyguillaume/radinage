@@ -44,6 +44,10 @@ pub struct Config {
     #[arg(long, env = "MAX_BUDGETS_PER_USER", default_value_t = 100)]
     pub max_budgets_per_user: u32,
 
+    /// Maximum number of import profiles a single user can create.
+    #[arg(long, env = "MAX_IMPORT_PROFILES_PER_USER", default_value_t = 20)]
+    pub max_import_profiles_per_user: u32,
+
     /// Root path prefix for all API routes (e.g. "api/v1"). Empty by default.
     /// A leading "/" is stripped automatically.
     #[arg(long, env = "ROOT_PATH", default_value = "")]

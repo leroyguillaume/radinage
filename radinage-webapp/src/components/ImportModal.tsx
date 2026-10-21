@@ -1,60 +1,37 @@
 import {
+	ActionIcon,
 	Alert,
 	Button,
+	Center,
 	FileInput,
+	Group,
+	Loader,
 	Modal,
-	NumberInput,
-	SimpleGrid,
+	Select,
 	Stack,
-	TextInput,
+	Text,
+	ThemeIcon,
+	Title,
 } from "@mantine/core";
-import { IconAlertCircle, IconUpload } from "@tabler/icons-react";
-import { useQueryClient } from "@tanstack/react-query";
+import {
+	IconAlertCircle,
+	IconFileImport,
+	IconPencil,
+	IconPlus,
+	IconUpload,
+} from "@tabler/icons-react";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { apiFetch } from "@/lib/api";
+import { ImportProfileForm } from "@/components/ImportProfileForm";
+import { useImportOperations, useImportProfiles } from "@/lib/hooks";
+import type { ImportProfileResponse, ImportResult } from "@/lib/types";
 import { headingFont } from "@/theme";
 
-const STORAGE_KEY = "import_config";
+const NEW_PROFILE = "__new__";
 
-interface ImportConfig {
-	labelCol: number;
-	amountCol: number;
-	dateCol: number;
-	dateFormat: string;
-	skipLines: number;
-}
-
-export interface ImportResult {
-	imported: number;
-	skipped: number;
-	errors: { row: number; reason: string }[];
-}
-
-function loadConfig(): ImportConfig {
-	try {
-		const stored = localStorage.getItem(STORAGE_KEY);
-		if (stored) {
-			return JSON.parse(stored) as ImportConfig;
-		}
-	} catch {
-		// ignore
-	}
-	return {
-		labelCol: 0,
-		amountCol: 1,
-		dateCol: 2,
-		dateFormat: "%d/%m/%Y",
-		skipLines: 1,
-	};
-}
-
-function saveConfig(config: ImportConfig) {
-	try {
-		localStorage.setItem(STORAGE_KEY, JSON.stringify(config));
-	} catch {
-		// ignore
-	}
+/** The profile being created (`profile: null`) or edited, while the form is shown. */
+interface Editing {
+	profile: ImportProfileResponse | null;
 }
 
 export function ImportModal({
@@ -67,67 +44,129 @@ export function ImportModal({
 	onSuccess: (result: ImportResult) => void;
 }) {
 	const { t } = useTranslation();
-	const queryClient = useQueryClient();
+	const profiles = useImportProfiles();
+	const importOperations = useImportOperations();
 
-	const [config, setConfig] = useState<ImportConfig>(loadConfig);
+	const [selectedId, setSelectedId] = useState<string | null>(null);
+	const [editing, setEditing] = useState<Editing | null>(null);
 	const [file, setFile] = useState<File | null>(null);
-	const [loading, setLoading] = useState(false);
 	const [error, setError] = useState<string | null>(null);
 
 	useEffect(() => {
 		if (opened) {
+			setSelectedId(null);
+			setEditing(null);
 			setFile(null);
 			setError(null);
 		}
 	}, [opened]);
 
-	function updateConfig(patch: Partial<ImportConfig>) {
-		setConfig((prev) => {
-			const next = { ...prev, ...patch };
-			saveConfig(next);
-			return next;
-		});
-	}
+	const list = profiles.data ?? [];
+	// The list comes most recently used first, so that is the default choice.
+	const selected = list.find((p) => p.id === selectedId) ?? list[0] ?? null;
 
 	async function handleImport() {
-		if (!file) return;
-
-		setLoading(true);
+		if (!file || !selected) return;
 		setError(null);
-
-		const formData = new FormData();
-		formData.append("file", file);
-		formData.append("labelCol", String(config.labelCol));
-		formData.append("amountCol", String(config.amountCol));
-		formData.append("dateCol", String(config.dateCol));
-		formData.append("dateFormat", config.dateFormat);
-		formData.append("skipLines", String(config.skipLines));
-
 		try {
-			const res = await apiFetch<ImportResult>("/operations/import", {
-				method: "POST",
-				body: formData,
-			});
-			queryClient.invalidateQueries({ queryKey: ["monthly-operations"] });
-			onSuccess(res);
+			onSuccess(
+				await importOperations.mutateAsync({ file, profile: selected }),
+			);
 		} catch {
 			setError(t("import.error"));
-		} finally {
-			setLoading(false);
 		}
 	}
 
-	return (
-		<Modal
-			opened={opened}
-			onClose={onClose}
-			title={t("import.title")}
-			size="lg"
-			styles={{
-				title: { fontFamily: headingFont, fontSize: 22, fontWeight: 700 },
-			}}
-		>
+	function title() {
+		if (!editing) return t("import.title");
+		return editing.profile
+			? t("importProfile.editTitle")
+			: t("importProfile.newTitle");
+	}
+
+	function body() {
+		if (editing) {
+			return (
+				<ImportProfileForm
+					profile={editing.profile}
+					onSaved={(profile) => {
+						setSelectedId(profile.id);
+						setEditing(null);
+					}}
+					onCancel={() => setEditing(null)}
+					onDeleted={() => {
+						setSelectedId(null);
+						setEditing(null);
+					}}
+				/>
+			);
+		}
+		if (profiles.isPending) {
+			return (
+				<Center py="xl">
+					<Loader />
+				</Center>
+			);
+		}
+		if (profiles.isError) {
+			return (
+				<Alert color="tangerine" icon={<IconAlertCircle size={16} />}>
+					{t("common.error")}
+				</Alert>
+			);
+		}
+		if (!selected) {
+			return (
+				<Stack align="center" gap="sm" py="md" ta="center">
+					<ThemeIcon size={56} radius="lg" variant="light">
+						<IconFileImport size={28} />
+					</ThemeIcon>
+					<Title order={4}>{t("import.noProfiles")}</Title>
+					<Text c="dimmed" size="sm">
+						{t("import.noProfilesText")}
+					</Text>
+					<Button
+						leftSection={<IconPlus size={18} />}
+						onClick={() => setEditing({ profile: null })}
+						fullWidth
+						mt="xs"
+					>
+						{t("import.createProfile")}
+					</Button>
+				</Stack>
+			);
+		}
+		return (
 			<Stack gap="md">
+				<Group gap="xs" align="flex-end" wrap="nowrap">
+					<Select
+						label={t("import.profile")}
+						data={[
+							...list.map((p) => ({ value: p.id, label: p.name })),
+							{ value: NEW_PROFILE, label: t("import.newProfile") },
+						]}
+						value={selected.id}
+						onChange={(v) => {
+							if (v === NEW_PROFILE) {
+								setEditing({ profile: null });
+							} else if (v !== null) {
+								setSelectedId(v);
+							}
+						}}
+						allowDeselect={false}
+						style={{ flex: 1 }}
+					/>
+					<ActionIcon
+						variant="default"
+						size={44}
+						radius="md"
+						aria-label={t("import.editProfile")}
+						onClick={() => setEditing({ profile: selected })}
+					>
+						<IconPencil size={18} />
+					</ActionIcon>
+				</Group>
+
 				<FileInput
 					label={t("import.file")}
 					placeholder={t("import.filePlaceholder")}
@@ -137,46 +176,6 @@ export function ImportModal({
 					onChange={setFile}
 				/>
 
-				<SimpleGrid cols={{ base: 1, sm: 3 }} spacing="md">
-					<NumberInput
-						label={t("import.labelCol")}
-						value={config.labelCol}
-						onChange={(v) => updateConfig({ labelCol: Number(v) })}
-						min={0}
-					/>
-
-					<NumberInput
-						label={t("import.amountCol")}
-						value={config.amountCol}
-						onChange={(v) => updateConfig({ amountCol: Number(v) })}
-						min={0}
-					/>
-
-					<NumberInput
-						label={t("import.dateCol")}
-						value={config.dateCol}
-						onChange={(v) => updateConfig({ dateCol: Number(v) })}
-						min={0}
-					/>
-				</SimpleGrid>
-
-				<SimpleGrid cols={{ base: 1, sm: 2 }} spacing="md">
-					<TextInput
-						label={t("import.dateFormat")}
-						value={config.dateFormat}
-						onChange={(e) =>
-							updateConfig({ dateFormat: e.currentTarget.value })
-						}
-					/>
-
-					<NumberInput
-						label={t("import.skipLines")}
-						value={config.skipLines}
-						onChange={(v) => updateConfig({ skipLines: Number(v) })}
-						min={0}
-					/>
-				</SimpleGrid>
-
 				{error && (
 					<Alert color="tangerine" icon={<IconAlertCircle size={16} />}>
 						{error}
@@ -185,7 +184,7 @@ export function ImportModal({
 
 				<Button
 					onClick={handleImport}
-					loading={loading}
+					loading={importOperations.isPending}
 					disabled={!file}
 					leftSection={<IconUpload size={18} />}
 					fullWidth
@@ -194,6 +193,20 @@ export function ImportModal({
 					{t("import.submit")}
 				</Button>
 			</Stack>
+		);
+	}
+
+	return (
+		<Modal
+			opened={opened}
+			onClose={onClose}
+			title={title()}
+			size="lg"
+			styles={{
+				title: { fontFamily: headingFont, fontSize: 22, fontWeight: 700 },
+			}}
+		>
+			{body()}
 		</Modal>
 	);
 }

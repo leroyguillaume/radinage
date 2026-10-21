@@ -3,6 +3,7 @@ pub mod budgets;
 pub mod data;
 pub mod forecast;
 pub mod import;
+pub mod import_profiles;
 pub mod monthly_operations;
 pub mod operations;
 pub mod summary;

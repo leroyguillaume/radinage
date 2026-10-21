@@ -3,8 +3,10 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { selectMantineOption } from "@/__tests__/mantine";
 import { ImportModal } from "@/components/ImportModal";
 import { i18n } from "@/i18n";
+import type { ImportProfileResponse } from "@/lib/types";
 import { theme } from "@/theme";
 
 vi.mock("@/lib/api", () => ({
@@ -22,9 +24,39 @@ vi.mock("@/lib/api", () => ({
 const { apiFetch } = await import("@/lib/api");
 const apiFetchMock = vi.mocked(apiFetch);
 
-const STORAGE_KEY = "import_config";
+function makeProfile(
+	overrides: Partial<ImportProfileResponse> = {},
+): ImportProfileResponse {
+	return {
+		id: "p1",
+		name: "Crédit Agricole",
+		labelCol: 1,
+		amountCol: 3,
+		dateCol: 0,
+		dateFormat: "%d/%m/%Y",
+		skipLines: 1,
+		lastUsedAt: "2026-10-20T10:00:00Z",
+		createdAt: "2026-01-01T10:00:00Z",
+		...overrides,
+	};
+}
 
-function renderModal(onClose = vi.fn(), onSuccess = vi.fn()) {
+/** Answer the profile list with `profiles` and every import with `importResult`. */
+function mockApi(
+	profiles: ImportProfileResponse[],
+	importResult: unknown = { imported: 2, skipped: 0, errors: [] },
+) {
+	apiFetchMock.mockImplementation(async (path) => {
+		if (path === "/import-profiles") return profiles;
+		if (path === "/operations/import") {
+			if (importResult instanceof Error) throw importResult;
+			return importResult;
+		}
+		throw new Error(`unexpected call to ${path}`);
+	});
+}
+
+function renderModal(onSuccess = vi.fn()) {
 	const queryClient = new QueryClient({
 		defaultOptions: { queries: { retry: false } },
 	});
@@ -32,119 +64,140 @@ function renderModal(onClose = vi.fn(), onSuccess = vi.fn()) {
 	render(
 		<QueryClientProvider client={queryClient}>
 			<MantineProvider theme={theme} env="test">
-				<ImportModal opened onClose={onClose} onSuccess={onSuccess} />
+				<ImportModal opened onClose={vi.fn()} onSuccess={onSuccess} />
 			</MantineProvider>
 		</QueryClientProvider>,
 	);
 
-	return { onClose, onSuccess, queryClient };
+	return { onSuccess };
+}
+
+async function uploadFile() {
+	const file = new File(["a,b"], "releve.csv", { type: "text/csv" });
+	const input = document.querySelector("input[type='file']");
+	if (!(input instanceof HTMLInputElement)) throw new Error("no file input");
+	await userEvent.setup().upload(input, file);
+	return file;
+}
+
+function importCall() {
+	const call = apiFetchMock.mock.calls.find(
+		([path]) => path === "/operations/import",
+	);
+	const body = call?.[1]?.body;
+	if (!(body instanceof FormData)) throw new Error("no import call");
+	return body;
 }
 
 beforeEach(async () => {
 	await i18n.changeLanguage("fr");
-	try {
-		localStorage.removeItem(STORAGE_KEY);
-	} catch {
-		// ignore
-	}
 });
 
 afterEach(() => {
 	vi.restoreAllMocks();
+	apiFetchMock.mockReset();
 });
 
 describe("ImportModal", () => {
-	it("renders all configuration fields", () => {
-		renderModal();
-
-		expect(screen.getByText("Importer des opérations")).toBeInTheDocument();
-		expect(
-			screen.getByText("Colonne du libellé (à partir de 0)"),
-		).toBeInTheDocument();
-		expect(
-			screen.getByText("Colonne du montant (à partir de 0)"),
-		).toBeInTheDocument();
-		expect(
-			screen.getByText("Colonne de la date (à partir de 0)"),
-		).toBeInTheDocument();
-		expect(screen.getByText("Format de date")).toBeInTheDocument();
-		expect(screen.getByText("Lignes à ignorer (en-tête)")).toBeInTheDocument();
-	});
-
-	it("has import button disabled when no file is selected", () => {
-		renderModal();
-
-		const button = screen.getByRole("button", { name: "Importer" });
-		expect(button).toBeDisabled();
-	});
-
-	it("saves config to localStorage when changed", async () => {
+	it("invites to create a profile when there is none", async () => {
+		mockApi([]);
 		renderModal();
 		const user = userEvent.setup();
 
-		const dateFormatInput = screen.getByDisplayValue("%d/%m/%Y");
-		await user.clear(dateFormatInput);
-		await user.type(dateFormatInput, "%Y-%m-%d");
+		expect(
+			await screen.findByText("Créez votre premier profil"),
+		).toBeInTheDocument();
+		await user.click(screen.getByRole("button", { name: "Créer un profil" }));
 
-		expect(screen.getByDisplayValue("%Y-%m-%d")).toBeInTheDocument();
+		expect(screen.getByText("Nouveau profil")).toBeInTheDocument();
+		expect(screen.getByLabelText(/Nom/)).toHaveValue("");
 	});
 
-	it("renders with default config values", () => {
+	it("preselects the most recently used profile", async () => {
+		mockApi([makeProfile(), makeProfile({ id: "p2", name: "Boursorama" })]);
 		renderModal();
 
-		expect(screen.getByDisplayValue("%d/%m/%Y")).toBeInTheDocument();
-		expect(
-			screen.getByLabelText("Colonne du libellé (à partir de 0)"),
-		).toHaveValue("0");
-		expect(
-			screen.getByLabelText("Colonne du montant (à partir de 0)"),
-		).toHaveValue("1");
-		expect(
-			screen.getByLabelText("Colonne de la date (à partir de 0)"),
-		).toHaveValue("2");
-		expect(screen.getByLabelText("Lignes à ignorer (en-tête)")).toHaveValue(
-			"1",
+		expect(await screen.findByRole("combobox", { name: "Profil" })).toHaveValue(
+			"Crédit Agricole",
 		);
 	});
 
-	it("calls onSuccess on successful import", async () => {
-		const importResult = { imported: 5, skipped: 1, errors: [] };
-		apiFetchMock.mockResolvedValueOnce(importResult);
+	it("keeps import disabled until a file is chosen", async () => {
+		mockApi([makeProfile()]);
+		renderModal();
 
-		const { onSuccess } = renderModal();
-		const user = userEvent.setup();
-
-		const file = new File(["test,data"], "test.csv", { type: "text/csv" });
-		const fileInput = document.querySelector(
-			"input[type='file']",
-		) as HTMLInputElement;
-		await user.upload(fileInput, file);
-
-		const button = screen.getByRole("button", { name: "Importer" });
-		await user.click(button);
-
-		await waitFor(() => {
-			expect(onSuccess).toHaveBeenCalledWith(importResult);
-		});
+		await screen.findByRole("combobox", { name: "Profil" });
+		expect(screen.getByRole("button", { name: "Importer" })).toBeDisabled();
 	});
 
-	it("shows error on failed import", async () => {
-		apiFetchMock.mockRejectedValueOnce(new Error("Network error"));
+	it("imports with the selected profile's settings", async () => {
+		const result = { imported: 2, skipped: 1, errors: [] };
+		mockApi(
+			[
+				makeProfile(),
+				makeProfile({ id: "p2", name: "Boursorama", labelCol: 2 }),
+			],
+			result,
+		);
+		const { onSuccess } = renderModal();
 
+		await screen.findByRole("combobox", { name: "Profil" });
+		await selectMantineOption("Profil", "Boursorama");
+		const file = await uploadFile();
+		await userEvent
+			.setup()
+			.click(screen.getByRole("button", { name: "Importer" }));
+
+		await waitFor(() => expect(onSuccess).toHaveBeenCalledWith(result));
+		const body = importCall();
+		expect(body.get("file")).toEqual(file);
+		expect(body.get("profileId")).toBe("p2");
+		expect(body.get("labelCol")).toBe("2");
+		expect(body.get("amountCol")).toBe("3");
+		expect(body.get("dateCol")).toBe("0");
+		expect(body.get("dateFormat")).toBe("%d/%m/%Y");
+		expect(body.get("skipLines")).toBe("1");
+	});
+
+	it("shows an error when the import fails", async () => {
+		mockApi([makeProfile()], new Error("Network error"));
 		renderModal();
-		const user = userEvent.setup();
 
-		const file = new File(["test,data"], "test.csv", { type: "text/csv" });
-		const fileInput = document.querySelector(
-			"input[type='file']",
-		) as HTMLInputElement;
-		await user.upload(fileInput, file);
-
-		const button = screen.getByRole("button", { name: "Importer" });
-		await user.click(button);
+		await screen.findByRole("combobox", { name: "Profil" });
+		await uploadFile();
+		await userEvent
+			.setup()
+			.click(screen.getByRole("button", { name: "Importer" }));
 
 		expect(
 			await screen.findByText("Erreur lors de l'import"),
 		).toBeInTheDocument();
+	});
+
+	it("opens a blank profile form from the new profile option", async () => {
+		mockApi([makeProfile()]);
+		renderModal();
+
+		await screen.findByRole("combobox", { name: "Profil" });
+		await selectMantineOption("Profil", "＋ Nouveau profil…");
+
+		expect(screen.getByText("Nouveau profil")).toBeInTheDocument();
+		expect(screen.getByLabelText(/Nom/)).toHaveValue("");
+	});
+
+	it("edits the selected profile and comes back on cancel", async () => {
+		mockApi([makeProfile()]);
+		renderModal();
+		const user = userEvent.setup();
+
+		await user.click(
+			await screen.findByRole("button", { name: "Modifier le profil" }),
+		);
+		expect(screen.getByLabelText(/Nom/)).toHaveValue("Crédit Agricole");
+
+		await user.click(screen.getByRole("button", { name: "Annuler" }));
+		expect(screen.getByRole("combobox", { name: "Profil" })).toHaveValue(
+			"Crédit Agricole",
+		);
 	});
 });
