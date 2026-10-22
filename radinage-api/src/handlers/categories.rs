@@ -1,7 +1,7 @@
 use crate::{
     AppState,
     auth::middleware::AuthUser,
-    domain::category::{Category, CategoryColor, CategoryFields},
+    domain::category::{Category, CategoryColor, CategoryFields, CategoryIcon},
     error::{AppError, AppResult},
     repositories::CategoryRepository,
 };
@@ -22,12 +22,15 @@ const MAX_NAME_LEN: usize = 50;
 /// Body of a create or update: the whole category, every field replaced on update.
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-#[schemars(extend("example" = serde_json::json!({ "name": "Groceries", "color": "teal" })))]
+#[schemars(extend("example" = serde_json::json!({ "name": "Groceries", "color": "teal", "icon": "cart" })))]
 pub struct CategoryRequest {
     /// Name shown on operations, unique per user (1 to 50 characters).
     pub name: String,
     /// Colour the category is shown with.
     pub color: CategoryColor,
+    /// Icon shown inside the colour; omitted or null for none.
+    #[serde(default)]
+    pub icon: Option<CategoryIcon>,
 }
 
 /// A category (omits `userId`).
@@ -37,6 +40,7 @@ pub struct CategoryResponse {
     pub id: Uuid,
     pub name: String,
     pub color: CategoryColor,
+    pub icon: Option<CategoryIcon>,
     pub created_at: DateTime<Utc>,
 }
 
@@ -46,6 +50,7 @@ impl From<Category> for CategoryResponse {
             id: c.id,
             name: c.fields.name,
             color: c.fields.color,
+            icon: c.fields.icon,
             created_at: c.created_at,
         }
     }
@@ -64,6 +69,7 @@ impl TryFrom<CategoryRequest> for CategoryFields {
         Ok(Self {
             name,
             color: body.color,
+            icon: body.icon,
         })
     }
 }
@@ -156,6 +162,7 @@ mod tests {
         CategoryRequest {
             name: name.to_string(),
             color: CategoryColor::Teal,
+            icon: None,
         }
     }
 
@@ -240,6 +247,7 @@ mod tests {
         let json: serde_json::Value = response_json(resp).await;
         assert_eq!(json[0]["name"], "Food");
         assert_eq!(json[0]["color"], "teal");
+        assert!(json[0]["icon"].is_null());
         assert!(json[0].get("userId").is_none());
     }
 
@@ -311,6 +319,25 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn create_with_unknown_icon_is_rejected() {
+        let mut repo = MockCategoryRepository::new();
+        repo.expect_create().never();
+
+        let auth = auth_header(Uuid::new_v4(), UserRole::User);
+        let resp = app(repo)
+            .oneshot(json_request(
+                "POST",
+                "/categories",
+                Some(r#"{"name":"Food","color":"teal","icon":"rocket"}"#),
+                Some(&auth),
+            ))
+            .await
+            .unwrap();
+
+        assert!(resp.status().is_client_error());
+    }
+
+    #[tokio::test]
     async fn update_unknown_category_is_not_found() {
         let mut repo = MockCategoryRepository::new();
         repo.expect_update()
@@ -349,6 +376,7 @@ mod tests {
         let req = CategoryRequest {
             name: "Groceries".to_string(),
             color: CategoryColor::Orange,
+            icon: Some(CategoryIcon::Cart),
         };
         let resp = app(repo)
             .oneshot(json_request(
@@ -364,6 +392,7 @@ mod tests {
         let json: CategoryResponse = response_json(resp).await;
         assert_eq!(json.id, id);
         assert_eq!(json.color, CategoryColor::Orange);
+        assert_eq!(json.icon, Some(CategoryIcon::Cart));
     }
 
     #[tokio::test]

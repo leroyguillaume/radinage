@@ -1,11 +1,11 @@
 use crate::{
-    domain::category::{Category, CategoryColor, CategoryFields},
+    domain::category::{Category, CategoryColor, CategoryFields, CategoryIcon},
     error::{AppError, AppResult},
 };
 use sqlx::{PgPool, Row, postgres::PgRow};
 use uuid::Uuid;
 
-const COLUMNS: &str = "id, user_id, name, color, created_at";
+const COLUMNS: &str = "id, user_id, name, color, icon, created_at";
 
 /// Data access interface for categories.
 #[cfg_attr(test, mockall::automock)]
@@ -65,12 +65,17 @@ impl PgCategoryRepository {
 
 fn row_to_category(row: &PgRow) -> AppResult<Category> {
     let color: &str = row.try_get("color")?;
+    let icon: Option<&str> = row.try_get("icon")?;
     Ok(Category {
         id: row.try_get("id")?,
         user_id: row.try_get("user_id")?,
         fields: CategoryFields {
             name: row.try_get("name")?,
             color: color.parse::<CategoryColor>().map_err(AppError::Internal)?,
+            icon: icon
+                .map(str::parse::<CategoryIcon>)
+                .transpose()
+                .map_err(AppError::Internal)?,
         },
         created_at: row.try_get("created_at")?,
     })
@@ -117,11 +122,13 @@ impl CategoryRepository for PgCategoryRepository {
 
     async fn create(&self, user_id: Uuid, fields: &CategoryFields) -> AppResult<Category> {
         let row = sqlx::query(&format!(
-            "INSERT INTO categories (user_id, name, color) VALUES ($1, $2, $3) RETURNING {COLUMNS}"
+            "INSERT INTO categories (user_id, name, color, icon) VALUES ($1, $2, $3, $4) \
+             RETURNING {COLUMNS}"
         ))
         .bind(user_id)
         .bind(&fields.name)
         .bind(fields.color.as_str())
+        .bind(fields.icon.as_ref().map(CategoryIcon::as_str))
         .fetch_one(&self.pool)
         .await
         .map_err(|e| map_name_conflict(e, &fields.name))?;
@@ -135,13 +142,14 @@ impl CategoryRepository for PgCategoryRepository {
         fields: &CategoryFields,
     ) -> AppResult<Option<Category>> {
         let row = sqlx::query(&format!(
-            "UPDATE categories SET name = $3, color = $4 \
+            "UPDATE categories SET name = $3, color = $4, icon = $5 \
              WHERE id = $1 AND user_id = $2 RETURNING {COLUMNS}"
         ))
         .bind(id)
         .bind(user_id)
         .bind(&fields.name)
         .bind(fields.color.as_str())
+        .bind(fields.icon.as_ref().map(CategoryIcon::as_str))
         .fetch_optional(&self.pool)
         .await
         .map_err(|e| map_name_conflict(e, &fields.name))?;
@@ -179,6 +187,7 @@ mod tests {
         CategoryFields {
             name: name.to_string(),
             color: CategoryColor::Teal,
+            icon: None,
         }
     }
 
@@ -221,6 +230,7 @@ mod tests {
         let changed = CategoryFields {
             name: "Groceries".to_string(),
             color: CategoryColor::Orange,
+            icon: Some(CategoryIcon::Cart),
         };
 
         assert!(repo.exists(created.id, alice).await.unwrap());
@@ -237,6 +247,12 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(updated.fields, changed);
+        let cleared = repo
+            .update(created.id, alice, &fields("Groceries"))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(cleared.fields.icon, None);
     }
 
     #[sqlx::test(migrations = "./migrations")]

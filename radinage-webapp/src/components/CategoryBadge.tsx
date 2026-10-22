@@ -1,22 +1,48 @@
-import { Box, Group, Select, type SelectProps, Text } from "@mantine/core";
+import {
+	Box,
+	Center,
+	Group,
+	Select,
+	type SelectProps,
+	Text,
+	ThemeIcon,
+} from "@mantine/core";
+import { categoryIcons } from "@/lib/category-icons";
 import { categoryFill } from "@/lib/tones";
-import type { CategoryColor, CategoryResponse } from "@/lib/types";
+import type { CategoryLook, CategoryResponse } from "@/lib/types";
 
+/** Width of a category's mark, with or without an icon, so names line up in a list. */
+export const CATEGORY_MARK_SIZE = 20;
+
+/** A category's colour, with its icon inside when it has one. */
 export function CategoryDot({
-	color,
-	size = 10,
+	category,
+	size = CATEGORY_MARK_SIZE,
 }: {
-	color: CategoryColor;
+	category: CategoryLook;
 	size?: number;
 }) {
+	const Icon = category.icon ? categoryIcons[category.icon] : undefined;
 	return (
-		<Box
-			w={size}
-			h={size}
-			bg={categoryFill(color)}
-			style={{ borderRadius: "50%", flexShrink: 0 }}
-			aria-hidden
-		/>
+		<Center w={size} h={size} style={{ flexShrink: 0 }} aria-hidden>
+			{Icon ? (
+				<ThemeIcon
+					color={`${category.color}.6`}
+					autoContrast
+					radius="xl"
+					size={size}
+				>
+					<Icon size={size * 0.65} stroke={2} />
+				</ThemeIcon>
+			) : (
+				<Box
+					w={size / 2}
+					h={size / 2}
+					bg={categoryFill(category.color)}
+					style={{ borderRadius: "50%" }}
+				/>
+			)}
+		</Center>
 	);
 }
 
@@ -30,7 +56,7 @@ export function CategoryBadge({
 }) {
 	return (
 		<Group gap={6} wrap="nowrap" miw={0}>
-			<CategoryDot color={category.color} />
+			<CategoryDot category={category} />
 			<Text
 				size="sm"
 				c={inherited ? "dimmed" : undefined}
@@ -67,7 +93,7 @@ export function CategorySelect({
 				...categories.map((c) => ({ value: c.id, label: c.name })),
 			]}
 			leftSection={
-				selected ? <CategoryDot color={selected.color} /> : props.leftSection
+				selected ? <CategoryDot category={selected} /> : props.leftSection
 			}
 			renderOption={({ option }) => {
 				const category = byId.get(option.value);

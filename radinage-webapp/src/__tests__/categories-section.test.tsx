@@ -27,6 +27,7 @@ const food: CategoryResponse = {
 	id: "c1",
 	name: "Courses",
 	color: "teal",
+	icon: null,
 	createdAt: "2026-01-01T00:00:00Z",
 };
 
@@ -102,7 +103,52 @@ describe("CategoriesSection", () => {
 				{
 					path: "/categories",
 					method: "POST",
-					body: { name: "Loisirs", color: "grape" },
+					body: { name: "Loisirs", color: "grape", icon: null },
+				},
+			]),
+		);
+	});
+
+	it("creates a category with the icon picked, none by default", async () => {
+		mockApi([]);
+		const user = renderSection();
+
+		await user.click(
+			await screen.findByRole("button", { name: /Ajouter une catégorie/ }),
+		);
+		expect(screen.getByRole("radio", { name: "Sans icône" })).toBeChecked();
+		await user.type(screen.getByRole("textbox", { name: /Nom/ }), "Resto");
+		await user.click(screen.getByRole("radio", { name: "Restaurant" }));
+		await user.click(screen.getByRole("button", { name: "Enregistrer" }));
+
+		await waitFor(() =>
+			expect(writes()).toEqual([
+				{
+					path: "/categories",
+					method: "POST",
+					body: { name: "Resto", color: "forest", icon: "restaurant" },
+				},
+			]),
+		);
+	});
+
+	it("removes the icon of a category", async () => {
+		mockApi([{ ...food, icon: "cart" }]);
+		const user = renderSection();
+
+		await user.click(
+			await screen.findByRole("button", { name: "Modifier Courses" }),
+		);
+		expect(screen.getByRole("radio", { name: "Courses" })).toBeChecked();
+		await user.click(screen.getByRole("radio", { name: "Sans icône" }));
+		await user.click(screen.getByRole("button", { name: "Enregistrer" }));
+
+		await waitFor(() =>
+			expect(writes()).toEqual([
+				{
+					path: "/categories/c1",
+					method: "PUT",
+					body: { name: "Courses", color: "teal", icon: null },
 				},
 			]),
 		);
@@ -186,7 +232,7 @@ describe("CategoriesSection", () => {
 				{
 					path: "/categories/c1",
 					method: "PUT",
-					body: { name: "Alimentation", color: "teal" },
+					body: { name: "Alimentation", color: "teal", icon: null },
 				},
 			]),
 		);

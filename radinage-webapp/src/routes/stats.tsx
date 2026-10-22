@@ -2,6 +2,7 @@ import { AreaChart, BarChart, PieChart } from "@mantine/charts";
 import {
 	Alert,
 	Box,
+	Center,
 	Group,
 	Loader,
 	Paper,
@@ -15,7 +16,7 @@ import { IconAlertCircle } from "@tabler/icons-react";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useId } from "react";
 import { useTranslation } from "react-i18next";
-import { CategoryDot } from "@/components/CategoryBadge";
+import { CATEGORY_MARK_SIZE, CategoryDot } from "@/components/CategoryBadge";
 import { PageHeader } from "@/components/PageHeader";
 import { StatTile } from "@/components/StatTile";
 import {
@@ -77,17 +78,22 @@ const OTHERS_FILL = "var(--mantine-color-gray-5)";
 
 function NoCategoryDot({ fill }: { fill?: string }) {
 	return (
-		<Box
-			w={10}
-			h={10}
-			bg={fill}
-			style={{
-				borderRadius: "50%",
-				border: fill ? undefined : "1px solid var(--mantine-color-dimmed)",
-				flexShrink: 0,
-			}}
+		<Center
+			w={CATEGORY_MARK_SIZE}
+			h={CATEGORY_MARK_SIZE}
+			style={{ flexShrink: 0 }}
 			aria-hidden
-		/>
+		>
+			<Box
+				w={CATEGORY_MARK_SIZE / 2}
+				h={CATEGORY_MARK_SIZE / 2}
+				bg={fill}
+				style={{
+					borderRadius: "50%",
+					border: fill ? undefined : "1px solid var(--mantine-color-dimmed)",
+				}}
+			/>
+		</Center>
 	);
 }
 
@@ -191,7 +197,7 @@ function CategoryBreakdown({
 										<Group justify="space-between" wrap="nowrap" gap="sm">
 											<Group gap={8} wrap="nowrap" miw={0}>
 												{row.category ? (
-													<CategoryDot color={row.category.color} />
+													<CategoryDot category={row.category} />
 												) : (
 													<NoCategoryDot fill={UNCATEGORIZED_FILL} />
 												)}

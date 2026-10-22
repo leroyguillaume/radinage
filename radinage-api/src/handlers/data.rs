@@ -3,7 +3,7 @@ use crate::{
     auth::middleware::AuthUser,
     domain::{
         budget::{Budget, BudgetFields, BudgetKind, BudgetType, Rule},
-        category::{Category, CategoryColor, CategoryFields},
+        category::{Category, CategoryColor, CategoryFields, CategoryIcon},
         import_profile::{ImportProfile, ImportProfileFields},
         operation::{BudgetLink, NewOperationSplit, Operation, OperationSplit, validate_splits},
         user::AccountBalance,
@@ -65,6 +65,8 @@ pub struct ExportCategory {
     pub id: Uuid,
     pub name: String,
     pub color: CategoryColor,
+    #[serde(default)]
+    pub icon: Option<CategoryIcon>,
 }
 
 impl From<Category> for ExportCategory {
@@ -73,6 +75,7 @@ impl From<Category> for ExportCategory {
             id: c.id,
             name: c.fields.name,
             color: c.fields.color,
+            icon: c.fields.icon,
         }
     }
 }
@@ -346,6 +349,7 @@ pub async fn import_data<
             let request = CategoryRequest {
                 name: c.name.clone(),
                 color: c.color,
+                icon: c.icon,
             };
             CategoryFields::try_from(request)
                 .map(|fields| (c.id, fields))
@@ -1550,6 +1554,7 @@ mod tests {
             fields: CategoryFields {
                 name: name.to_string(),
                 color: CategoryColor::Teal,
+                icon: None,
             },
             created_at: Utc::now(),
         }
@@ -1636,7 +1641,7 @@ mod tests {
         let mut category_repo = categories_listing(vec![existing]);
         category_repo
             .expect_create()
-            .withf(|_, fields| fields.name == "Fun")
+            .withf(|_, fields| fields.name == "Fun" && fields.icon == Some(CategoryIcon::Games))
             .once()
             .returning(move |user_id, fields| {
                 let created = Category {
@@ -1674,7 +1679,7 @@ mod tests {
             "version": 1,
             "categories": [
                 {"id": "11111111-1111-1111-1111-111111111111", "name": "Food", "color": "orange"},
-                {"id": "22222222-2222-2222-2222-222222222222", "name": "Fun", "color": "grape"}
+                {"id": "22222222-2222-2222-2222-222222222222", "name": "Fun", "color": "grape", "icon": "games"}
             ],
             "budgets": [
                 {
