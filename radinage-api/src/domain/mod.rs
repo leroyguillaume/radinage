@@ -1,3 +1,41 @@
+/// Declares a unit enum stored and sent as one fixed string per variant, with the
+/// `as_str` / `FromStr` pair repositories read and write it through. The strings must
+/// match the enum's serde names: a test per enum checks it over `ALL`.
+macro_rules! string_enum {
+    (
+        $(#[$meta:meta])*
+        $vis:vis enum $name:ident ($what:literal) {
+            $($(#[$vmeta:meta])* $variant:ident => $str:literal,)+
+        }
+    ) => {
+        $(#[$meta])*
+        $vis enum $name {
+            $($(#[$vmeta])* $variant,)+
+        }
+
+        impl $name {
+            #[cfg(test)]
+            pub const ALL: &[Self] = &[$(Self::$variant,)+];
+
+            pub fn as_str(&self) -> &'static str {
+                match self {
+                    $(Self::$variant => $str,)+
+                }
+            }
+        }
+
+        impl std::str::FromStr for $name {
+            type Err = String;
+            fn from_str(s: &str) -> Result<Self, Self::Err> {
+                match s {
+                    $($str => Ok(Self::$variant),)+
+                    other => Err(format!("unknown {}: {other}", $what)),
+                }
+            }
+        }
+    };
+}
+
 pub mod budget;
 pub mod category;
 pub mod import_profile;

@@ -3,65 +3,78 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-/// Colour a category is shown with, a key of the web app's palette.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[schemars(transform = crate::schema::flatten_string_enum)]
-#[serde(rename_all = "camelCase")]
-pub enum CategoryColor {
-    Forest,
-    Blue,
-    Cyan,
-    Teal,
-    Lime,
-    Yellow,
-    Orange,
-    Red,
-    Pink,
-    Grape,
-    Violet,
-    Indigo,
-    Gray,
-}
-
-impl CategoryColor {
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            Self::Forest => "forest",
-            Self::Blue => "blue",
-            Self::Cyan => "cyan",
-            Self::Teal => "teal",
-            Self::Lime => "lime",
-            Self::Yellow => "yellow",
-            Self::Orange => "orange",
-            Self::Red => "red",
-            Self::Pink => "pink",
-            Self::Grape => "grape",
-            Self::Violet => "violet",
-            Self::Indigo => "indigo",
-            Self::Gray => "gray",
-        }
+string_enum! {
+    /// Colour a category is shown with, a key of the web app's palette.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+    #[schemars(transform = crate::schema::flatten_string_enum)]
+    #[serde(rename_all = "camelCase")]
+    pub enum CategoryColor ("category color") {
+        Forest => "forest",
+        Blue => "blue",
+        Cyan => "cyan",
+        Teal => "teal",
+        Lime => "lime",
+        Yellow => "yellow",
+        Orange => "orange",
+        Red => "red",
+        Pink => "pink",
+        Grape => "grape",
+        Violet => "violet",
+        Indigo => "indigo",
+        Gray => "gray",
     }
 }
 
-impl std::str::FromStr for CategoryColor {
-    type Err = String;
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "forest" => Ok(Self::Forest),
-            "blue" => Ok(Self::Blue),
-            "cyan" => Ok(Self::Cyan),
-            "teal" => Ok(Self::Teal),
-            "lime" => Ok(Self::Lime),
-            "yellow" => Ok(Self::Yellow),
-            "orange" => Ok(Self::Orange),
-            "red" => Ok(Self::Red),
-            "pink" => Ok(Self::Pink),
-            "grape" => Ok(Self::Grape),
-            "violet" => Ok(Self::Violet),
-            "indigo" => Ok(Self::Indigo),
-            "gray" => Ok(Self::Gray),
-            other => Err(format!("unknown category color: {other}")),
-        }
+string_enum! {
+    /// Icon a category is shown with, drawn by the web app from its own icon set.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+    #[schemars(transform = crate::schema::flatten_string_enum)]
+    #[serde(rename_all = "camelCase")]
+    pub enum CategoryIcon ("category icon") {
+        Cart => "cart",
+        Home => "home",
+        Car => "car",
+        Bus => "bus",
+        Fuel => "fuel",
+        Plane => "plane",
+        Restaurant => "restaurant",
+        Coffee => "coffee",
+        Drinks => "drinks",
+        Health => "health",
+        Pharmacy => "pharmacy",
+        Clothes => "clothes",
+        Gift => "gift",
+        Phone => "phone",
+        Internet => "internet",
+        Electricity => "electricity",
+        Water => "water",
+        Heating => "heating",
+        Education => "education",
+        Books => "books",
+        Baby => "baby",
+        Pets => "pets",
+        Movies => "movies",
+        Music => "music",
+        Games => "games",
+        Sport => "sport",
+        Fitness => "fitness",
+        Holidays => "holidays",
+        Repairs => "repairs",
+        Bills => "bills",
+        Taxes => "taxes",
+        Bank => "bank",
+        Savings => "savings",
+        Investments => "investments",
+        Cash => "cash",
+        Card => "card",
+        Salary => "salary",
+        Insurance => "insurance",
+        Beauty => "beauty",
+        Garden => "garden",
+        Charity => "charity",
+        Subscriptions => "subscriptions",
+        Family => "family",
+        Other => "other",
     }
 }
 
@@ -70,6 +83,8 @@ impl std::str::FromStr for CategoryColor {
 pub struct CategoryFields {
     pub name: String,
     pub color: CategoryColor,
+    /// Shown inside the colour; without one, the colour alone identifies the category.
+    pub icon: Option<CategoryIcon>,
 }
 
 /// A user-defined category operations are sorted into.
@@ -85,23 +100,36 @@ pub struct Category {
 mod tests {
     use super::*;
 
-    #[test]
-    fn color_round_trips_through_its_string() {
-        for color in [
-            CategoryColor::Forest,
-            CategoryColor::Grape,
-            CategoryColor::Gray,
-        ] {
-            assert_eq!(color.as_str().parse::<CategoryColor>(), Ok(color));
+    fn assert_round_trips<T>(all: &[T], as_str: impl Fn(&T) -> &'static str)
+    where
+        T: std::str::FromStr<Err = String> + Serialize + PartialEq + std::fmt::Debug,
+    {
+        for value in all {
+            assert_eq!(as_str(value).parse::<T>().as_ref(), Ok(value));
             assert_eq!(
-                serde_json::to_string(&color).unwrap(),
-                format!("\"{}\"", color.as_str())
+                serde_json::to_string(value).unwrap(),
+                format!("\"{}\"", as_str(value))
             );
         }
     }
 
     #[test]
+    fn color_round_trips_through_its_string() {
+        assert_round_trips(CategoryColor::ALL, CategoryColor::as_str);
+    }
+
+    #[test]
+    fn icon_round_trips_through_its_string() {
+        assert_round_trips(CategoryIcon::ALL, CategoryIcon::as_str);
+    }
+
+    #[test]
     fn unknown_color_is_rejected() {
         assert!("purple".parse::<CategoryColor>().is_err());
+    }
+
+    #[test]
+    fn unknown_icon_is_rejected() {
+        assert!("rocket".parse::<CategoryIcon>().is_err());
     }
 }

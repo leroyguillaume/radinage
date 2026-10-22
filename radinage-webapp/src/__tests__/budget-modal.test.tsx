@@ -704,6 +704,7 @@ describe("BudgetModal", () => {
 				id: "c1",
 				name: "Alimentation",
 				color: "teal",
+				icon: null,
 				createdAt: "2026-01-01T00:00:00Z",
 			},
 		]);

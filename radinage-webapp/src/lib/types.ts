@@ -292,11 +292,66 @@ export const CATEGORY_COLORS = [
 
 export type CategoryColor = (typeof CATEGORY_COLORS)[number];
 
+/** Icons a category can be shown with, drawn from `categoryIcons`. */
+export const CATEGORY_ICONS = [
+	"cart",
+	"home",
+	"car",
+	"bus",
+	"fuel",
+	"plane",
+	"restaurant",
+	"coffee",
+	"drinks",
+	"health",
+	"pharmacy",
+	"clothes",
+	"gift",
+	"phone",
+	"internet",
+	"electricity",
+	"water",
+	"heating",
+	"education",
+	"books",
+	"baby",
+	"pets",
+	"movies",
+	"music",
+	"games",
+	"sport",
+	"fitness",
+	"holidays",
+	"repairs",
+	"bills",
+	"taxes",
+	"bank",
+	"savings",
+	"investments",
+	"cash",
+	"card",
+	"salary",
+	"insurance",
+	"beauty",
+	"garden",
+	"charity",
+	"subscriptions",
+	"family",
+	"other",
+] as const;
+
+export type CategoryIcon = (typeof CATEGORY_ICONS)[number];
+
 export interface CategoryResponse {
 	id: string;
 	name: string;
 	color: CategoryColor;
+	/** Null shows the colour alone. */
+	icon: CategoryIcon | null;
 	createdAt: string;
 }
 
 export type CategoryRequest = Omit<CategoryResponse, "id" | "createdAt">;
+
+/** What a category looks like, independently of its name. */
+export type CategoryLook = Pick<CategoryResponse, "color" | "icon">;

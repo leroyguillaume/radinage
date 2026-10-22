@@ -7,7 +7,13 @@ import {
 import type { CategoryResponse } from "@/lib/types";
 
 function category(id: string): CategoryResponse {
-	return { id, name: id, color: "teal", createdAt: "2026-01-01T00:00:00Z" };
+	return {
+		id,
+		name: id,
+		color: "teal",
+		icon: null,
+		createdAt: "2026-01-01T00:00:00Z",
+	};
 }
 
 function row(key: string, amount: number): CategoryRow {

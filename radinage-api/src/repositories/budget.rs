@@ -664,6 +664,7 @@ mod tests {
         let category = |name: &str| crate::domain::category::CategoryFields {
             name: name.to_string(),
             color: crate::domain::category::CategoryColor::Teal,
+            icon: None,
         };
         let food = categories.create(user_id, &category("Food")).await.unwrap();
         let fun = categories.create(user_id, &category("Fun")).await.unwrap();

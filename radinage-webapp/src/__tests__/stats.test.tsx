@@ -313,6 +313,7 @@ describe("StatsPage", () => {
 					id: "c1",
 					name: "Courses",
 					color: "teal",
+					icon: null,
 					createdAt: "2026-01-01T00:00:00Z",
 				},
 			],
@@ -346,12 +347,14 @@ describe("StatsPage", () => {
 					id: "c1",
 					name: "Salaire",
 					color: "teal",
+					icon: null,
 					createdAt: "2026-01-01T00:00:00Z",
 				},
 				{
 					id: "c2",
 					name: "Courses",
 					color: "orange",
+					icon: null,
 					createdAt: "2026-01-01T00:00:00Z",
 				},
 			],
@@ -384,6 +387,7 @@ describe("StatsPage", () => {
 					id: "c1",
 					name: "Courses",
 					color: "teal",
+					icon: null,
 					createdAt: "2026-01-01T00:00:00Z",
 				},
 			],
@@ -405,6 +409,7 @@ describe("StatsPage", () => {
 			id: `c${i}`,
 			name: `Cat ${i}`,
 			color: "teal" as const,
+			icon: null,
 			createdAt: "2026-01-01T00:00:00Z",
 		}));
 		setupMocks(mockSummaryResponse, categories, {

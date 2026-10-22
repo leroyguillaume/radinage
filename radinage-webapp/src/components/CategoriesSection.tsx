@@ -19,21 +19,76 @@ import {
 	IconPlus,
 	IconTrash,
 } from "@tabler/icons-react";
-import { type FormEvent, useState } from "react";
+import { type FormEvent, type ReactNode, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { CategoryBadge } from "@/components/CategoryBadge";
+import { CategoryBadge, CategoryDot } from "@/components/CategoryBadge";
 import { ApiError } from "@/lib/api";
 import { categoriesByColor, leastUsedColor } from "@/lib/category-colors";
+import { categoryIcons } from "@/lib/category-icons";
 import { useCategories, useDeleteCategory, useSaveCategory } from "@/lib/hooks";
 import { categoryFill } from "@/lib/tones";
 import {
 	CATEGORY_COLORS,
+	CATEGORY_ICONS,
 	type CategoryColor,
+	type CategoryIcon,
 	type CategoryResponse,
 } from "@/lib/types";
 import { palette } from "@/theme";
 
 const MAX_NAME_LENGTH = 50;
+
+interface Swatch<T> {
+	value: T;
+	label: string;
+	content: ReactNode;
+}
+
+/** A labelled radio group of 44px swatches, the checked one outlined. */
+function SwatchGroup<T>({
+	id,
+	label,
+	swatches,
+	value,
+	onChange,
+}: {
+	id: string;
+	label: string;
+	swatches: Swatch<T>[];
+	value: T;
+	onChange: (value: T) => void;
+}) {
+	return (
+		<Stack gap={4}>
+			<Text size="sm" fw={500} id={id}>
+				{label}
+			</Text>
+			<Group gap={4} role="radiogroup" aria-labelledby={id}>
+				{swatches.map((swatch) => (
+					<UnstyledButton
+						key={swatch.label}
+						role="radio"
+						aria-checked={swatch.value === value}
+						aria-label={swatch.label}
+						title={swatch.label}
+						onClick={() => onChange(swatch.value)}
+						w={44}
+						h={44}
+						className="flex items-center justify-center rounded-md"
+						style={{
+							outline:
+								swatch.value === value
+									? "2px solid var(--mantine-color-text)"
+									: undefined,
+						}}
+					>
+						{swatch.content}
+					</UnstyledButton>
+				))}
+			</Group>
+		</Stack>
+	);
+}
 
 /** Opacity of a colour other categories already use, still recognisable but receding. */
 const TAKEN_OPACITY = 0.35;
@@ -51,49 +106,75 @@ function ColorPicker({
 	const { t } = useTranslation();
 	const takenBy = categoriesByColor(others);
 	return (
-		<Stack gap={4}>
-			<Text size="sm" fw={500} id="category-color-label">
-				{t("settings.categories.color")}
-			</Text>
-			<Group gap={4} role="radiogroup" aria-labelledby="category-color-label">
-				{CATEGORY_COLORS.map((color) => {
-					const names = takenBy.get(color);
-					const label = names
+		<SwatchGroup
+			id="category-color-label"
+			label={t("settings.categories.color")}
+			value={value}
+			onChange={onChange}
+			swatches={CATEGORY_COLORS.map((color) => {
+				const names = takenBy.get(color);
+				return {
+					value: color,
+					label: names
 						? t("settings.categories.colorOptionTaken", {
 								color,
 								names: names.join(", "),
 							})
-						: t("settings.categories.colorOption", { color });
-					return (
-						<UnstyledButton
-							key={color}
-							role="radio"
-							aria-checked={color === value}
-							aria-label={label}
-							title={label}
-							onClick={() => onChange(color)}
-							w={44}
-							h={44}
-							className="flex items-center justify-center rounded-md"
-							style={{
-								outline:
-									color === value
-										? "2px solid var(--mantine-color-text)"
-										: undefined,
-							}}
-						>
-							<Box
-								w={24}
-								h={24}
-								bg={categoryFill(color)}
-								opacity={names && color !== value ? TAKEN_OPACITY : 1}
-								style={{ borderRadius: "50%" }}
-							/>
-						</UnstyledButton>
-					);
-				})}
-			</Group>
-		</Stack>
+						: t("settings.categories.colorOption", { color }),
+					content: (
+						<Box
+							w={24}
+							h={24}
+							bg={categoryFill(color)}
+							opacity={names && color !== value ? TAKEN_OPACITY : 1}
+							style={{ borderRadius: "50%" }}
+						/>
+					),
+				};
+			})}
+		/>
+	);
+}
+
+/** Size of the icon swatches: the chosen one previews the category's mark. */
+const ICON_SWATCH_SIZE = 28;
+
+function IconPicker({
+	value,
+	color,
+	onChange,
+}: {
+	value: CategoryIcon | null;
+	color: CategoryColor;
+	onChange: (icon: CategoryIcon | null) => void;
+}) {
+	const { t } = useTranslation();
+	const swatch = (icon: CategoryIcon | null, label: string) => {
+		const Icon = icon ? categoryIcons[icon] : undefined;
+		return {
+			value: icon,
+			label,
+			content:
+				icon === value || !Icon ? (
+					<CategoryDot category={{ color, icon }} size={ICON_SWATCH_SIZE} />
+				) : (
+					<Icon size={22} color="var(--mantine-color-dimmed)" aria-hidden />
+				),
+		};
+	};
+	return (
+		<SwatchGroup
+			id="category-icon-label"
+			label={t("settings.categories.icon")}
+			value={value}
+			onChange={onChange}
+			swatches={[
+				swatch(null, t("settings.categories.noIcon")),
+				...CATEGORY_ICONS.map((icon) =>
+					swatch(icon, t(`settings.categories.icons.${icon}`)),
+				),
+			]}
+		/>
 	);
 }
 
@@ -113,6 +194,7 @@ function CategoryForm({
 	const [color, setColor] = useState<CategoryColor>(
 		category?.color ?? leastUsedColor(others),
 	);
+	const [icon, setIcon] = useState<CategoryIcon | null>(category?.icon ?? null);
 	const [error, setError] = useState<string | null>(null);
 
 	async function handleSubmit(e: FormEvent) {
@@ -130,7 +212,7 @@ function CategoryForm({
 		try {
 			await save.mutateAsync({
 				...(category ? { id: category.id } : {}),
-				body: { name: trimmed, color },
+				body: { name: trimmed, color, icon },
 			});
 			onDone();
 		} catch (err) {
@@ -155,6 +237,7 @@ function CategoryForm({
 					autoFocus
 				/>
 				<ColorPicker value={color} others={others} onChange={setColor} />
+				<IconPicker value={icon} color={color} onChange={setIcon} />
 				{error && (
 					<Alert color="tangerine" icon={<IconAlertCircle size={16} />}>
 						{error}
