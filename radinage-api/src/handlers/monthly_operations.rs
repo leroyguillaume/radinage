@@ -46,17 +46,14 @@ pub async fn get_monthly_operations<U, O: OperationRepository, B, P, C>(
     let params = ListOperationsParams {
         date_from: Some(month_start),
         date_to: Some(month_end),
-        label_filter: None,
-        amount: None,
         sort: OperationSortField::Date,
         order: SortOrder::Desc,
         limit: i64::MAX,
-        offset: 0,
         include_ignored: q.include_ignored,
-        category: None,
+        ..Default::default()
     };
 
-    let (ops, _total) = state.operation_repo.list(user_id, &params).await?;
+    let (ops, _totals) = state.operation_repo.list(user_id, &params).await?;
     let operations = ops.into_iter().map(OperationResponse::from).collect();
 
     Ok(Json(MonthlyOperationsResponse { operations }))
@@ -70,7 +67,9 @@ mod tests {
             operation::{BudgetLink, Operation},
             user::UserRole,
         },
-        repositories::{MockBudgetRepository, MockOperationRepository, MockUserRepository},
+        repositories::{
+            MockBudgetRepository, MockOperationRepository, MockUserRepository, OperationTotals,
+        },
         test_util::{auth_header, build_test_router, json_request, make_test_state, response_json},
     };
     use axum::http::StatusCode;
@@ -107,7 +106,7 @@ mod tests {
         let user_id = Uuid::new_v4();
         let mut or = MockOperationRepository::new();
         or.expect_list()
-            .returning(|_, _| Box::pin(async { Ok((vec![], 0)) }));
+            .returning(|_, _| Box::pin(async { Ok((vec![], OperationTotals::default())) }));
         let app = build_app(or);
 
         let auth = auth_header(user_id, UserRole::User);
@@ -135,11 +134,14 @@ mod tests {
             ),
         ];
         let mut or = MockOperationRepository::new();
-        let total = ops.len() as i64;
+        let totals = OperationTotals {
+            count: ops.len() as i64,
+            ..Default::default()
+        };
         or.expect_list().returning(move |_, _| {
             let ops = ops.clone();
-            let total = total;
-            Box::pin(async move { Ok((ops, total)) })
+            let totals = totals.clone();
+            Box::pin(async move { Ok((ops, totals)) })
         });
         let app = build_app(or);
 
@@ -158,7 +160,7 @@ mod tests {
         let (tx, rx) = std::sync::mpsc::channel();
         or.expect_list().returning(move |_, params| {
             tx.send(params.include_ignored).unwrap();
-            Box::pin(async { Ok((vec![], 0)) })
+            Box::pin(async { Ok((vec![], OperationTotals::default())) })
         });
         let app = build_app(or);
 

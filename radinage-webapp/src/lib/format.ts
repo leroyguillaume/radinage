@@ -30,6 +30,16 @@ export function formatMonthYear(
 	});
 }
 
+/** "05/03/2026" in `locale` for an API date ("2026-03-05"), read as a local date. */
+export function formatIsoDate(iso: string, locale: string): string {
+	const [year = 0, month = 1, day = 1] = iso.split("-").map(Number);
+	return new Intl.DateTimeFormat(locale, {
+		day: "2-digit",
+		month: "2-digit",
+		year: "numeric",
+	}).format(new Date(year, month - 1, day));
+}
+
 export function formatSignedAmount(amount: number): string {
 	return amount > 0 ? `+${currency.format(amount)}` : currency.format(amount);
 }

@@ -1,5 +1,15 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+	keepPreviousData,
+	useInfiniteQuery,
+	useMutation,
+	useQuery,
+	useQueryClient,
+} from "@tanstack/react-query";
 import { ApiError, apiFetch } from "@/lib/api";
+import {
+	type OperationFilters,
+	operationSearchQuery,
+} from "@/lib/operation-search";
 import type {
 	AccountBalance,
 	ApplyBudgetResponse,
@@ -18,6 +28,7 @@ import type {
 	ImportResult,
 	MonthlyOperationsResponse,
 	OperationResponse,
+	OperationSearchResponse,
 	OperationSplitRequest,
 	ResetPasswordResponse,
 	SummaryResponse,
@@ -40,6 +51,24 @@ export function useMonthlyOperations(
 			previousQuery?.queryKey[1] === year && previousQuery.queryKey[2] === month
 				? previous
 				: undefined,
+	});
+}
+
+export const SEARCH_PAGE_SIZE = 50;
+
+/** Operations of every date matching `filters`, a page at a time. */
+export function useOperationSearch(filters: OperationFilters) {
+	return useInfiniteQuery({
+		queryKey: ["operation-search", filters],
+		queryFn: ({ pageParam }) =>
+			apiFetch<OperationSearchResponse>(
+				`/operations?${operationSearchQuery(filters, pageParam, SEARCH_PAGE_SIZE)}`,
+			),
+		initialPageParam: 1,
+		getNextPageParam: (last) =>
+			last.page < last.maxPage ? last.page + 1 : undefined,
+		// Refining a search keeps the previous results on screen instead of a loader.
+		placeholderData: keepPreviousData,
 	});
 }
 

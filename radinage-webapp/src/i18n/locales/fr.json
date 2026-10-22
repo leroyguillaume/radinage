@@ -308,8 +308,10 @@
 	},
 	"nav": {
 		"operations": "Opérations",
+		"search": "Recherche",
 		"budgets": "Budgets",
 		"stats": "Statistiques",
+		"statsShort": "Stats",
 		"forecast": "Résumé",
 		"admin": "Admin",
 		"settings": "Paramètres",
@@ -469,5 +471,58 @@
 		"errorInvalidToken": "Ce lien d'invitation est invalide ou a déjà été utilisé",
 		"errorPasswordMismatch": "Les mots de passe ne correspondent pas",
 		"errorMissingToken": "Lien d'invitation invalide : jeton manquant"
+	},
+	"search": {
+		"title": "Recherche",
+		"subtitle": "Retrouve tes opérations sur tout ton historique",
+		"label": "Libellé",
+		"labelPlaceholder": "Libellé — laisse vide pour tout lister",
+		"clearLabel": "Effacer le libellé",
+		"amountMin": "Montant min",
+		"amountMax": "Montant max",
+		"invalidAmount": "Montant invalide",
+		"direction": {
+			"label": "Type",
+			"all": "Tout",
+			"expense": "Dépenses",
+			"income": "Revenus"
+		},
+		"categories": "Catégories",
+		"allCategories": "Toutes les catégories",
+		"noCategory": "Sans catégorie",
+		"budgets": "Budgets",
+		"allBudgets": "Tous les budgets",
+		"dates": "Dates",
+		"allDates": "Toutes les dates",
+		"includeIgnored": "Inclure les ignorées",
+		"ignored": "Ignorée",
+		"reset": "Réinitialiser",
+		"filters": "Filtres",
+		"activeFilters": "Filtres actifs",
+		"removeFilter": "Retirer le filtre {{name}}",
+		"amountRange": "De {{min}} à {{max}}",
+		"amountAtLeast": "≥ {{min}}",
+		"amountAtMost": "≤ {{max}}",
+		"resultsCount": "{{count}} résultat(s)",
+		"showResults": "Voir {{count}} résultat(s)",
+		"totals": {
+			"count": "Résultats",
+			"expenses": "Total des dépenses",
+			"income": "Total des revenus"
+		},
+		"sort": {
+			"label": "Trier par",
+			"date": "Date",
+			"amount": "Montant",
+			"labelKey": "Libellé"
+		},
+		"showMore": "Afficher plus",
+		"loadedOf": "{{loaded}} sur {{total}}",
+		"openMonth": "Ouvrir {{month}} dans les opérations",
+		"empty": {
+			"title": "Aucune opération ne correspond",
+			"hint": "Essaie un libellé plus court ou moins de filtres."
+		},
+		"fetchError": "Impossible de rechercher les opérations"
 	}
 }

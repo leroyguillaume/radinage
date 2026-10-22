@@ -9,6 +9,8 @@ interface StatTileProps {
 	dotColor: string;
 	/** CSS colour of the value; defaults to the body text colour. */
 	valueColor?: string;
+	/** Small print under the value. */
+	hint?: ReactNode;
 }
 
 export function StatTile({
@@ -16,6 +18,7 @@ export function StatTile({
 	value,
 	dotColor,
 	valueColor,
+	hint,
 }: StatTileProps) {
 	return (
 		<Paper radius="lg" p="md">
@@ -35,6 +38,11 @@ export function StatTile({
 				>
 					{value}
 				</Text>
+				{hint && (
+					<Text size="sm" c="dimmed">
+						{hint}
+					</Text>
+				)}
 			</Stack>
 		</Paper>
 	);

@@ -25,6 +25,22 @@ export interface OperationResponse {
 	splits: OperationSplitResponse[];
 }
 
+/** Aggregates over every operation matching a search, not only the returned page. */
+export interface OperationSearchTotals {
+	/** Sum of the positive amounts. */
+	income: string;
+	/** Sum of the negative amounts; zero or negative. */
+	expense: string;
+	/** Earliest accounting date (YYYY-MM-DD), null when nothing matches. */
+	firstDate: string | null;
+	lastDate: string | null;
+}
+
+export interface OperationSearchResponse
+	extends PaginatedResponse<OperationResponse> {
+	totals: OperationSearchTotals;
+}
+
 export interface OperationSplitResponse {
 	id: string;
 	/** Signed decimal, same sign as the parent operation's amount. */

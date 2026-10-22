@@ -330,7 +330,7 @@ where
             get_with(handlers::operations::list_operations, |op| {
                 op.tag("Operations")
                     .summary("List operations")
-                    .description("Retrieve a paginated list of bank operations for the authenticated user. Supports filtering by date range, exact amount, label search and category: `categoryId` keeps the operations counting towards that category (an unsplit operation through its effective category, a split one through any of its parts), `uncategorized` those without one; combining both is a 400. Results are ordered by date descending.")
+                    .description("Retrieve a paginated list of bank operations for the authenticated user, across all dates unless a date range is given. Every filter is optional, a blank `label` included: label search, date range, exact amount, absolute amount bounds (`amountMin`, `amountMax`), `direction` (expenses or income), categories and budgets. `categoryId` and `budgetId` can be repeated and keep the operations counting towards any of them (an unsplit operation through its effective category or budget link, a split one through any of its parts); `uncategorized` adds those without a category. `totals` aggregates every matching operation, not only the page. Results are ordered by date descending.")
                     .id("listOperations")
             })
             .post_with(handlers::operations::create_operation, |op| {

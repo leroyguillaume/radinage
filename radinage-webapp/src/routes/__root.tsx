@@ -4,6 +4,7 @@ import {
 	IconLayoutDashboard,
 	IconListDetails,
 	IconLogout,
+	IconSearch,
 	IconSettings,
 	IconShieldLock,
 	IconUserCircle,
@@ -26,6 +27,8 @@ interface NavItem {
 	to: string;
 	activePrefix: string;
 	labelKey: string;
+	/** Label of the mobile tab, when `labelKey` is too long for it. */
+	shortLabelKey?: string;
 	icon: ComponentType<{ size?: number; stroke?: number }>;
 }
 
@@ -43,9 +46,16 @@ const primaryNav: NavItem[] = [
 		icon: IconListDetails,
 	},
 	{
+		to: "/search",
+		activePrefix: "/search",
+		labelKey: "nav.search",
+		icon: IconSearch,
+	},
+	{
 		to: "/stats",
 		activePrefix: "/stats",
 		labelKey: "nav.stats",
+		shortLabelKey: "nav.statsShort",
 		icon: IconChartBar,
 	},
 	{
@@ -97,7 +107,9 @@ function TabLink({ item }: { item: NavItem }) {
 			aria-current={active ? "page" : undefined}
 		>
 			<Icon size={22} />
-			{t(item.labelKey)}
+			<span className="tab-label">
+				{t(item.shortLabelKey ?? item.labelKey)}
+			</span>
 		</Link>
 	);
 }

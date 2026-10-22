@@ -39,29 +39,68 @@ impl OperationSortField {
 }
 
 /// Parameters for a paginated, filtered, sorted list of operations.
+#[derive(Debug, Default)]
 pub struct ListOperationsParams {
     pub date_from: Option<NaiveDate>,
     pub date_to: Option<NaiveDate>,
     /// Label filter already formatted as `%pattern%` for SQL LIKE.
     pub label_filter: Option<String>,
     pub amount: Option<Decimal>,
+    /// Inclusive lower bound on the absolute amount.
+    pub amount_min: Option<Decimal>,
+    /// Inclusive upper bound on the absolute amount.
+    pub amount_max: Option<Decimal>,
+    pub direction: Option<OperationDirection>,
     pub sort: OperationSortField,
     pub order: SortOrder,
     pub limit: i64,
     pub offset: i64,
     /// When false (default), ignored operations are excluded from results.
     pub include_ignored: bool,
-    pub category: Option<CategoryFilter>,
+    pub category: CategoryFilter,
+    /// When not empty, keeps the operations linked to one of these budgets, a split operation
+    /// through any of its parts.
+    pub budget_ids: Vec<Uuid>,
 }
 
-/// Which category the operations listed must count towards.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CategoryFilter {
-    /// Unsplit operations whose effective category is this one, and split operations with a
-    /// part in it.
-    Category(Uuid),
-    /// Unsplit operations with no effective category, and split operations with such a part.
-    Uncategorized,
+/// Which categories the operations listed must count towards: an unsplit operation through
+/// its effective category, a split one through any of its parts. Empty means no filter.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct CategoryFilter {
+    pub category_ids: Vec<Uuid>,
+    /// Also keeps the operations, or parts, without an effective category.
+    pub uncategorized: bool,
+}
+
+impl CategoryFilter {
+    fn is_empty(&self) -> bool {
+        self.category_ids.is_empty() && !self.uncategorized
+    }
+}
+
+/// Sign of the operations listed.
+#[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq, JsonSchema)]
+#[schemars(transform = crate::schema::flatten_string_enum)]
+#[serde(rename_all = "camelCase")]
+pub enum OperationDirection {
+    /// Negative amounts.
+    Expense,
+    /// Positive amounts.
+    Income,
+}
+
+/// Aggregates over every operation matching a listing's filters, across all pages.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct OperationTotals {
+    pub count: i64,
+    /// Sum of the positive amounts.
+    pub income: Decimal,
+    /// Sum of the negative amounts.
+    pub expense: Decimal,
+    /// Earliest accounting date, `None` when nothing matches.
+    pub first_date: Option<NaiveDate>,
+    /// Latest accounting date, `None` when nothing matches.
+    pub last_date: Option<NaiveDate>,
 }
 
 /// Non-ignored amounts of one effective category over a date range.
@@ -123,12 +162,12 @@ pub trait OperationRepository: Send + Sync + 'static {
         user_id: Uuid,
     ) -> impl std::future::Future<Output = AppResult<Operation>> + Send;
 
-    /// List operations with filtering and pagination. Returns `(rows, total_count)`.
+    /// List operations with filtering and pagination, with the totals of every match.
     fn list(
         &self,
         user_id: Uuid,
         params: &ListOperationsParams,
-    ) -> impl std::future::Future<Output = AppResult<(Vec<Operation>, i64)>> + Send;
+    ) -> impl std::future::Future<Output = AppResult<(Vec<Operation>, OperationTotals)>> + Send;
 
     /// Insert a new operation row. The budget link starts as `Unlinked`.
     fn insert(
@@ -271,7 +310,19 @@ const OPERATION_CATEGORY: &str = "COALESCE(o.category_id, \
 const SPLIT_CATEGORY: &str =
     "COALESCE(s.category_id, (SELECT b.category_id FROM budgets b WHERE b.id = s.budget_id))";
 
-/// Filters shared by the listing and its count, binding `$1` to `$6` as [`bind_list_filters`]
+/// `AND` clause keeping an unsplit operation `o` whose `operation_test` holds, and a split one
+/// with a part `s` whose `split_test` holds.
+fn whole_or_any_part(operation_test: &str, split_test: &str) -> String {
+    format!(
+        "AND CASE WHEN EXISTS (SELECT 1 FROM operation_splits s WHERE s.operation_id = o.id)
+             THEN EXISTS (SELECT 1 FROM operation_splits s
+                          WHERE s.operation_id = o.id AND {split_test})
+             ELSE {operation_test}
+         END"
+    )
+}
+
+/// Filters shared by the listing and its totals, binding `$1` to `$9` as [`bind_list_filters`]
 /// does.
 fn list_filters_sql(params: &ListOperationsParams) -> String {
     let ignored = if params.include_ignored {
@@ -279,21 +330,28 @@ fn list_filters_sql(params: &ListOperationsParams) -> String {
     } else {
         "AND o.ignored = FALSE"
     };
-    let category = match params.category {
-        None => String::new(),
-        Some(filter) => {
-            let test = match filter {
-                CategoryFilter::Category(_) => "= $6",
-                CategoryFilter::Uncategorized => "IS NULL",
+    let direction = match params.direction {
+        None => "",
+        Some(OperationDirection::Expense) => "AND o.amount < 0",
+        Some(OperationDirection::Income) => "AND o.amount > 0",
+    };
+    let category = if params.category.is_empty() {
+        String::new()
+    } else {
+        let test = |expr: &str| {
+            let null = if params.category.uncategorized {
+                format!(" OR {expr} IS NULL")
+            } else {
+                String::new()
             };
-            format!(
-                "AND CASE WHEN EXISTS (SELECT 1 FROM operation_splits s WHERE s.operation_id = o.id)
-                     THEN EXISTS (SELECT 1 FROM operation_splits s
-                                  WHERE s.operation_id = o.id AND {SPLIT_CATEGORY} {test})
-                     ELSE {OPERATION_CATEGORY} {test}
-                 END"
-            )
-        }
+            format!("({expr} = ANY($6){null})")
+        };
+        whole_or_any_part(&test(OPERATION_CATEGORY), &test(SPLIT_CATEGORY))
+    };
+    let budget = if params.budget_ids.is_empty() {
+        String::new()
+    } else {
+        whole_or_any_part("o.budget_link_id = ANY($7)", "s.budget_id = ANY($7)")
     };
     format!(
         "WHERE o.user_id = $1
@@ -301,8 +359,12 @@ fn list_filters_sql(params: &ListOperationsParams) -> String {
            AND ($3::date IS NULL OR COALESCE(o.effective_date, o.date) <= $3)
            AND ($4::text IS NULL OR LOWER(o.label) LIKE $4)
            AND ($5::numeric IS NULL OR o.amount = $5)
+           AND ($8::numeric IS NULL OR ABS(o.amount) >= $8)
+           AND ($9::numeric IS NULL OR ABS(o.amount) <= $9)
            {ignored}
-           {category}"
+           {direction}
+           {category}
+           {budget}"
     )
 }
 
@@ -311,17 +373,16 @@ fn bind_list_filters<'q>(
     user_id: Uuid,
     params: &'q ListOperationsParams,
 ) -> sqlx::query::Query<'q, sqlx::Postgres, sqlx::postgres::PgArguments> {
-    let category_id = match params.category {
-        Some(CategoryFilter::Category(id)) => Some(id),
-        _ => None,
-    };
     query
         .bind(user_id)
         .bind(params.date_from)
         .bind(params.date_to)
         .bind(params.label_filter.as_deref())
         .bind(params.amount)
-        .bind(category_id)
+        .bind(&params.category.category_ids)
+        .bind(&params.budget_ids)
+        .bind(params.amount_min)
+        .bind(params.amount_max)
 }
 
 /// Build a `BudgetLink` from the raw database columns.
@@ -414,13 +475,13 @@ impl OperationRepository for PgOperationRepository {
         &self,
         user_id: Uuid,
         params: &ListOperationsParams,
-    ) -> AppResult<(Vec<Operation>, i64)> {
+    ) -> AppResult<(Vec<Operation>, OperationTotals)> {
         let filters = list_filters_sql(params);
         let sql = format!(
             "SELECT {OPERATION_COLUMNS} FROM operations o
              {filters}
              ORDER BY {sort_col} {sort_dir}, o.id DESC
-             LIMIT $7 OFFSET $8",
+             LIMIT $10 OFFSET $11",
             sort_col = params.sort.as_sql(),
             sort_dir = params.order.as_sql(),
         );
@@ -430,19 +491,32 @@ impl OperationRepository for PgOperationRepository {
             .fetch_all(&self.pool)
             .await?;
 
-        let count_sql = format!("SELECT COUNT(*) AS count FROM operations o {filters}");
-        let count_row = bind_list_filters(sqlx::query(&count_sql), user_id, params)
+        let totals_sql = format!(
+            "SELECT COUNT(*) AS count,
+                    COALESCE(SUM(o.amount) FILTER (WHERE o.amount > 0), 0) AS income,
+                    COALESCE(SUM(o.amount) FILTER (WHERE o.amount < 0), 0) AS expense,
+                    MIN(COALESCE(o.effective_date, o.date)) AS first_date,
+                    MAX(COALESCE(o.effective_date, o.date)) AS last_date
+             FROM operations o {filters}"
+        );
+        let totals_row = bind_list_filters(sqlx::query(&totals_sql), user_id, params)
             .fetch_one(&self.pool)
             .await?;
+        let totals = OperationTotals {
+            count: totals_row.try_get("count")?,
+            income: totals_row.try_get("income")?,
+            expense: totals_row.try_get("expense")?,
+            first_date: totals_row.try_get("first_date")?,
+            last_date: totals_row.try_get("last_date")?,
+        };
 
-        let total: i64 = count_row.try_get("count")?;
         let mut ops = rows
             .iter()
             .map(row_to_operation)
             .collect::<AppResult<Vec<_>>>()?;
         attach_splits(&self.pool, &mut ops).await?;
 
-        Ok((ops, total))
+        Ok((ops, totals))
     }
 
     async fn insert(
@@ -960,20 +1034,14 @@ mod integration_tests {
         }
 
         let params = ListOperationsParams {
-            date_from: None,
-            date_to: None,
-            label_filter: None,
-            amount: None,
             sort: OperationSortField::Date,
             order: SortOrder::Asc,
             limit: 2,
-            offset: 0,
-            include_ignored: false,
-            category: None,
+            ..Default::default()
         };
 
-        let (ops, total) = repo.list(user_id, &params).await.unwrap();
-        assert_eq!(total, 5);
+        let (ops, totals) = repo.list(user_id, &params).await.unwrap();
+        assert_eq!(totals.count, 5);
         assert_eq!(ops.len(), 2);
     }
 
@@ -1022,16 +1090,10 @@ mod integration_tests {
         .unwrap();
 
         let params = ListOperationsParams {
-            date_from: None,
-            date_to: None,
-            label_filter: None,
-            amount: None,
             sort: OperationSortField::Date,
             order: SortOrder::Asc,
             limit: 10,
-            offset: 0,
-            include_ignored: false,
-            category: None,
+            ..Default::default()
         };
 
         let (ops, _) = repo.list(user_id, &params).await.unwrap();
@@ -1187,16 +1249,11 @@ mod integration_tests {
         assert!(plain.splits.is_empty());
 
         let params = ListOperationsParams {
-            date_from: None,
-            date_to: None,
-            label_filter: None,
             amount: Some(dec!(-100)),
             sort: OperationSortField::Date,
             order: SortOrder::Asc,
             limit: 10,
-            offset: 0,
-            include_ignored: false,
-            category: None,
+            ..Default::default()
         };
         let (ops, _) = repo.list(user_id, &params).await.unwrap();
         assert_eq!(ops.len(), 1);
@@ -1456,31 +1513,32 @@ mod integration_tests {
             .unwrap();
     }
 
-    fn category_params(category: Option<CategoryFilter>) -> ListOperationsParams {
+    fn category_params(category_ids: &[Uuid], uncategorized: bool) -> ListOperationsParams {
         ListOperationsParams {
-            date_from: None,
-            date_to: None,
-            label_filter: None,
-            amount: None,
+            category: CategoryFilter {
+                category_ids: category_ids.to_vec(),
+                uncategorized,
+            },
+            ..sorted_params()
+        }
+    }
+
+    fn sorted_params() -> ListOperationsParams {
+        ListOperationsParams {
             sort: OperationSortField::Amount,
             order: SortOrder::Asc,
             limit: 10,
-            offset: 0,
-            include_ignored: false,
-            category,
+            ..Default::default()
         }
     }
 
     async fn listed_ids(
         repo: &PgOperationRepository,
         user_id: Uuid,
-        category: Option<CategoryFilter>,
+        params: ListOperationsParams,
     ) -> (Vec<Uuid>, i64) {
-        let (ops, total) = repo
-            .list(user_id, &category_params(category))
-            .await
-            .unwrap();
-        (ops.into_iter().map(|op| op.id).collect(), total)
+        let (ops, totals) = repo.list(user_id, &params).await.unwrap();
+        (ops.into_iter().map(|op| op.id).collect(), totals.count)
     }
 
     #[sqlx::test(migrations = "./migrations")]
@@ -1590,18 +1648,135 @@ mod integration_tests {
         repo.replace_splits(split, user_id, &parts).await.unwrap();
 
         assert_eq!(
-            listed_ids(&repo, user_id, Some(CategoryFilter::Category(food))).await,
+            listed_ids(&repo, user_id, category_params(&[food], false)).await,
             (vec![through_budget, own], 2)
         );
         assert_eq!(
-            listed_ids(&repo, user_id, Some(CategoryFilter::Category(fun))).await,
+            listed_ids(&repo, user_id, category_params(&[fun], false)).await,
             (vec![split, overridden], 2)
         );
         assert_eq!(
-            listed_ids(&repo, user_id, Some(CategoryFilter::Uncategorized)).await,
+            listed_ids(&repo, user_id, category_params(&[], true)).await,
             (vec![split, none], 2)
         );
-        assert_eq!(listed_ids(&repo, user_id, None).await.1, 5);
+        assert_eq!(
+            listed_ids(&repo, user_id, category_params(&[food, fun], false)).await,
+            (vec![split, overridden, through_budget, own], 4)
+        );
+        assert_eq!(
+            listed_ids(&repo, user_id, category_params(&[food], true)).await,
+            (vec![split, none, through_budget, own], 4)
+        );
+        assert_eq!(listed_ids(&repo, user_id, sorted_params()).await.1, 5);
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn list_filters_by_budget_link_and_split_parts(pool: PgPool) {
+        let repo = PgOperationRepository::new(pool.clone());
+        let user_id = setup_user(&pool).await;
+        let rent = setup_budget(&pool, user_id, "expense").await;
+        let food = setup_budget(&pool, user_id, "expense").await;
+
+        let linked = insert_op(&repo, user_id, dec!(-1)).await;
+        repo.set_budget_link(linked, user_id, &BudgetLink::Manual { budget_id: rent })
+            .await
+            .unwrap();
+        let other = insert_op(&repo, user_id, dec!(-2)).await;
+        repo.set_budget_link(other, user_id, &BudgetLink::Manual { budget_id: food })
+            .await
+            .unwrap();
+        insert_op(&repo, user_id, dec!(-3)).await;
+        let split = insert_op(&repo, user_id, dec!(-100)).await;
+        let parts = [part(dec!(-60), Some(rent)), part(dec!(-40), None)];
+        repo.replace_splits(split, user_id, &parts).await.unwrap();
+
+        let by_budgets = |budget_ids: Vec<Uuid>| ListOperationsParams {
+            budget_ids,
+            ..sorted_params()
+        };
+        assert_eq!(
+            listed_ids(&repo, user_id, by_budgets(vec![rent])).await,
+            (vec![split, linked], 2)
+        );
+        assert_eq!(
+            listed_ids(&repo, user_id, by_budgets(vec![rent, food])).await,
+            (vec![split, other, linked], 3)
+        );
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn list_filters_by_direction_and_absolute_amount(pool: PgPool) {
+        let repo = PgOperationRepository::new(pool.clone());
+        let user_id = setup_user(&pool).await;
+        let small_expense = insert_op(&repo, user_id, dec!(-5)).await;
+        let big_expense = insert_op(&repo, user_id, dec!(-50)).await;
+        let small_income = insert_op(&repo, user_id, dec!(10)).await;
+        let big_income = insert_op(&repo, user_id, dec!(500)).await;
+
+        let expenses = ListOperationsParams {
+            direction: Some(OperationDirection::Expense),
+            ..sorted_params()
+        };
+        assert_eq!(
+            listed_ids(&repo, user_id, expenses).await,
+            (vec![big_expense, small_expense], 2)
+        );
+        let income = ListOperationsParams {
+            direction: Some(OperationDirection::Income),
+            ..sorted_params()
+        };
+        assert_eq!(
+            listed_ids(&repo, user_id, income).await,
+            (vec![small_income, big_income], 2)
+        );
+        let bounded = ListOperationsParams {
+            amount_min: Some(dec!(5)),
+            amount_max: Some(dec!(50)),
+            ..sorted_params()
+        };
+        assert_eq!(
+            listed_ids(&repo, user_id, bounded).await,
+            (vec![big_expense, small_expense, small_income], 3)
+        );
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn list_totals_cover_every_page(pool: PgPool) {
+        let repo = PgOperationRepository::new(pool.clone());
+        let user_id = setup_user(&pool).await;
+        for (amount, day) in [(dec!(-30), 5), (dec!(-12.5), 20), (dec!(100), 12)] {
+            repo.insert(
+                Uuid::new_v4(),
+                user_id,
+                amount,
+                NaiveDate::from_ymd_opt(2024, 3, day).unwrap(),
+                None,
+                "Op",
+            )
+            .await
+            .unwrap();
+        }
+
+        let params = ListOperationsParams {
+            limit: 1,
+            ..sorted_params()
+        };
+        let (ops, totals) = repo.list(user_id, &params).await.unwrap();
+        assert_eq!(ops.len(), 1);
+        assert_eq!(
+            totals,
+            OperationTotals {
+                count: 3,
+                income: dec!(100),
+                expense: dec!(-42.5),
+                first_date: NaiveDate::from_ymd_opt(2024, 3, 5),
+                last_date: NaiveDate::from_ymd_opt(2024, 3, 20),
+            }
+        );
+
+        let (ops, totals) = repo.list(Uuid::new_v4(), &params).await.unwrap();
+        assert!(ops.is_empty());
+        assert_eq!(totals, OperationTotals::default());
     }
 
     #[sqlx::test(migrations = "./migrations")]

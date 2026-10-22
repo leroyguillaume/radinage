@@ -11,8 +11,8 @@ pub use budget::{BudgetRepository, BudgetSortField, ListBudgetsParams, PgBudgetR
 pub use category::{CategoryRepository, PgCategoryRepository};
 pub use import_profile::{ImportProfileRepository, PgImportProfileRepository};
 pub use operation::{
-    CategoryFilter, CategoryTotal, ListOperationsParams, OperationRepository, OperationSortField,
-    PgOperationRepository, SummaryCategory, SummaryRow,
+    CategoryFilter, CategoryTotal, ListOperationsParams, OperationDirection, OperationRepository,
+    OperationSortField, OperationTotals, PgOperationRepository, SummaryCategory, SummaryRow,
 };
 pub use user::{PgUserRepository, UserRepository};
 

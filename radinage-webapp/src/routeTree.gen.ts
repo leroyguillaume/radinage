@@ -15,6 +15,7 @@ import { Route as AdminRouteImport } from './routes/admin'
 import { Route as BudgetsRouteImport } from './routes/budgets'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as OperationsRouteImport } from './routes/operations'
+import { Route as SearchRouteImport } from './routes/search'
 import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as StatsRouteImport } from './routes/stats'
 import { Route as SummaryRouteImport } from './routes/summary'
@@ -49,6 +50,11 @@ const OperationsRoute = OperationsRouteImport.update({
   path: '/operations',
   getParentRoute: () => rootRouteImport,
 } as any)
+const SearchRoute = SearchRouteImport.update({
+  id: '/search',
+  path: '/search',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const SettingsRoute = SettingsRouteImport.update({
   id: '/settings',
   path: '/settings',
@@ -72,6 +78,7 @@ export interface FileRoutesByFullPath {
   '/budgets': typeof BudgetsRoute
   '/login': typeof LoginRoute
   '/operations': typeof OperationsRoute
+  '/search': typeof SearchRoute
   '/settings': typeof SettingsRoute
   '/stats': typeof StatsRoute
   '/summary': typeof SummaryRoute
@@ -83,6 +90,7 @@ export interface FileRoutesByTo {
   '/budgets': typeof BudgetsRoute
   '/login': typeof LoginRoute
   '/operations': typeof OperationsRoute
+  '/search': typeof SearchRoute
   '/settings': typeof SettingsRoute
   '/stats': typeof StatsRoute
   '/summary': typeof SummaryRoute
@@ -95,6 +103,7 @@ export interface FileRoutesById {
   '/budgets': typeof BudgetsRoute
   '/login': typeof LoginRoute
   '/operations': typeof OperationsRoute
+  '/search': typeof SearchRoute
   '/settings': typeof SettingsRoute
   '/stats': typeof StatsRoute
   '/summary': typeof SummaryRoute
@@ -108,6 +117,7 @@ export interface FileRouteTypes {
     | '/budgets'
     | '/login'
     | '/operations'
+    | '/search'
     | '/settings'
     | '/stats'
     | '/summary'
@@ -119,6 +129,7 @@ export interface FileRouteTypes {
     | '/budgets'
     | '/login'
     | '/operations'
+    | '/search'
     | '/settings'
     | '/stats'
     | '/summary'
@@ -130,6 +141,7 @@ export interface FileRouteTypes {
     | '/budgets'
     | '/login'
     | '/operations'
+    | '/search'
     | '/settings'
     | '/stats'
     | '/summary'
@@ -142,6 +154,7 @@ export interface RootRouteChildren {
   BudgetsRoute: typeof BudgetsRoute
   LoginRoute: typeof LoginRoute
   OperationsRoute: typeof OperationsRoute
+  SearchRoute: typeof SearchRoute
   SettingsRoute: typeof SettingsRoute
   StatsRoute: typeof StatsRoute
   SummaryRoute: typeof SummaryRoute
@@ -191,6 +204,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof OperationsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/search': {
+      id: '/search'
+      path: '/search'
+      fullPath: '/search'
+      preLoaderRoute: typeof SearchRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/settings': {
       id: '/settings'
       path: '/settings'
@@ -222,6 +242,7 @@ const rootRouteChildren: RootRouteChildren = {
   BudgetsRoute: BudgetsRoute,
   LoginRoute: LoginRoute,
   OperationsRoute: OperationsRoute,
+  SearchRoute: SearchRoute,
   SettingsRoute: SettingsRoute,
   StatsRoute: StatsRoute,
   SummaryRoute: SummaryRoute,
