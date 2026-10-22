@@ -237,11 +237,13 @@
 		"monthlyEvolution": "Income, expenses and savings",
 		"balanceEvolution": "Balance evolution",
 		"cumulative": "Cumulative over the period",
-		"byCategory": "Expenses by category",
+		"incomeByCategory": "Income by category",
+		"expensesByCategory": "Expenses by category",
 		"byCategoryHint": "A split operation counts for each of its parts.",
 		"uncategorized": "Uncategorized",
 		"otherCategories": "Others ({{count}} categories)",
-		"noCategoryExpenses": "No expenses over the period."
+		"noIncome": "No income over the period.",
+		"noExpenses": "No expenses over the period."
 	},
 	"forecast": {
 		"title": "Summary",

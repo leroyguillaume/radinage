@@ -13,16 +13,18 @@ import {
 import { MonthPickerInput } from "@mantine/dates";
 import { IconAlertCircle } from "@tabler/icons-react";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { useId } from "react";
 import { useTranslation } from "react-i18next";
 import { CategoryDot } from "@/components/CategoryBadge";
 import { PageHeader } from "@/components/PageHeader";
 import { StatTile } from "@/components/StatTile";
 import {
-	type CategoryExpenseRow,
-	type CategoryExpenseSlice,
-	categoryExpenseRows,
-	categoryExpenseSlices,
-} from "@/lib/category-expenses";
+	type CategoryRow,
+	type CategorySide,
+	type CategorySlice,
+	categoryRows,
+	categorySlices,
+} from "@/lib/category-totals";
 import { formatAmount, formatCompactAmount } from "@/lib/format";
 import { useCategories, useCategorySummary, useSummary } from "@/lib/hooks";
 import { balanceTextColor, budgetTypeTones, categoryFill } from "@/lib/tones";
@@ -89,16 +91,16 @@ function NoCategoryDot({ fill }: { fill?: string }) {
 	);
 }
 
-function CategoryPie({ rows }: { rows: CategoryExpenseRow[] }) {
+function CategoryPie({ rows, label }: { rows: CategoryRow[]; label: string }) {
 	const { t } = useTranslation();
-	const slices = categoryExpenseSlices(rows);
-	const fill = (slice: CategoryExpenseSlice) =>
+	const slices = categorySlices(rows);
+	const fill = (slice: CategorySlice) =>
 		slice.category
 			? categoryFill(slice.category.color)
 			: slice.others > 0
 				? OTHERS_FILL
 				: UNCATEGORIZED_FILL;
-	const name = (slice: CategoryExpenseSlice) =>
+	const name = (slice: CategorySlice) =>
 		slice.category?.name ??
 		(slice.others > 0
 			? t("stats.otherCategories", { count: slice.others })
@@ -112,7 +114,7 @@ function CategoryPie({ rows }: { rows: CategoryExpenseRow[] }) {
 				data={slices.map((slice) => ({
 					key: slice.key,
 					name: name(slice),
-					value: slice.spent,
+					value: slice.amount,
 					color: fill(slice),
 				}))}
 				strokeWidth={2}
@@ -120,7 +122,7 @@ function CategoryPie({ rows }: { rows: CategoryExpenseRow[] }) {
 				withTooltip
 				tooltipDataSource="segment"
 				valueFormatter={(value) => formatAmount(value)}
-				aria-label={t("stats.byCategory")}
+				aria-label={label}
 			/>
 			{others && (
 				<Group gap={6} wrap="nowrap">
@@ -134,25 +136,35 @@ function CategoryPie({ rows }: { rows: CategoryExpenseRow[] }) {
 	);
 }
 
-/** What each category spent over the range, most spent first, with its share. */
-function CategoryExpenses({
+const categoryBreakdownKeys = {
+	income: { title: "stats.incomeByCategory", empty: "stats.noIncome" },
+	expense: { title: "stats.expensesByCategory", empty: "stats.noExpenses" },
+} as const;
+
+/** What each category earned or spent over the range, largest first, with its share. */
+function CategoryBreakdown({
+	side,
 	totals,
 	categories,
 }: {
+	side: CategorySide;
 	totals: CategoryTotal[];
 	categories: CategoryResponse[];
 }) {
 	const { t } = useTranslation();
-	const rows = categoryExpenseRows(totals, categories);
-	const totalSpent = rows.reduce((sum, row) => sum + row.spent, 0);
-	const maxSpent = rows[0]?.spent ?? 0;
+	const titleId = useId();
+	const keys = categoryBreakdownKeys[side];
+	const title = t(keys.title);
+	const rows = categoryRows(totals, categories, side);
+	const total = rows.reduce((sum, row) => sum + row.amount, 0);
+	const max = rows[0]?.amount ?? 0;
 
 	return (
-		<Paper>
+		<Paper component="section" aria-labelledby={titleId}>
 			<Stack gap="md">
 				<Stack gap={4}>
-					<Text component="h2" ff={headingFont} fz={22} fw={700}>
-						{t("stats.byCategory")}
+					<Text id={titleId} component="h2" ff={headingFont} fz={22} fw={700}>
+						{title}
 					</Text>
 					<Text size="sm" c="dimmed">
 						{t("stats.byCategoryHint")}
@@ -160,15 +172,15 @@ function CategoryExpenses({
 				</Stack>
 				{rows.length === 0 ? (
 					<Text size="sm" c="dimmed">
-						{t("stats.noCategoryExpenses")}
+						{t(keys.empty)}
 					</Text>
 				) : (
 					<div className="grid gap-6 sm:grid-cols-[220px_minmax(0,1fr)] sm:items-start">
-						<CategoryPie rows={rows} />
+						<CategoryPie rows={rows} label={title} />
 						<Box component="ul" m={0} p={0} className="list-none">
 							{rows.map((row) => {
 								const name = row.category?.name ?? t("stats.uncategorized");
-								const share = Math.round((row.spent / totalSpent) * 100);
+								const share = Math.round((row.amount / total) * 100);
 								return (
 									<Box
 										component="li"
@@ -194,18 +206,18 @@ function CategoryExpenses({
 													c="var(--mantine-color-text)"
 													inherit
 												>
-													{formatAmount(row.spent)}
+													{formatAmount(row.amount)}
 												</Text>
 												{` · ${share} %`}
 											</Text>
 										</Group>
 										<Progress
 											mt={6}
-											value={(row.spent / maxSpent) * 100}
-											color={budgetTypeTones.expense.fill}
+											value={(row.amount / max) * 100}
+											color={budgetTypeTones[side].fill}
 											bg={palette.track}
 											size="sm"
-											aria-label={`${name} : ${formatAmount(row.spent)}`}
+											aria-label={`${name} : ${formatAmount(row.amount)}`}
 										/>
 									</Box>
 								);
@@ -482,10 +494,16 @@ function StatsPage() {
 						)}
 
 						{categorySummaryQuery.data && categoriesQuery.data?.length ? (
-							<CategoryExpenses
-								totals={categorySummaryQuery.data.categories}
-								categories={categoriesQuery.data}
-							/>
+							<SimpleGrid cols={{ base: 1, lg: 2 }} spacing="lg">
+								{(["income", "expense"] as const).map((side) => (
+									<CategoryBreakdown
+										key={side}
+										side={side}
+										totals={categorySummaryQuery.data.categories}
+										categories={categoriesQuery.data}
+									/>
+								))}
+							</SimpleGrid>
 						) : null}
 					</>
 				)}

@@ -237,11 +237,13 @@
 		"monthlyEvolution": "Revenus, dépenses et épargne",
 		"balanceEvolution": "Évolution de la balance",
 		"cumulative": "Cumul sur la période",
-		"byCategory": "Dépenses par catégorie",
+		"incomeByCategory": "Revenus par catégorie",
+		"expensesByCategory": "Dépenses par catégorie",
 		"byCategoryHint": "Une opération divisée compte pour chacune de ses parts.",
 		"uncategorized": "Sans catégorie",
 		"otherCategories": "Autres ({{count}} catégories)",
-		"noCategoryExpenses": "Aucune dépense sur la période."
+		"noIncome": "Aucun revenu sur la période.",
+		"noExpenses": "Aucune dépense sur la période."
 	},
 	"forecast": {
 		"title": "Résumé",
