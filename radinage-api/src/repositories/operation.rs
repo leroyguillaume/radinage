@@ -236,7 +236,8 @@ pub trait OperationRepository: Send + Sync + 'static {
     ) -> impl std::future::Future<Output = AppResult<Vec<SummaryRow>>> + Send;
 
     /// Totals per effective category of the non-ignored amounts whose accounting date falls in
-    /// `[from, to]`, a split operation counting through its parts.
+    /// `[from, to]`, a split operation counting through its parts. Amounts linked to a savings
+    /// budget are left out: they are neither income nor expenses.
     fn category_totals(
         &self,
         user_id: Uuid,
@@ -713,17 +714,21 @@ impl OperationRepository for PgOperationRepository {
             "WITH amounts AS (
                  SELECT o.amount, {OPERATION_CATEGORY} AS category_id
                  FROM operations o
+                 LEFT JOIN budgets b ON b.id = o.budget_link_id
                  WHERE o.user_id = $1
                    AND COALESCE(o.effective_date, o.date) BETWEEN $2 AND $3
                    AND o.ignored = FALSE
+                   AND b.budget_type IS DISTINCT FROM 'savings'
                    AND NOT EXISTS (SELECT 1 FROM operation_splits s WHERE s.operation_id = o.id)
                  UNION ALL
                  SELECT s.amount, {SPLIT_CATEGORY}
                  FROM operation_splits s
                  JOIN operations o ON o.id = s.operation_id
+                 LEFT JOIN budgets b ON b.id = s.budget_id
                  WHERE o.user_id = $1
                    AND COALESCE(o.effective_date, o.date) BETWEEN $2 AND $3
                    AND o.ignored = FALSE
+                   AND b.budget_type IS DISTINCT FROM 'savings'
              )
              SELECT category_id,
                     COALESCE(SUM(amount) FILTER (WHERE amount > 0), 0) AS income,
@@ -1633,13 +1638,17 @@ mod integration_tests {
     }
 
     #[sqlx::test(migrations = "./migrations")]
-    async fn category_totals_sum_income_and_expense_per_effective_category(pool: PgPool) {
+    async fn category_totals_sum_income_and_expense_per_effective_category_without_savings(
+        pool: PgPool,
+    ) {
         let repo = PgOperationRepository::new(pool.clone());
         let user_id = setup_user(&pool).await;
         let food = setup_category(&pool, user_id, "Food").await;
         let fun = setup_category(&pool, user_id, "Fun").await;
         let budget_id = setup_budget(&pool, user_id, "expense").await;
         set_budget_category(&pool, budget_id, food).await;
+        let savings_id = setup_budget(&pool, user_id, "savings").await;
+        set_budget_category(&pool, savings_id, fun).await;
 
         let spent = insert_op(&repo, user_id, dec!(-30)).await;
         repo.set_category(spent, user_id, Some(food)).await.unwrap();
@@ -1653,13 +1662,24 @@ mod integration_tests {
             .unwrap();
         repo.set_ignored(ignored, user_id, true).await.unwrap();
         insert_op(&repo, user_id, dec!(-7)).await;
-        let split = insert_op(&repo, user_id, dec!(-100)).await;
+        let saved = insert_op(&repo, user_id, dec!(-200)).await;
+        repo.set_budget_link(
+            saved,
+            user_id,
+            &BudgetLink::Manual {
+                budget_id: savings_id,
+            },
+        )
+        .await
+        .unwrap();
+        let split = insert_op(&repo, user_id, dec!(-130)).await;
         let parts = [
             NewOperationSplit {
                 category_id: Some(fun),
                 ..part(dec!(-60), None)
             },
             part(dec!(-40), Some(budget_id)),
+            part(dec!(-30), Some(savings_id)),
         ];
         repo.replace_splits(split, user_id, &parts).await.unwrap();
         repo.insert(
