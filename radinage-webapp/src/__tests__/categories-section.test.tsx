@@ -108,6 +108,36 @@ describe("CategoriesSection", () => {
 		);
 	});
 
+	it("defaults a new category to a colour no other category uses", async () => {
+		mockApi([{ ...food, color: "forest" }]);
+		const user = renderSection();
+
+		await user.click(
+			await screen.findByRole("button", { name: /Ajouter une catégorie/ }),
+		);
+
+		expect(screen.getByRole("radio", { name: "Couleur blue" })).toBeChecked();
+	});
+
+	it("shows which category already uses a colour, apart from the one edited", async () => {
+		const leisure: CategoryResponse = { ...food, id: "c2", name: "Loisirs" };
+		mockApi([food, leisure]);
+		const user = renderSection();
+
+		await user.click(
+			await screen.findByRole("button", { name: "Modifier Courses" }),
+		);
+
+		expect(
+			screen.getByRole("radio", {
+				name: "Couleur teal, déjà prise par Loisirs",
+			}),
+		).toBeChecked();
+		expect(
+			screen.getByRole("radio", { name: "Couleur grape" }),
+		).not.toBeChecked();
+	});
+
 	it("refuses a name already taken without calling the API", async () => {
 		mockApi([food]);
 		const user = renderSection();

@@ -23,6 +23,7 @@ import { type FormEvent, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { CategoryBadge } from "@/components/CategoryBadge";
 import { ApiError } from "@/lib/api";
+import { categoriesByColor, leastUsedColor } from "@/lib/category-colors";
 import { useCategories, useDeleteCategory, useSaveCategory } from "@/lib/hooks";
 import { categoryFill } from "@/lib/tones";
 import {
@@ -34,45 +35,63 @@ import { palette } from "@/theme";
 
 const MAX_NAME_LENGTH = 50;
 
+/** Opacity of a colour other categories already use, still recognisable but receding. */
+const TAKEN_OPACITY = 0.35;
+
 function ColorPicker({
 	value,
+	others,
 	onChange,
 }: {
 	value: CategoryColor;
+	/** The other categories, whose colours are shown as taken. */
+	others: CategoryResponse[];
 	onChange: (color: CategoryColor) => void;
 }) {
 	const { t } = useTranslation();
+	const takenBy = categoriesByColor(others);
 	return (
 		<Stack gap={4}>
 			<Text size="sm" fw={500} id="category-color-label">
 				{t("settings.categories.color")}
 			</Text>
 			<Group gap={4} role="radiogroup" aria-labelledby="category-color-label">
-				{CATEGORY_COLORS.map((color) => (
-					<UnstyledButton
-						key={color}
-						role="radio"
-						aria-checked={color === value}
-						aria-label={t("settings.categories.colorOption", { color })}
-						onClick={() => onChange(color)}
-						w={44}
-						h={44}
-						className="flex items-center justify-center rounded-md"
-						style={{
-							outline:
-								color === value
-									? "2px solid var(--mantine-color-text)"
-									: undefined,
-						}}
-					>
-						<Box
-							w={24}
-							h={24}
-							bg={categoryFill(color)}
-							style={{ borderRadius: "50%" }}
-						/>
-					</UnstyledButton>
-				))}
+				{CATEGORY_COLORS.map((color) => {
+					const names = takenBy.get(color);
+					const label = names
+						? t("settings.categories.colorOptionTaken", {
+								color,
+								names: names.join(", "),
+							})
+						: t("settings.categories.colorOption", { color });
+					return (
+						<UnstyledButton
+							key={color}
+							role="radio"
+							aria-checked={color === value}
+							aria-label={label}
+							title={label}
+							onClick={() => onChange(color)}
+							w={44}
+							h={44}
+							className="flex items-center justify-center rounded-md"
+							style={{
+								outline:
+									color === value
+										? "2px solid var(--mantine-color-text)"
+										: undefined,
+							}}
+						>
+							<Box
+								w={24}
+								h={24}
+								bg={categoryFill(color)}
+								opacity={names && color !== value ? TAKEN_OPACITY : 1}
+								style={{ borderRadius: "50%" }}
+							/>
+						</UnstyledButton>
+					);
+				})}
 			</Group>
 		</Stack>
 	);
@@ -90,8 +109,9 @@ function CategoryForm({
 	const { t } = useTranslation();
 	const save = useSaveCategory();
 	const [name, setName] = useState(category?.name ?? "");
+	const others = categories.filter((c) => c.id !== category?.id);
 	const [color, setColor] = useState<CategoryColor>(
-		category?.color ?? "forest",
+		category?.color ?? leastUsedColor(others),
 	);
 	const [error, setError] = useState<string | null>(null);
 
@@ -134,7 +154,7 @@ function CategoryForm({
 					required
 					autoFocus
 				/>
-				<ColorPicker value={color} onChange={setColor} />
+				<ColorPicker value={color} others={others} onChange={setColor} />
 				{error && (
 					<Alert color="tangerine" icon={<IconAlertCircle size={16} />}>
 						{error}
