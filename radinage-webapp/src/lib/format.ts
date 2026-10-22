@@ -3,8 +3,20 @@ const currency = new Intl.NumberFormat("fr-FR", {
 	currency: "EUR",
 });
 
+const compactCurrency = new Intl.NumberFormat("fr-FR", {
+	style: "currency",
+	currency: "EUR",
+	notation: "compact",
+	maximumFractionDigits: 1,
+});
+
 export function formatAmount(amount: number | string): string {
 	return currency.format(typeof amount === "string" ? Number(amount) : amount);
+}
+
+/** Short amount for chart axes: "19,5 k €". */
+export function formatCompactAmount(amount: number): string {
+	return compactCurrency.format(amount);
 }
 
 /** "mars 2026" in `locale`. */
