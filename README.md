@@ -16,7 +16,7 @@ Radinage keeps a record of your bank operations and compares them with the budge
 - **Categories**: sort operations into your own named, coloured categories, independently of budgets; an operation linked to a budget takes the budget's default category unless given its own, and each part of a split operation has its own. Filter the operations of a month by category.
 - **Budgets**: recurring (weekly, monthly, quarterly, yearly) or one-off, for expenses, income or savings, with matching rules that categorise operations automatically.
 - **Forecast**, over a calendar year or the next 12 months: starting from the account balance you record (the balance your bank shows on a given day) or from zero, actuals for past months (operations outside any budget counted as income or expense by their own sign), the current month's actuals plus what its budgets still expect, budgets beyond it, spending outside budgets at your average of the last three months, the daily amount you can still spend outside budgets without ending in the red (negative when the budgets alone already do), and the month the balance would first turn negative. Selecting a month opens its breakdown budget by budget: what each one expects, what is already linked to it and what the forecast counts, then spending outside budgets.
-- **Statistics**: income, expenses, savings and balance over any range of months, and expenses by category.
+- **Statistics**: income, expenses, savings and balance over any range of months, and income and expenses by category.
 - **Multi-user**: JWT authentication, an admin account and invitation links.
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for the design and the reasoning behind it.

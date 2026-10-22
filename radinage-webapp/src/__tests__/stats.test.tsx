@@ -132,6 +132,12 @@ async function renderStatsPage() {
 	return { queryClient };
 }
 
+function pieCells(section: HTMLElement) {
+	return within(within(section).getByTestId("pie-chart"))
+		.getAllByRole("listitem")
+		.map((cell) => cell.textContent);
+}
+
 beforeEach(async () => {
 	await i18n.changeLanguage("fr");
 	setupMocks();
@@ -320,17 +326,78 @@ describe("StatsPage", () => {
 		);
 		await renderStatsPage();
 
-		const rows = await screen.findAllByRole("progressbar");
+		const expenses = await screen.findByRole("region", {
+			name: "Dépenses par catégorie",
+		});
+		const rows = within(expenses).getAllByRole("progressbar");
 		expect(rows.map((row) => row.getAttribute("aria-label"))).toEqual([
 			expect.stringMatching(/^Courses : 300,00/),
 			expect.stringMatching(/^Sans catégorie : 100,00/),
 		]);
-		expect(screen.getByText(/· 75 %/)).toBeInTheDocument();
+		expect(within(expenses).getByText(/· 75 %/)).toBeInTheDocument();
+		expect(pieCells(expenses)).toEqual(["Courses=300", "Sans catégorie=100"]);
+	});
+
+	it("ranks the income by category with their share", async () => {
+		setupMocks(
+			mockSummaryResponse,
+			[
+				{
+					id: "c1",
+					name: "Salaire",
+					color: "teal",
+					createdAt: "2026-01-01T00:00:00Z",
+				},
+				{
+					id: "c2",
+					name: "Courses",
+					color: "orange",
+					createdAt: "2026-01-01T00:00:00Z",
+				},
+			],
+			{
+				categories: [
+					{ categoryId: "c1", income: "900.00", expense: "0" },
+					{ categoryId: "c2", income: "100.00", expense: "-300.00" },
+				],
+			},
+		);
+		await renderStatsPage();
+
+		const income = await screen.findByRole("region", {
+			name: "Revenus par catégorie",
+		});
+		const rows = within(income).getAllByRole("progressbar");
+		expect(rows.map((row) => row.getAttribute("aria-label"))).toEqual([
+			expect.stringMatching(/^Salaire : 900,00/),
+			expect.stringMatching(/^Courses : 100,00/),
+		]);
+		expect(within(income).getByText(/· 90 %/)).toBeInTheDocument();
+		expect(pieCells(income)).toEqual(["Salaire=900", "Courses=100"]);
+	});
+
+	it("says when there is no income over the period", async () => {
+		setupMocks(
+			mockSummaryResponse,
+			[
+				{
+					id: "c1",
+					name: "Courses",
+					color: "teal",
+					createdAt: "2026-01-01T00:00:00Z",
+				},
+			],
+			{ categories: [{ categoryId: "c1", income: "0", expense: "-30.00" }] },
+		);
+		await renderStatsPage();
+
+		const income = await screen.findByRole("region", {
+			name: "Revenus par catégorie",
+		});
 		expect(
-			within(screen.getByTestId("pie-chart"))
-				.getAllByRole("listitem")
-				.map((cell) => cell.textContent),
-		).toEqual(["Courses=300", "Sans catégorie=100"]);
+			within(income).getByText("Aucun revenu sur la période."),
+		).toBeInTheDocument();
+		expect(within(income).queryByTestId("pie-chart")).not.toBeInTheDocument();
 	});
 
 	it("folds the smallest categories into one pie slice", async () => {
@@ -349,10 +416,10 @@ describe("StatsPage", () => {
 		});
 		await renderStatsPage();
 
-		const pie = within(await screen.findByTestId("pie-chart"));
-		expect(
-			pie.getAllByRole("listitem").map((cell) => cell.textContent),
-		).toEqual([
+		const expenses = await screen.findByRole("region", {
+			name: "Dépenses par catégorie",
+		});
+		expect(pieCells(expenses)).toEqual([
 			"Cat 0=70",
 			"Cat 1=60",
 			"Cat 2=50",
@@ -361,7 +428,7 @@ describe("StatsPage", () => {
 			"Autres (2 catégories)=30",
 		]);
 		// The list below the pie still details every category.
-		expect(screen.getAllByRole("progressbar")).toHaveLength(7);
+		expect(within(expenses).getAllByRole("progressbar")).toHaveLength(7);
 	});
 
 	it("leaves the category breakdown out without categories", async () => {
@@ -374,5 +441,6 @@ describe("StatsPage", () => {
 		expect(
 			screen.queryByText("Dépenses par catégorie"),
 		).not.toBeInTheDocument();
+		expect(screen.queryByText("Revenus par catégorie")).not.toBeInTheDocument();
 	});
 });

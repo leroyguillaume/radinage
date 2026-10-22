@@ -1,16 +1,19 @@
 import type { CategoryResponse, CategoryTotal } from "@/lib/types";
 
-/** What one category, or the operations without one, spent over a range. */
-export interface CategoryExpenseRow {
+/** Which flow of the category totals a breakdown is about. */
+export type CategorySide = "income" | "expense";
+
+/** What one category, or the operations without one, earned or spent over a range. */
+export interface CategoryRow {
 	key: string;
 	/** Undefined for the amounts without a category. */
 	category: CategoryResponse | undefined;
-	/** Positive amount spent. */
-	spent: number;
+	/** Positive amount earned or spent. */
+	amount: number;
 }
 
-/** One slice of the expenses pie: a row, or the rows folded past the largest ones. */
-export interface CategoryExpenseSlice extends CategoryExpenseRow {
+/** One slice of a pie: a row, or the rows folded past the largest ones. */
+export interface CategorySlice extends CategoryRow {
 	/** Number of rows folded into this slice; 0 for a single row. */
 	others: number;
 }
@@ -18,30 +21,31 @@ export interface CategoryExpenseSlice extends CategoryExpenseRow {
 /** Past this many slices a pie stops reading at a glance. */
 export const MAX_PIE_SLICES = 6;
 
-/** The categories that spent something over the range, most spent first. */
-export function categoryExpenseRows(
+/** The categories with something on that side over the range, largest first. */
+export function categoryRows(
 	totals: CategoryTotal[],
 	categories: CategoryResponse[],
-): CategoryExpenseRow[] {
+	side: CategorySide,
+): CategoryRow[] {
 	const byId = new Map(categories.map((c) => [c.id, c]));
 	return totals
 		.map((total) => ({
 			key: total.categoryId ?? "__none",
 			category: total.categoryId ? byId.get(total.categoryId) : undefined,
-			spent: -Number(total.expense),
+			amount: Math.abs(Number(total[side])),
 		}))
-		.filter((row) => row.spent > 0)
-		.sort((a, b) => b.spent - a.spent);
+		.filter((row) => row.amount > 0)
+		.sort((a, b) => b.amount - a.amount);
 }
 
 /**
  * The rows as pie slices: all of them when they fit, otherwise the largest ones
  * and a last slice summing the rest.
  */
-export function categoryExpenseSlices(
-	rows: CategoryExpenseRow[],
+export function categorySlices(
+	rows: CategoryRow[],
 	maxSlices = MAX_PIE_SLICES,
-): CategoryExpenseSlice[] {
+): CategorySlice[] {
 	if (rows.length <= maxSlices) {
 		return rows.map((row) => ({ ...row, others: 0 }));
 	}
@@ -52,7 +56,7 @@ export function categoryExpenseSlices(
 		{
 			key: "__others",
 			category: undefined,
-			spent: folded.reduce((sum, row) => sum + row.spent, 0),
+			amount: folded.reduce((sum, row) => sum + row.amount, 0),
 			others: folded.length,
 		},
 	];
