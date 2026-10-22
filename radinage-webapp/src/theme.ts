@@ -94,6 +94,10 @@ export const theme = createTheme({
 		FileInput: { defaultProps: { size: "md" } },
 		MonthPickerInput: { defaultProps: { size: "md" } },
 		Modal: { defaultProps: { radius: "xl", centered: true } },
+		// Modal and Drawer render their content as a Paper: without this, the
+		// Paper defaults above pad the scroll area above the sticky header.
+		ModalContent: { defaultProps: { p: 0, withBorder: false } },
+		DrawerContent: { defaultProps: { p: 0, withBorder: false } },
 		Badge: { defaultProps: { radius: "xl", variant: "light" } },
 		Progress: { defaultProps: { radius: "xl" } },
 	},
