@@ -72,7 +72,19 @@ pub struct Budget {
     pub budget_type: BudgetType,
     pub kind: BudgetKind,
     pub rules: Vec<Rule>,
+    /// Default category of the operations and split parts linked to this budget.
+    pub category_id: Option<Uuid>,
     pub created_at: chrono::DateTime<chrono::Utc>,
+}
+
+/// What a user chooses for a budget, as written on creation or update.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BudgetFields {
+    pub label: String,
+    pub budget_type: BudgetType,
+    pub kind: BudgetKind,
+    pub rules: Vec<Rule>,
+    pub category_id: Option<Uuid>,
 }
 
 /// Classification of what a budget tracks.

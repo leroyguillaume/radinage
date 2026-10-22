@@ -112,8 +112,9 @@ pub async fn import_operations<
     O: OperationRepository,
     B: BudgetRepository,
     P: ImportProfileRepository,
+    C,
 >(
-    State(state): State<AppState<U, O, B, P>>,
+    State(state): State<AppState<U, O, B, P, C>>,
     auth_user: AuthUser,
     MultipartBody(mut multipart, _): MultipartBody,
 ) -> AppResult<(StatusCode, Json<ImportResponse>)> {
@@ -279,6 +280,8 @@ pub async fn import_operations<
                     label: parsed_row.label,
                     budget_link: BudgetLink::Unlinked,
                     ignored: false,
+                    category_id: None,
+                    budget_category_id: None,
                     splits: Vec::new(),
                 };
                 // Best-effort auto-match; don't fail the import on match errors.
@@ -387,6 +390,7 @@ mod tests {
                 amount: Decimal::ZERO,
             },
             rules: vec![],
+            category_id: None,
             created_at: Utc::now(),
         }
     }

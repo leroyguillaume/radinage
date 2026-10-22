@@ -4,6 +4,9 @@ import type {
 	AccountBalance,
 	ApplyBudgetResponse,
 	BudgetResponse,
+	CategoryRequest,
+	CategoryResponse,
+	CategorySummaryResponse,
 	CreateUserResponse,
 	ExportDataResponse,
 	ForecastMonthBreakdown,
@@ -51,6 +54,21 @@ export function useSummary(
 		queryFn: () =>
 			apiFetch<SummaryResponse>(
 				`/summary?fromYear=${fromYear}&fromMonth=${fromMonth}&toYear=${toYear}&toMonth=${toMonth}`,
+			),
+	});
+}
+
+export function useCategorySummary(
+	fromYear: number,
+	fromMonth: number,
+	toYear: number,
+	toMonth: number,
+) {
+	return useQuery({
+		queryKey: ["category-summary", fromYear, fromMonth, toYear, toMonth],
+		queryFn: () =>
+			apiFetch<CategorySummaryResponse>(
+				`/summary/categories?fromYear=${fromYear}&fromMonth=${fromMonth}&toYear=${toYear}&toMonth=${toMonth}`,
 			),
 	});
 }
@@ -189,8 +207,30 @@ function useInvalidateMonthlyData() {
 	return () => {
 		queryClient.invalidateQueries({ queryKey: ["monthly-operations"] });
 		queryClient.invalidateQueries({ queryKey: ["summary"] });
+		queryClient.invalidateQueries({ queryKey: ["category-summary"] });
 		queryClient.invalidateQueries({ queryKey: ["forecast"] });
 	};
+}
+
+/** Put an unsplit operation in a category, or clear its own with null. */
+export function useSetOperationCategory() {
+	const invalidate = useInvalidateMonthlyData();
+	return useMutation({
+		mutationFn: ({
+			opId,
+			categoryId,
+		}: {
+			opId: string;
+			categoryId: string | null;
+		}) =>
+			apiFetch<OperationResponse>(
+				`/operations/${opId}/category`,
+				categoryId === null
+					? { method: "DELETE" }
+					: { method: "PUT", body: JSON.stringify({ categoryId }) },
+			),
+		onSuccess: invalidate,
+	});
 }
 
 export function useSetOperationIgnored() {
@@ -345,6 +385,7 @@ export function useImportData() {
 		onSuccess: () => {
 			queryClient.invalidateQueries({ queryKey: ["monthly-operations"] });
 			queryClient.invalidateQueries({ queryKey: ["budgets"] });
+			queryClient.invalidateQueries({ queryKey: categoriesKey });
 			queryClient.invalidateQueries({ queryKey: ["summary"] });
 			queryClient.invalidateQueries({ queryKey: ["forecast"] });
 			queryClient.invalidateQueries({ queryKey: accountBalanceKey });
@@ -440,6 +481,52 @@ export function useImportOperations() {
 		onSuccess: () => {
 			queryClient.invalidateQueries({ queryKey: ["monthly-operations"] });
 			queryClient.invalidateQueries({ queryKey: importProfilesKey });
+		},
+	});
+}
+
+const categoriesKey = ["categories"];
+
+/** Categories, by name. */
+export function useCategories() {
+	return useQuery({
+		queryKey: categoriesKey,
+		queryFn: () => apiFetch<CategoryResponse[]>("/categories"),
+	});
+}
+
+export function useSaveCategory() {
+	const queryClient = useQueryClient();
+	return useMutation({
+		mutationFn: ({ id, body }: { id?: string; body: CategoryRequest }) =>
+			apiFetch<CategoryResponse>(
+				id === undefined ? "/categories" : `/categories/${id}`,
+				{
+					method: id === undefined ? "POST" : "PUT",
+					body: JSON.stringify(body),
+				},
+			),
+		onSuccess: () => {
+			queryClient.invalidateQueries({ queryKey: categoriesKey });
+		},
+	});
+}
+
+export function useDeleteCategory() {
+	const queryClient = useQueryClient();
+	return useMutation({
+		mutationFn: (id: string) =>
+			apiFetch<void>(`/categories/${id}`, { method: "DELETE" }),
+		onSuccess: () => {
+			// Whatever was in the category, budgets included, is left without one.
+			for (const queryKey of [
+				categoriesKey,
+				["budgets"],
+				["monthly-operations"],
+				["category-summary"],
+			]) {
+				queryClient.invalidateQueries({ queryKey });
+			}
 		},
 	});
 }

@@ -130,6 +130,8 @@ apps:
     maxBudgetsPerUser: "100"
     # -- (string) Maximum number of import profiles per user
     maxImportProfilesPerUser: "20"
+    # -- (string) Maximum number of categories per user
+    maxCategoriesPerUser: "50"
     # -- (string) Base URL of the web application (used for invitation links).
     # Defaults to `<protocol>://<global.domain><ingress.apps.webapp.path>`
     webappUrl: ""

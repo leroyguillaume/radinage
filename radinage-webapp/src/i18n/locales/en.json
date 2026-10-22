@@ -84,7 +84,20 @@
 			"unsplit": "Undo split",
 			"invalidAmount": "Invalid amount",
 			"saveError": "Failed to save the split",
-			"unsplitError": "Failed to undo the split"
+			"unsplitError": "Failed to undo the split",
+			"category": "Category",
+			"budgetCategory": "Budget's category: {{name}}",
+			"noCategory": "No category"
+		},
+		"category": {
+			"set": "Category",
+			"change": "Change the category",
+			"fromBudget": "The budget's default category",
+			"clear": "Remove the category",
+			"filter": "Filter by category",
+			"all": "All categories",
+			"none": "Uncategorized",
+			"noneYet": "Create categories in the settings to sort your operations."
 		}
 	},
 	"import": {
@@ -172,7 +185,10 @@
 			"patternType": "Criteria",
 			"patternValue": "Value",
 			"matchAmount": "Check amount",
-			"matchAmountTooltip": "Amount must match"
+			"matchAmountTooltip": "Amount must match",
+			"category": "Default category",
+			"categoryHint": "Given to the operations linked to this budget that have no category.",
+			"noCategory": "No category"
 		},
 		"addRule": "Add rule",
 		"addPeriod": "Add period",
@@ -218,7 +234,11 @@
 		"fetchError": "Failed to load statistics",
 		"monthlyEvolution": "Income, expenses and savings",
 		"balanceEvolution": "Balance evolution",
-		"cumulative": "Cumulative over the period"
+		"cumulative": "Cumulative over the period",
+		"byCategory": "Expenses by category",
+		"byCategoryHint": "A split operation counts for each of its parts.",
+		"uncategorized": "Uncategorized",
+		"noCategoryExpenses": "No expenses over the period."
 	},
 	"forecast": {
 		"title": "Summary",
@@ -363,8 +383,25 @@
 			"exportError": "Export failed",
 			"import": "Import data",
 			"importError": "Invalid file or import rejected",
-			"importSuccess": "{{budgets}} budget(s) imported ({{skippedBudgets}} skipped), {{operations}} operation(s) imported ({{skippedOperations}} skipped)",
+			"importSuccess": "{{categories}} category(ies) imported ({{skippedCategories}} already present), {{budgets}} budget(s) imported ({{skippedBudgets}} skipped), {{operations}} operation(s) imported ({{skippedOperations}} skipped)",
 			"importedBalance": "Account balance imported."
+		},
+		"categories": {
+			"title": "Categories",
+			"description": "Sort your operations into categories, independently of budgets. An operation linked to a budget takes the budget's default category, unless you give it another one.",
+			"empty": "No categories yet.",
+			"add": "Add a category",
+			"name": "Name",
+			"color": "Colour",
+			"colorOption": "Colour {{color}}",
+			"save": "Save",
+			"edit": "Edit {{name}}",
+			"delete": "Delete {{name}}",
+			"confirmDelete": "Delete “{{name}}”? The operations and budgets using it will be left without a category.",
+			"errorName": "The name must be 1 to 50 characters long",
+			"errorNameTaken": "A category already has this name",
+			"errorLimit": "Maximum number of categories reached",
+			"fetchError": "Unable to load categories"
 		}
 	},
 	"activate": {

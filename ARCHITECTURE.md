@@ -42,10 +42,10 @@ handler → service → repository → database:
   domain values, with no I/O.
 - [src/repositories/](radinage-api/src/repositories/) define one trait per
   aggregate (`UserRepository`, `OperationRepository`, `BudgetRepository`,
-  `ImportProfileRepository`), each
+  `ImportProfileRepository`, `CategoryRepository`), each
   with a `Pg*` implementation and a mockall-generated mock for handler tests.
-- [src/domain/](radinage-api/src/domain/) holds users, operations, budgets and
-  import profiles,
+- [src/domain/](radinage-api/src/domain/) holds users, operations, budgets,
+  categories and import profiles,
   including the `BudgetLink` and `BudgetKind` enums that carry most of the
   domain's shape.
 - [src/auth/](radinage-api/src/auth/) hashes passwords with Argon2 and issues
@@ -148,7 +148,9 @@ two columns (link type and budget id) that encode `BudgetLink`: unlinked,
 manual, or auto. An operation can instead be split: `operation_splits` holds
 its ordered parts, each with an amount and an optional budget that becomes
 null when that budget is deleted. A split operation's own link stays unlinked,
-and every aggregation counts its parts instead of its amount. The schema is
+and every aggregation counts its parts instead of its amount. Users also own
+categories; an operation, each split part and each budget has an optional
+category that becomes null when that category is deleted. The schema is
 defined by
 [radinage-api/migrations/](radinage-api/migrations/).
 
@@ -157,8 +159,8 @@ browser keeps the JWT and role in `localStorage`.
 
 ## Design decisions
 
-**Static dispatch over repository traits.** `AppState<U, O, B>` is generic
-over the three repository types and handlers are generic functions. Tests swap
+**Static dispatch over repository traits.** `AppState<U, O, B, P, C>` is generic
+over the five repository types and handlers are generic functions. Tests swap
 in mocks with no `dyn` and no runtime cost, at the price of generic parameters
 on every handler signature.
 
@@ -183,6 +185,20 @@ duplicate detection on re-import and removing a split loses nothing. The cost
 is that every aggregation expands split operations into their parts:
 `list_for_summary` in SQL (which feeds both `/summary` and `/forecast`), and
 [operation-parts.ts](radinage-webapp/src/lib/operation-parts.ts) in the web app.
+
+**A budget's category is resolved on read.** Categories are a second axis,
+independent of budgets: they say what money went on, budgets how much was
+planned. To spare the user categorizing what a budget already says, a budget
+may carry a default category, and an operation (or a split part) counts
+towards its own category if it has one, else towards its budget's. That
+effective category is computed in SQL whenever operations are read, filtered
+or summed (`GET /operations?categoryId=`, `GET /summary/categories`), never
+copied onto the operation: changing a budget's category re-sorts every
+operation linked to it, and an auto-matched operation needs no write beyond its
+link. A split operation has no category of its own, like it has no budget link;
+splitting clears it and each part carries its own. The operations page filters
+the month it already holds by the same rule, per part, in
+[operation-parts.ts](radinage-webapp/src/lib/operation-parts.ts).
 
 **The forecast is computed by the API.** `GET /forecast` returns, for each
 month of a horizon of up to 24 months, income, expenses, savings, balance and

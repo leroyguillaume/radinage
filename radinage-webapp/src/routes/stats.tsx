@@ -1,15 +1,27 @@
 import { AreaChart, BarChart } from "@mantine/charts";
-import { Alert, Loader, Paper, SimpleGrid, Stack, Text } from "@mantine/core";
+import {
+	Alert,
+	Box,
+	Group,
+	Loader,
+	Paper,
+	Progress,
+	SimpleGrid,
+	Stack,
+	Text,
+} from "@mantine/core";
 import { MonthPickerInput } from "@mantine/dates";
 import { IconAlertCircle } from "@tabler/icons-react";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useTranslation } from "react-i18next";
+import { CategoryDot } from "@/components/CategoryBadge";
 import { PageHeader } from "@/components/PageHeader";
 import { StatTile } from "@/components/StatTile";
 import { formatAmount } from "@/lib/format";
-import { useSummary } from "@/lib/hooks";
+import { useCategories, useCategorySummary, useSummary } from "@/lib/hooks";
 import { balanceTextColor, budgetTypeTones } from "@/lib/tones";
-import { headingFont } from "@/theme";
+import type { CategoryResponse, CategoryTotal } from "@/lib/types";
+import { headingFont, palette } from "@/theme";
 
 interface StatsSearch {
 	fromYear: number;
@@ -50,6 +62,99 @@ const pickerStyles = {
 
 const axisColor = "var(--mantine-color-dimmed)";
 
+/** What each category spent over the range, most spent first, with its share. */
+function CategoryExpenses({
+	totals,
+	categories,
+}: {
+	totals: CategoryTotal[];
+	categories: CategoryResponse[];
+}) {
+	const { t } = useTranslation();
+	const byId = new Map(categories.map((c) => [c.id, c]));
+	const rows = totals
+		.map((total) => ({
+			key: total.categoryId ?? "__none",
+			category: total.categoryId ? byId.get(total.categoryId) : undefined,
+			spent: -Number(total.expense),
+		}))
+		.filter((row) => row.spent > 0)
+		.sort((a, b) => b.spent - a.spent);
+	const totalSpent = rows.reduce((sum, row) => sum + row.spent, 0);
+	const maxSpent = rows[0]?.spent ?? 0;
+
+	return (
+		<Paper>
+			<Stack gap="md">
+				<Stack gap={4}>
+					<Text component="h2" ff={headingFont} fz={22} fw={700}>
+						{t("stats.byCategory")}
+					</Text>
+					<Text size="sm" c="dimmed">
+						{t("stats.byCategoryHint")}
+					</Text>
+				</Stack>
+				{rows.length === 0 ? (
+					<Text size="sm" c="dimmed">
+						{t("stats.noCategoryExpenses")}
+					</Text>
+				) : (
+					<Box component="ul" m={0} p={0} className="list-none">
+						{rows.map((row) => {
+							const name = row.category?.name ?? t("stats.uncategorized");
+							const share = Math.round((row.spent / totalSpent) * 100);
+							return (
+								<Box
+									component="li"
+									key={row.key}
+									py={8}
+									style={{ borderTop: `1px solid ${palette.divider}` }}
+								>
+									<Group justify="space-between" wrap="nowrap" gap="sm">
+										<Group gap={8} wrap="nowrap" miw={0}>
+											{row.category ? (
+												<CategoryDot color={row.category.color} />
+											) : (
+												<Box
+													w={10}
+													h={10}
+													style={{
+														borderRadius: "50%",
+														border: "1px solid var(--mantine-color-dimmed)",
+														flexShrink: 0,
+													}}
+													aria-hidden
+												/>
+											)}
+											<Text size="sm" fw={600} truncate>
+												{name}
+											</Text>
+										</Group>
+										<Text size="sm" className="tabular-nums" c="dimmed">
+											<Text span fw={700} c="var(--mantine-color-text)" inherit>
+												{formatAmount(row.spent)}
+											</Text>
+											{` · ${share} %`}
+										</Text>
+									</Group>
+									<Progress
+										mt={6}
+										value={(row.spent / maxSpent) * 100}
+										color={budgetTypeTones.expense.fill}
+										bg={palette.track}
+										size="sm"
+										aria-label={`${name} : ${formatAmount(row.spent)}`}
+									/>
+								</Box>
+							);
+						})}
+					</Box>
+				)}
+			</Stack>
+		</Paper>
+	);
+}
+
 function StatsPage() {
 	const { t, i18n } = useTranslation();
 	const navigate = useNavigate();
@@ -59,6 +164,13 @@ function StatsPage() {
 	const to = new Date(toYear, toMonth - 1);
 
 	const summaryQuery = useSummary(fromYear, fromMonth, toYear, toMonth);
+	const categorySummaryQuery = useCategorySummary(
+		fromYear,
+		fromMonth,
+		toYear,
+		toMonth,
+	);
+	const categoriesQuery = useCategories();
 
 	const isLoading = summaryQuery.isLoading;
 	const isError = summaryQuery.isError;
@@ -302,6 +414,13 @@ function StatsPage() {
 								</Paper>
 							</>
 						)}
+
+						{categorySummaryQuery.data && categoriesQuery.data?.length ? (
+							<CategoryExpenses
+								totals={categorySummaryQuery.data.categories}
+								categories={categoriesQuery.data}
+							/>
+						) : null}
 					</>
 				)}
 			</Stack>

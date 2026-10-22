@@ -1,7 +1,7 @@
 use crate::{
     domain::budget::{
-        Budget, BudgetKind, BudgetType, ClosedPeriod, CurrentPeriod, LabelPattern, Recurrence,
-        Rule, YearMonth,
+        Budget, BudgetFields, BudgetKind, BudgetType, ClosedPeriod, CurrentPeriod, LabelPattern,
+        Recurrence, Rule, YearMonth,
     },
     error::{AppError, AppResult},
     repositories::SortOrder,
@@ -73,10 +73,7 @@ pub trait BudgetRepository: Send + Sync + 'static {
     fn create(
         &self,
         user_id: Uuid,
-        label: &str,
-        budget_type: BudgetType,
-        kind: &BudgetKind,
-        rules: &[Rule],
+        fields: &BudgetFields,
     ) -> impl std::future::Future<Output = AppResult<Budget>> + Send;
 
     /// Replace a budget's fields, periods, and rules atomically.
@@ -85,10 +82,7 @@ pub trait BudgetRepository: Send + Sync + 'static {
         &self,
         id: Uuid,
         user_id: Uuid,
-        label: &str,
-        budget_type: BudgetType,
-        kind: &BudgetKind,
-        rules: &[Rule],
+        fields: &BudgetFields,
     ) -> impl std::future::Future<Output = AppResult<Option<Budget>>> + Send;
 
     /// Delete a budget and its related rows. Returns `true` if found.
@@ -120,7 +114,7 @@ impl PgBudgetRepository {
     async fn fetch_full(&self, id: Uuid, user_id: Uuid) -> AppResult<Budget> {
         let row = sqlx::query(
             r#"SELECT id, user_id, label, budget_type, kind_type, recurrence,
-                      kind_month, kind_year, kind_amount, created_at
+                      kind_month, kind_year, kind_amount, category_id, created_at
                FROM budgets WHERE id = $1 AND user_id = $2"#,
         )
         .bind(id)
@@ -239,6 +233,7 @@ impl PgBudgetRepository {
             budget_type,
             kind,
             rules,
+            category_id: row.try_get("category_id")?,
             created_at,
         })
     }
@@ -390,31 +385,28 @@ impl BudgetRepository for PgBudgetRepository {
         Ok(budgets)
     }
 
-    async fn create(
-        &self,
-        user_id: Uuid,
-        label: &str,
-        budget_type: BudgetType,
-        kind: &BudgetKind,
-        rules: &[Rule],
-    ) -> AppResult<Budget> {
+    async fn create(&self, user_id: Uuid, fields: &BudgetFields) -> AppResult<Budget> {
         let id = Uuid::new_v4();
+        let kind = &fields.kind;
+        let rules = &fields.rules;
         let (kind_type, recurrence, kind_month, kind_year, kind_amount) = kind_to_cols(kind);
 
         sqlx::query(
             r#"INSERT INTO budgets
-               (id, user_id, label, budget_type, kind_type, recurrence, kind_month, kind_year, kind_amount)
-               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)"#,
+               (id, user_id, label, budget_type, kind_type, recurrence, kind_month, kind_year,
+                kind_amount, category_id)
+               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)"#,
         )
         .bind(id)
         .bind(user_id)
-        .bind(label)
-        .bind(budget_type.as_str())
+        .bind(&fields.label)
+        .bind(fields.budget_type.as_str())
         .bind(kind_type)
         .bind(recurrence)
         .bind(kind_month)
         .bind(kind_year)
         .bind(kind_amount)
+        .bind(fields.category_id)
         .execute(&self.pool)
         .await?;
 
@@ -436,20 +428,20 @@ impl BudgetRepository for PgBudgetRepository {
         &self,
         id: Uuid,
         user_id: Uuid,
-        label: &str,
-        budget_type: BudgetType,
-        kind: &BudgetKind,
-        rules: &[Rule],
+        fields: &BudgetFields,
     ) -> AppResult<Option<Budget>> {
+        let kind = &fields.kind;
+        let rules = &fields.rules;
         let (kind_type, recurrence, kind_month, kind_year, kind_amount) = kind_to_cols(kind);
 
         let affected = sqlx::query(
             r#"UPDATE budgets SET label = $1, budget_type = $2, kind_type = $3,
-               recurrence = $4, kind_month = $5, kind_year = $6, kind_amount = $7
+               recurrence = $4, kind_month = $5, kind_year = $6, kind_amount = $7,
+               category_id = $10
                WHERE id = $8 AND user_id = $9"#,
         )
-        .bind(label)
-        .bind(budget_type.as_str())
+        .bind(&fields.label)
+        .bind(fields.budget_type.as_str())
         .bind(kind_type)
         .bind(recurrence)
         .bind(kind_month)
@@ -457,6 +449,7 @@ impl BudgetRepository for PgBudgetRepository {
         .bind(kind_amount)
         .bind(id)
         .bind(user_id)
+        .bind(fields.category_id)
         .execute(&self.pool)
         .await?
         .rows_affected();
@@ -533,6 +526,21 @@ mod tests {
         user_id
     }
 
+    fn fields(
+        label: &str,
+        budget_type: BudgetType,
+        kind: BudgetKind,
+        rules: &[Rule],
+    ) -> BudgetFields {
+        BudgetFields {
+            label: label.to_string(),
+            budget_type,
+            kind,
+            rules: rules.to_vec(),
+            category_id: None,
+        }
+    }
+
     fn occasional_kind() -> BudgetKind {
         BudgetKind::Occasional {
             month: 3,
@@ -561,10 +569,7 @@ mod tests {
         let budget = repo
             .create(
                 user_id,
-                "Vacances",
-                BudgetType::Expense,
-                &occasional_kind(),
-                &[],
+                &fields("Vacances", BudgetType::Expense, occasional_kind(), &[]),
             )
             .await
             .unwrap();
@@ -588,10 +593,7 @@ mod tests {
         let budget = repo
             .create(
                 user_id,
-                "Salaire",
-                BudgetType::Income,
-                &recurring_kind(),
-                &rules,
+                &fields("Salaire", BudgetType::Income, recurring_kind(), &rules),
             )
             .await
             .unwrap();
@@ -615,7 +617,10 @@ mod tests {
         let user_id = setup_user(&pool).await;
 
         let budget = repo
-            .create(user_id, "B", BudgetType::Expense, &occasional_kind(), &[])
+            .create(
+                user_id,
+                &fields("B", BudgetType::Expense, occasional_kind(), &[]),
+            )
             .await
             .unwrap();
 
@@ -631,10 +636,7 @@ mod tests {
         let budget = repo
             .create(
                 user_id,
-                "Original",
-                BudgetType::Expense,
-                &occasional_kind(),
-                &[],
+                &fields("Original", BudgetType::Expense, occasional_kind(), &[]),
             )
             .await
             .unwrap();
@@ -643,10 +645,7 @@ mod tests {
             .update(
                 budget.id,
                 user_id,
-                "Updated",
-                BudgetType::Savings,
-                &occasional_kind(),
-                &[],
+                &fields("Updated", BudgetType::Savings, occasional_kind(), &[]),
             )
             .await
             .unwrap()
@@ -654,6 +653,42 @@ mod tests {
 
         assert_eq!(updated.label, "Updated");
         assert_eq!(updated.budget_type, BudgetType::Savings);
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn category_is_stored_replaced_and_cleared_when_deleted(pool: PgPool) {
+        use crate::repositories::{CategoryRepository, PgCategoryRepository};
+        let repo = PgBudgetRepository::new(pool.clone());
+        let categories = PgCategoryRepository::new(pool.clone());
+        let user_id = setup_user(&pool).await;
+        let category = |name: &str| crate::domain::category::CategoryFields {
+            name: name.to_string(),
+            color: crate::domain::category::CategoryColor::Teal,
+        };
+        let food = categories.create(user_id, &category("Food")).await.unwrap();
+        let fun = categories.create(user_id, &category("Fun")).await.unwrap();
+        let in_category = |id| BudgetFields {
+            category_id: Some(id),
+            ..fields("B", BudgetType::Expense, occasional_kind(), &[])
+        };
+
+        let budget = repo.create(user_id, &in_category(food.id)).await.unwrap();
+        assert_eq!(budget.category_id, Some(food.id));
+        let budget = repo
+            .update(budget.id, user_id, &in_category(fun.id))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(budget.category_id, Some(fun.id));
+
+        categories.delete(fun.id, user_id).await.unwrap();
+        assert_eq!(
+            repo.find_by_id(budget.id, user_id)
+                .await
+                .unwrap()
+                .category_id,
+            None
+        );
     }
 
     #[sqlx::test(migrations = "./migrations")]
@@ -665,10 +700,7 @@ mod tests {
             .update(
                 Uuid::new_v4(),
                 user_id,
-                "X",
-                BudgetType::Expense,
-                &occasional_kind(),
-                &[],
+                &fields("X", BudgetType::Expense, occasional_kind(), &[]),
             )
             .await
             .unwrap();
@@ -684,10 +716,7 @@ mod tests {
         let budget = repo
             .create(
                 user_id,
-                "ToDelete",
-                BudgetType::Expense,
-                &occasional_kind(),
-                &[],
+                &fields("ToDelete", BudgetType::Expense, occasional_kind(), &[]),
             )
             .await
             .unwrap();
@@ -704,10 +733,12 @@ mod tests {
         for i in 0..4 {
             repo.create(
                 user_id,
-                &format!("Budget {i}"),
-                BudgetType::Expense,
-                &occasional_kind(),
-                &[],
+                &fields(
+                    &format!("Budget {i}"),
+                    BudgetType::Expense,
+                    occasional_kind(),
+                    &[],
+                ),
             )
             .await
             .unwrap();
@@ -745,7 +776,7 @@ mod tests {
                 },
             };
             let budget = repo
-                .create(user_id, label, BudgetType::Expense, &kind, &[])
+                .create(user_id, &fields(label, BudgetType::Expense, kind, &[]))
                 .await
                 .unwrap();
 
@@ -775,10 +806,12 @@ mod tests {
         for i in 0..3 {
             repo.create(
                 user_id,
-                &format!("B{i}"),
-                BudgetType::Expense,
-                &occasional_kind(),
-                &[],
+                &fields(
+                    &format!("B{i}"),
+                    BudgetType::Expense,
+                    occasional_kind(),
+                    &[],
+                ),
             )
             .await
             .unwrap();

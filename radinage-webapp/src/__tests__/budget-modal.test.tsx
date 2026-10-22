@@ -13,7 +13,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { selectMantineOption } from "@/__tests__/mantine";
 import { BudgetModal } from "@/components/BudgetModal";
 import { i18n } from "@/i18n";
-import type { BudgetResponse } from "@/lib/types";
+import type { BudgetResponse, CategoryResponse } from "@/lib/types";
 import { theme } from "@/theme";
 
 vi.mock("@/lib/api", () => ({
@@ -31,10 +31,16 @@ vi.mock("@/lib/api", () => ({
 const { apiFetch } = await import("@/lib/api");
 const apiFetchMock = vi.mocked(apiFetch);
 
-function renderModal(budget: BudgetResponse | null = null, onClose = vi.fn()) {
+function renderModal(
+	budget: BudgetResponse | null = null,
+	onClose = vi.fn(),
+	categories: CategoryResponse[] = [],
+) {
+	// Categories come from the cache, so every API call the tests see is a save.
 	const queryClient = new QueryClient({
-		defaultOptions: { queries: { retry: false } },
+		defaultOptions: { queries: { retry: false, staleTime: Infinity } },
 	});
+	queryClient.setQueryData(["categories"], categories);
 
 	render(
 		<QueryClientProvider client={queryClient}>
@@ -67,6 +73,7 @@ function makeRecurringBudget(
 			},
 		},
 		rules: [],
+		categoryId: null,
 		createdAt: "2024-01-01T00:00:00Z",
 	};
 }
@@ -88,6 +95,7 @@ function makeOccasionalBudget(): BudgetResponse {
 				matchAmount: false,
 			},
 		],
+		categoryId: null,
 		createdAt: "2024-01-01T00:00:00Z",
 	};
 }
@@ -310,6 +318,7 @@ describe("BudgetModal", () => {
 				},
 			},
 			rules: [],
+			categoryId: null,
 			createdAt: "2024-01-01T00:00:00Z",
 		};
 		renderModal(budget);
@@ -371,6 +380,7 @@ describe("BudgetModal", () => {
 				},
 			},
 			rules: [],
+			categoryId: null,
 			createdAt: "2024-01-01T00:00:00Z",
 		};
 		apiFetchMock.mockResolvedValueOnce(budget);
@@ -454,6 +464,7 @@ describe("BudgetModal", () => {
 					matchAmount: false,
 				},
 			],
+			categoryId: null,
 			createdAt: "2024-01-01T00:00:00Z",
 		};
 		apiFetchMock.mockResolvedValueOnce(budgetWithRules);
@@ -513,6 +524,7 @@ describe("BudgetModal", () => {
 				},
 			},
 			rules: [],
+			categoryId: null,
 			createdAt: "2024-01-01T00:00:00Z",
 		};
 		renderModal(budget);
@@ -545,6 +557,7 @@ describe("BudgetModal", () => {
 				},
 			},
 			rules: [],
+			categoryId: null,
 			createdAt: "2024-01-01T00:00:00Z",
 		};
 		renderModal(budget);
@@ -581,6 +594,7 @@ describe("BudgetModal", () => {
 				},
 			},
 			rules: [],
+			categoryId: null,
 			createdAt: "2024-01-01T00:00:00Z",
 		};
 		renderModal(budget);
@@ -622,6 +636,7 @@ describe("BudgetModal", () => {
 					matchAmount: false,
 				},
 			],
+			categoryId: null,
 			createdAt: "2024-01-01T00:00:00Z",
 		};
 		// First call: create budget
@@ -665,5 +680,40 @@ describe("BudgetModal", () => {
 				screen.getByText("2 opération(s) liée(s), 0 ignorée(s)"),
 			).toBeInTheDocument();
 		});
+	});
+
+	it("sends the default category picked", async () => {
+		apiFetchMock.mockResolvedValueOnce(makeRecurringBudget("monthly"));
+		renderModal(null, vi.fn(), [
+			{
+				id: "c1",
+				name: "Alimentation",
+				color: "teal",
+				createdAt: "2026-01-01T00:00:00Z",
+			},
+		]);
+		const user = userEvent.setup();
+
+		await user.type(screen.getByLabelText("Libellé *"), "Courses");
+		await user.type(screen.getByLabelText("Montant *"), "-100");
+		await user.click(
+			screen.getByRole("combobox", { name: "Catégorie par défaut" }),
+		);
+		await user.click(
+			await screen.findByRole("option", { name: "Alimentation" }),
+		);
+		fireEvent.click(screen.getByRole("button", { name: "Enregistrer" }));
+
+		await waitFor(() => expect(apiFetchMock).toHaveBeenCalled());
+		const callBody = JSON.parse(apiFetchMock.mock.calls[0][1]?.body as string);
+		expect(callBody.categoryId).toBe("c1");
+	});
+
+	it("hides the category field while there are no categories", () => {
+		renderModal();
+
+		expect(
+			screen.queryByRole("combobox", { name: "Catégorie par défaut" }),
+		).not.toBeInTheDocument();
 	});
 });

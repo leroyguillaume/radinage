@@ -13,9 +13,10 @@ A self-hosted personal bank account tracker: import your bank statements, sort t
 Radinage keeps a record of your bank operations and compares them with the budgets you plan, month by month, so the end-of-year balance is never a surprise. It does not connect to your bank: operations come from the CSV or Excel exports banks already provide.
 
 - **Operations**: import bank statements (CSV/XLSX) with import profiles that remember each bank's file layout, set up from a preview of a sample file; link operations to budgets by hand, or split one operation (a cash withdrawal, say) across several budgets.
+- **Categories**: sort operations into your own named, coloured categories, independently of budgets; an operation linked to a budget takes the budget's default category unless given its own, and each part of a split operation has its own. Filter the operations of a month by category.
 - **Budgets**: recurring (weekly, monthly, quarterly, yearly) or one-off, for expenses, income or savings, with matching rules that categorise operations automatically.
 - **Forecast**, over a calendar year or the next 12 months: starting from the account balance you record (the balance your bank shows on a given day) or from zero, actuals for past months (operations outside any budget counted as income or expense by their own sign), the current month's actuals plus what its budgets still expect, budgets beyond it, spending outside budgets at your average of the last three months, the daily amount you can still spend outside budgets without ending in the red (negative when the budgets alone already do), and the month the balance would first turn negative. Selecting a month opens its breakdown budget by budget: what each one expects, what is already linked to it and what the forecast counts, then spending outside budgets.
-- **Statistics**: income, expenses, savings and balance over any range of months.
+- **Statistics**: income, expenses, savings and balance over any range of months, and expenses by category.
 - **Multi-user**: JWT authentication, an admin account and invitation links.
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for the design and the reasoning behind it.
@@ -61,6 +62,7 @@ The API (`radinage-api`) reads its configuration from environment variables, or 
 | `JWT_EXPIRATION_SECS` | no | `86400` | Token lifetime in seconds |
 | `MAX_BUDGETS_PER_USER` | no | `100` | Maximum number of budgets per user |
 | `MAX_IMPORT_PROFILES_PER_USER` | no | `20` | Maximum number of import profiles per user |
+| `MAX_CATEGORIES_PER_USER` | no | `50` | Maximum number of categories per user |
 | `LOG_FILTER` | no | `info` | `tracing` filter directive |
 | `LOG_JSON` | no | `false` | Emit logs as JSON |
 

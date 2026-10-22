@@ -18,6 +18,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { type FormEvent, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { AccountBalanceSection } from "@/components/AccountBalanceSection";
+import { CategoriesSection } from "@/components/CategoriesSection";
 import { PageHeader } from "@/components/PageHeader";
 import { ApiError } from "@/lib/api";
 import { useChangePassword, useExportData, useImportData } from "@/lib/hooks";
@@ -166,6 +167,8 @@ export function SettingsPage() {
 
 				<AccountBalanceSection />
 
+				<CategoriesSection />
+
 				<Paper>
 					<Stack>
 						<Title order={3} fz={20}>
@@ -184,6 +187,8 @@ export function SettingsPage() {
 						{dataSuccess && (
 							<Alert color="leaf" icon={<IconCheck size={16} />}>
 								{t("settings.data.importSuccess", {
+									categories: dataSuccess.importedCategories,
+									skippedCategories: dataSuccess.skippedCategories,
 									budgets: dataSuccess.importedBudgets,
 									skippedBudgets: dataSuccess.skippedBudgets,
 									operations: dataSuccess.importedOperations,

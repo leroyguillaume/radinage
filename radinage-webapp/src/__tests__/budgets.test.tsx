@@ -59,6 +59,7 @@ function makeBudget(
 				matchAmount: false,
 			},
 		],
+		categoryId: null,
 		createdAt: "2024-01-01T00:00:00Z",
 	};
 }
@@ -75,6 +76,7 @@ function makeOccasionalBudget(id: string, label: string): BudgetResponse {
 			amount: "-500.00",
 		},
 		rules: [],
+		categoryId: null,
 		createdAt: "2024-01-01T00:00:00Z",
 	};
 }
@@ -97,6 +99,8 @@ function makeLinkedOperation(
 		label: `OP ${id}`,
 		budgetLink: { type: "auto", budgetId },
 		ignored: false,
+		categoryId: null,
+		effectiveCategoryId: null,
 		splits: [],
 	};
 }
@@ -588,10 +592,30 @@ describe("BudgetsPage", () => {
 					label: "RETRAIT DAB",
 					budgetLink: { type: "unlinked" },
 					ignored: false,
+					categoryId: null,
+					effectiveCategoryId: null,
 					splits: [
-						{ id: "s1", amount: "-30.00", budgetId: "b1" },
-						{ id: "s2", amount: "-50.00", budgetId: "b2" },
-						{ id: "s3", amount: "-20.00", budgetId: null },
+						{
+							id: "s1",
+							amount: "-30.00",
+							budgetId: "b1",
+							categoryId: null,
+							effectiveCategoryId: null,
+						},
+						{
+							id: "s2",
+							amount: "-50.00",
+							budgetId: "b2",
+							categoryId: null,
+							effectiveCategoryId: null,
+						},
+						{
+							id: "s3",
+							amount: "-20.00",
+							budgetId: null,
+							categoryId: null,
+							effectiveCategoryId: null,
+						},
 					],
 				},
 			],

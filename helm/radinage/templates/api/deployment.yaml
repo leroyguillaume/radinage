@@ -40,6 +40,8 @@ spec:
               value: {{ $app.maxBudgetsPerUser | quote }}
             - name: MAX_IMPORT_PROFILES_PER_USER
               value: {{ $app.maxImportProfilesPerUser | quote }}
+            - name: MAX_CATEGORIES_PER_USER
+              value: {{ $app.maxCategoriesPerUser | quote }}
             - name: DATABASE_URL
               valueFrom:
                 secretKeyRef:

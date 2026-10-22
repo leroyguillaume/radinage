@@ -5,8 +5,10 @@ use crate::{
         BudgetLink, NewOperationSplit, Operation, OperationSplit, validate_splits,
     },
     error::{AppError, AppResult},
+    handlers::categories::ensure_category_is_users,
     repositories::{
-        BudgetRepository, ListOperationsParams, OperationRepository, OperationSortField, SortOrder,
+        BudgetRepository, CategoryFilter, CategoryRepository, ListOperationsParams,
+        OperationRepository, OperationSortField, SortOrder,
     },
     services::matcher::{MatcherService, MatcherServiceImpl},
 };
@@ -44,6 +46,11 @@ pub struct OperationResponse {
     pub budget_link: BudgetLink,
     /// Whether this operation is ignored (excluded from summaries and budgets).
     pub ignored: bool,
+    /// Category the user put this operation in, `null` when none. Always `null` when split.
+    pub category_id: Option<Uuid>,
+    /// Category the operation counts towards: its own, else its linked budget's. Always `null`
+    /// when split, each part carrying its own.
+    pub effective_category_id: Option<Uuid>,
     /// Parts this operation is split into, ordered by position; empty when not split.
     /// A split operation is accounted through its parts and its own budget link is unlinked.
     pub splits: Vec<OperationSplitResponse>,
@@ -60,6 +67,10 @@ pub struct OperationSplitResponse {
     pub amount: Decimal,
     /// Budget this part is assigned to, or `null` when it is unbudgeted.
     pub budget_id: Option<Uuid>,
+    /// Category the user put this part in, `null` when none.
+    pub category_id: Option<Uuid>,
+    /// Category the part counts towards: its own, else its budget's.
+    pub effective_category_id: Option<Uuid>,
 }
 
 impl From<OperationSplit> for OperationSplitResponse {
@@ -68,12 +79,15 @@ impl From<OperationSplit> for OperationSplitResponse {
             id: split.id,
             amount: split.amount,
             budget_id: split.budget_id,
+            category_id: split.category_id,
+            effective_category_id: split.effective_category_id(),
         }
     }
 }
 
 impl From<Operation> for OperationResponse {
     fn from(op: Operation) -> Self {
+        let effective_category_id = op.effective_category_id();
         Self {
             id: op.id,
             amount: op.amount,
@@ -82,6 +96,8 @@ impl From<Operation> for OperationResponse {
             label: op.label,
             budget_link: op.budget_link,
             ignored: op.ignored,
+            category_id: op.category_id,
+            effective_category_id,
             splits: op
                 .splits
                 .into_iter()
@@ -126,13 +142,28 @@ pub struct LinkBudgetRequest {
     pub budget_id: Uuid,
 }
 
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct SetCategoryRequest {
+    /// One of the caller's categories.
+    pub category_id: Uuid,
+}
+
 /// Full set of parts to split an operation into, replacing any existing split.
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 #[schemars(extend("example" = serde_json::json!({
     "splits": [
-        { "amount": "-30", "budgetId": "3f1c2a9e-8d4b-4c7a-9e21-5b6f0d8a1c42" },
-        { "amount": "-70", "budgetId": null }
+        {
+            "amount": "-30",
+            "budgetId": "3f1c2a9e-8d4b-4c7a-9e21-5b6f0d8a1c42",
+            "categoryId": null
+        },
+        {
+            "amount": "-70",
+            "budgetId": null,
+            "categoryId": "9b2e4f1a-6c3d-4e8b-a1f2-7d5c0e9b3a61"
+        }
     ]
 })))]
 pub struct ReplaceOperationSplitsRequest {
@@ -150,6 +181,9 @@ pub struct OperationSplitRequest {
     pub amount: Decimal,
     /// One of the caller's budgets, or `null` to leave the part unbudgeted.
     pub budget_id: Option<Uuid>,
+    /// One of the caller's categories, or `null` (the default) to fall back on the budget's.
+    #[serde(default)]
+    pub category_id: Option<Uuid>,
 }
 
 impl From<OperationSplitRequest> for NewOperationSplit {
@@ -157,6 +191,7 @@ impl From<OperationSplitRequest> for NewOperationSplit {
         Self {
             amount: split.amount,
             budget_id: split.budget_id,
+            category_id: split.category_id,
         }
     }
 }
@@ -186,6 +221,13 @@ pub struct ListOperationsQuery {
     /// Include ignored operations in results (default: false).
     #[serde(default)]
     pub include_ignored: bool,
+    /// Include only operations counting towards this category: an unsplit operation through
+    /// its effective category, a split one through any of its parts.
+    pub category_id: Option<Uuid>,
+    /// Include only operations without an effective category, or split with such a part
+    /// (default: false). Cannot be combined with `categoryId`.
+    #[serde(default)]
+    pub uncategorized: bool,
 }
 
 fn default_page() -> Option<u32> {
@@ -242,13 +284,23 @@ pub fn compute_max_page(total: i64, page_size: u32) -> u32 {
 
 // ── Handlers ─────────────────────────────────────────────────────────────────
 
-pub async fn list_operations<U, O: OperationRepository, B, P>(
-    State(state): State<AppState<U, O, B, P>>,
+pub async fn list_operations<U, O: OperationRepository, B, P, C>(
+    State(state): State<AppState<U, O, B, P, C>>,
     auth_user: AuthUser,
     Query(q): Query<ListOperationsQuery>,
 ) -> AppResult<Json<PaginatedResponse<OperationResponse>>> {
     let page = q.page.unwrap_or(1).max(1);
     let page_size = q.page_size.unwrap_or(100).clamp(1, 500);
+    let category = match (q.category_id, q.uncategorized) {
+        (Some(_), true) => {
+            return Err(AppError::BadRequest(
+                "categoryId and uncategorized cannot be combined".to_string(),
+            ));
+        }
+        (Some(id), false) => Some(CategoryFilter::Category(id)),
+        (None, true) => Some(CategoryFilter::Uncategorized),
+        (None, false) => None,
+    };
 
     let params = ListOperationsParams {
         date_from: q.date_from,
@@ -263,6 +315,7 @@ pub async fn list_operations<U, O: OperationRepository, B, P>(
         limit: page_size as i64,
         offset: ((page - 1) * page_size) as i64,
         include_ignored: q.include_ignored,
+        category,
     };
 
     let (ops, total) = state.operation_repo.list(auth_user.id, &params).await?;
@@ -277,8 +330,8 @@ pub async fn list_operations<U, O: OperationRepository, B, P>(
     }))
 }
 
-pub async fn get_operation<U, O: OperationRepository, B, P>(
-    State(state): State<AppState<U, O, B, P>>,
+pub async fn get_operation<U, O: OperationRepository, B, P, C>(
+    State(state): State<AppState<U, O, B, P, C>>,
     auth_user: AuthUser,
     Path(id): Path<Uuid>,
 ) -> AppResult<Json<OperationResponse>> {
@@ -286,8 +339,8 @@ pub async fn get_operation<U, O: OperationRepository, B, P>(
     Ok(Json(op.into()))
 }
 
-pub async fn create_operation<U, O: OperationRepository, B: BudgetRepository, P>(
-    State(state): State<AppState<U, O, B, P>>,
+pub async fn create_operation<U, O: OperationRepository, B: BudgetRepository, P, C>(
+    State(state): State<AppState<U, O, B, P, C>>,
     auth_user: AuthUser,
     Json(body): Json<CreateOperationRequest>,
 ) -> AppResult<(StatusCode, Json<OperationResponse>)> {
@@ -314,6 +367,8 @@ pub async fn create_operation<U, O: OperationRepository, B: BudgetRepository, P>
         label: body.label,
         budget_link: BudgetLink::Unlinked,
         ignored: false,
+        category_id: None,
+        budget_category_id: None,
         splits: Vec::new(),
     };
     auto_match_operation(&state.operation_repo, &state.budget_repo, &op).await?;
@@ -322,8 +377,8 @@ pub async fn create_operation<U, O: OperationRepository, B: BudgetRepository, P>
     Ok((StatusCode::CREATED, Json(updated.into())))
 }
 
-pub async fn update_operation<U, O: OperationRepository, B, P>(
-    State(state): State<AppState<U, O, B, P>>,
+pub async fn update_operation<U, O: OperationRepository, B, P, C>(
+    State(state): State<AppState<U, O, B, P, C>>,
     auth_user: AuthUser,
     Path(id): Path<Uuid>,
     Json(body): Json<UpdateOperationRequest>,
@@ -352,8 +407,8 @@ pub async fn update_operation<U, O: OperationRepository, B, P>(
     Ok(Json(op.into()))
 }
 
-pub async fn delete_operation<U, O: OperationRepository, B, P>(
-    State(state): State<AppState<U, O, B, P>>,
+pub async fn delete_operation<U, O: OperationRepository, B, P, C>(
+    State(state): State<AppState<U, O, B, P, C>>,
     auth_user: AuthUser,
     Path(id): Path<Uuid>,
 ) -> AppResult<StatusCode> {
@@ -364,8 +419,8 @@ pub async fn delete_operation<U, O: OperationRepository, B, P>(
     Ok(StatusCode::NO_CONTENT)
 }
 
-pub async fn link_budget<U, O: OperationRepository, B: BudgetRepository, P>(
-    State(state): State<AppState<U, O, B, P>>,
+pub async fn link_budget<U, O: OperationRepository, B: BudgetRepository, P, C>(
+    State(state): State<AppState<U, O, B, P, C>>,
     auth_user: AuthUser,
     Path(op_id): Path<Uuid>,
     Json(body): Json<LinkBudgetRequest>,
@@ -374,7 +429,7 @@ pub async fn link_budget<U, O: OperationRepository, B: BudgetRepository, P>(
     if !state.budget_repo.exists(body.budget_id, user_id).await? {
         return Err(AppError::NotFound);
     }
-    ensure_not_split(&state.operation_repo, op_id, user_id).await?;
+    ensure_not_split(&state.operation_repo, op_id, user_id, "budget link").await?;
 
     let link = BudgetLink::Manual {
         budget_id: body.budget_id,
@@ -391,12 +446,12 @@ pub async fn link_budget<U, O: OperationRepository, B: BudgetRepository, P>(
     Ok(Json(op.into()))
 }
 
-pub async fn unlink_budget<U, O: OperationRepository, B, P>(
-    State(state): State<AppState<U, O, B, P>>,
+pub async fn unlink_budget<U, O: OperationRepository, B, P, C>(
+    State(state): State<AppState<U, O, B, P, C>>,
     auth_user: AuthUser,
     Path(id): Path<Uuid>,
 ) -> AppResult<Json<OperationResponse>> {
-    ensure_not_split(&state.operation_repo, id, auth_user.id).await?;
+    ensure_not_split(&state.operation_repo, id, auth_user.id, "budget link").await?;
     let found = state
         .operation_repo
         .set_budget_link(id, auth_user.id, &BudgetLink::Unlinked)
@@ -408,8 +463,53 @@ pub async fn unlink_budget<U, O: OperationRepository, B, P>(
     Ok(Json(op.into()))
 }
 
-pub async fn ignore_operation<U, O: OperationRepository, B, P>(
-    State(state): State<AppState<U, O, B, P>>,
+pub async fn set_category<U, O: OperationRepository, B, P, C: CategoryRepository>(
+    State(state): State<AppState<U, O, B, P, C>>,
+    auth_user: AuthUser,
+    Path(id): Path<Uuid>,
+    Json(body): Json<SetCategoryRequest>,
+) -> AppResult<Json<OperationResponse>> {
+    if !state
+        .category_repo
+        .exists(body.category_id, auth_user.id)
+        .await?
+    {
+        return Err(AppError::NotFound);
+    }
+    store_category(
+        &state.operation_repo,
+        id,
+        auth_user.id,
+        Some(body.category_id),
+    )
+    .await
+}
+
+pub async fn clear_category<U, O: OperationRepository, B, P, C>(
+    State(state): State<AppState<U, O, B, P, C>>,
+    auth_user: AuthUser,
+    Path(id): Path<Uuid>,
+) -> AppResult<Json<OperationResponse>> {
+    store_category(&state.operation_repo, id, auth_user.id, None).await
+}
+
+/// Set an unsplit operation's own category and return the operation.
+async fn store_category(
+    op_repo: &impl OperationRepository,
+    id: Uuid,
+    user_id: Uuid,
+    category_id: Option<Uuid>,
+) -> AppResult<Json<OperationResponse>> {
+    ensure_not_split(op_repo, id, user_id, "category").await?;
+    if !op_repo.set_category(id, user_id, category_id).await? {
+        return Err(AppError::NotFound);
+    }
+    let op = op_repo.find_by_id(id, user_id).await?;
+    Ok(Json(op.into()))
+}
+
+pub async fn ignore_operation<U, O: OperationRepository, B, P, C>(
+    State(state): State<AppState<U, O, B, P, C>>,
     auth_user: AuthUser,
     Path(id): Path<Uuid>,
 ) -> AppResult<Json<OperationResponse>> {
@@ -424,8 +524,8 @@ pub async fn ignore_operation<U, O: OperationRepository, B, P>(
     Ok(Json(op.into()))
 }
 
-pub async fn unignore_operation<U, O: OperationRepository, B, P>(
-    State(state): State<AppState<U, O, B, P>>,
+pub async fn unignore_operation<U, O: OperationRepository, B, P, C>(
+    State(state): State<AppState<U, O, B, P, C>>,
     auth_user: AuthUser,
     Path(id): Path<Uuid>,
 ) -> AppResult<Json<OperationResponse>> {
@@ -440,8 +540,14 @@ pub async fn unignore_operation<U, O: OperationRepository, B, P>(
     Ok(Json(op.into()))
 }
 
-pub async fn replace_splits<U, O: OperationRepository, B: BudgetRepository, P>(
-    State(state): State<AppState<U, O, B, P>>,
+pub async fn replace_splits<
+    U,
+    O: OperationRepository,
+    B: BudgetRepository,
+    P,
+    C: CategoryRepository,
+>(
+    State(state): State<AppState<U, O, B, P, C>>,
     auth_user: AuthUser,
     Path(id): Path<Uuid>,
     Json(body): Json<ReplaceOperationSplitsRequest>,
@@ -460,6 +566,12 @@ pub async fn replace_splits<U, O: OperationRepository, B: BudgetRepository, P>(
             return Err(AppError::BadRequest(format!("unknown budget {budget_id}")));
         }
     }
+    let mut category_ids: Vec<Uuid> = splits.iter().filter_map(|s| s.category_id).collect();
+    category_ids.sort_unstable();
+    category_ids.dedup();
+    for category_id in category_ids {
+        ensure_category_is_users(&state.category_repo, Some(category_id), user_id).await?;
+    }
 
     if !state
         .operation_repo
@@ -472,8 +584,8 @@ pub async fn replace_splits<U, O: OperationRepository, B: BudgetRepository, P>(
     Ok(Json(op.into()))
 }
 
-pub async fn clear_splits<U, O: OperationRepository, B, P>(
-    State(state): State<AppState<U, O, B, P>>,
+pub async fn clear_splits<U, O: OperationRepository, B, P, C>(
+    State(state): State<AppState<U, O, B, P, C>>,
     auth_user: AuthUser,
     Path(id): Path<Uuid>,
 ) -> AppResult<Json<OperationResponse>> {
@@ -484,16 +596,18 @@ pub async fn clear_splits<U, O: OperationRepository, B, P>(
     Ok(Json(op.into()))
 }
 
-/// Reject changes to the budget link of a split operation, which is accounted through its parts.
+/// Reject changes to the budget link or category of a split operation, which is accounted
+/// through its parts.
 async fn ensure_not_split(
     op_repo: &impl OperationRepository,
     id: Uuid,
     user_id: Uuid,
+    what: &str,
 ) -> AppResult<()> {
     if op_repo.find_by_id(id, user_id).await?.is_split() {
-        return Err(AppError::Conflict(
-            "the operation is split: its budget link cannot be changed".to_string(),
-        ));
+        return Err(AppError::Conflict(format!(
+            "the operation is split: its {what} cannot be changed"
+        )));
     }
     Ok(())
 }
@@ -531,8 +645,14 @@ mod tests {
             budget::{Budget, BudgetKind, BudgetType, LabelPattern, Rule},
             operation::BudgetLink,
         },
-        repositories::{MockBudgetRepository, MockOperationRepository, MockUserRepository},
-        test_util::{auth_header, build_test_router, json_request, make_test_state, response_json},
+        repositories::{
+            MockBudgetRepository, MockCategoryRepository, MockOperationRepository,
+            MockUserRepository,
+        },
+        test_util::{
+            auth_header, build_test_router, json_request, make_test_state,
+            make_test_state_with_categories, response_json,
+        },
     };
     use axum::{Router, http::StatusCode, response::Response};
     use chrono::{NaiveDate, Utc};
@@ -550,6 +670,8 @@ mod tests {
             label: "Test".to_string(),
             budget_link: BudgetLink::Unlinked,
             ignored: false,
+            category_id: None,
+            budget_category_id: None,
             splits: vec![],
         }
     }
@@ -566,6 +688,7 @@ mod tests {
                 amount: Decimal::new(-50, 0),
             },
             rules: vec![],
+            category_id: None,
             created_at: Utc::now(),
         }
     }
@@ -842,11 +965,15 @@ mod tests {
                     id: Uuid::new_v4(),
                     amount: Decimal::new(-20, 0),
                     budget_id: None,
+                    category_id: None,
+                    budget_category_id: None,
                 },
                 OperationSplit {
                     id: Uuid::new_v4(),
                     amount: Decimal::new(-30, 0),
                     budget_id: None,
+                    category_id: None,
+                    budget_category_id: None,
                 },
             ],
             ..make_op(id, user_id)
@@ -912,10 +1039,12 @@ mod tests {
                             NewOperationSplit {
                                 amount: Decimal::new(-20, 0),
                                 budget_id: Some(budget_id),
+                                category_id: None,
                             },
                             NewOperationSplit {
                                 amount: Decimal::new(-30, 0),
                                 budget_id: None,
+                                category_id: None,
                             },
                         ]
             })
@@ -1261,5 +1390,249 @@ mod tests {
         auto_match_operation(&op_repo, &budget_repo, &op)
             .await
             .unwrap();
+    }
+
+    fn category_app(
+        op_repo: MockOperationRepository,
+        category_repo: MockCategoryRepository,
+    ) -> Router {
+        build_test_router(make_test_state_with_categories(
+            MockUserRepository::new(),
+            op_repo,
+            MockBudgetRepository::new(),
+            category_repo,
+        ))
+    }
+
+    fn categories_existing(found: bool) -> MockCategoryRepository {
+        let mut repo = MockCategoryRepository::new();
+        repo.expect_exists()
+            .returning(move |_, _| Box::pin(async move { Ok(found) }));
+        repo
+    }
+
+    async fn put_category(app: Router, user_id: Uuid, op_id: Uuid, category_id: Uuid) -> Response {
+        let auth = auth_header(user_id, UserRole::User);
+        let body = serde_json::to_string(&SetCategoryRequest { category_id }).unwrap();
+        let req = json_request(
+            "PUT",
+            &format!("/operations/{op_id}/category"),
+            Some(&body),
+            Some(&auth),
+        );
+        app.oneshot(req).await.unwrap()
+    }
+
+    #[tokio::test]
+    async fn response_exposes_own_and_effective_category() {
+        let own = Uuid::new_v4();
+        let budgets = Uuid::new_v4();
+        let op = Operation {
+            budget_category_id: Some(budgets),
+            ..make_op(Uuid::new_v4(), Uuid::new_v4())
+        };
+
+        let json = serde_json::to_value(OperationResponse::from(op.clone())).unwrap();
+        assert_eq!(json["categoryId"], serde_json::Value::Null);
+        assert_eq!(json["effectiveCategoryId"], budgets.to_string());
+
+        let json = serde_json::to_value(OperationResponse::from(Operation {
+            category_id: Some(own),
+            ..op
+        }))
+        .unwrap();
+        assert_eq!(json["categoryId"], own.to_string());
+        assert_eq!(json["effectiveCategoryId"], own.to_string());
+    }
+
+    #[tokio::test]
+    async fn set_category_stores_it_and_returns_the_operation() {
+        let user_id = Uuid::new_v4();
+        let op_id = Uuid::new_v4();
+        let category_id = Uuid::new_v4();
+        let mut op_repo = MockOperationRepository::new();
+        let mut calls = 0;
+        op_repo.expect_find_by_id().times(2).returning(move |_, _| {
+            calls += 1;
+            let category_id = (calls == 2).then_some(category_id);
+            Box::pin(async move {
+                Ok(Operation {
+                    category_id,
+                    ..make_op(op_id, user_id)
+                })
+            })
+        });
+        op_repo
+            .expect_set_category()
+            .withf(move |id, uid, cid| *id == op_id && *uid == user_id && *cid == Some(category_id))
+            .once()
+            .returning(|_, _, _| Box::pin(async { Ok(true) }));
+
+        let app = category_app(op_repo, categories_existing(true));
+        let resp = put_category(app, user_id, op_id, category_id).await;
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        let json: OperationResponse = response_json(resp).await;
+        assert_eq!(json.category_id, Some(category_id));
+    }
+
+    #[tokio::test]
+    async fn set_unknown_category_returns_404() {
+        let mut op_repo = MockOperationRepository::new();
+        op_repo.expect_set_category().never();
+
+        let app = category_app(op_repo, categories_existing(false));
+        let resp = put_category(app, Uuid::new_v4(), Uuid::new_v4(), Uuid::new_v4()).await;
+
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn set_category_on_split_operation_returns_409() {
+        let user_id = Uuid::new_v4();
+        let op_id = Uuid::new_v4();
+        let mut op_repo = MockOperationRepository::new();
+        expect_find_returning(&mut op_repo, split_op(op_id, user_id));
+        op_repo.expect_set_category().never();
+
+        let app = category_app(op_repo, categories_existing(true));
+        let resp = put_category(app, user_id, op_id, Uuid::new_v4()).await;
+
+        assert_eq!(resp.status(), StatusCode::CONFLICT);
+        assert_eq!(
+            error_message(resp).await,
+            "the operation is split: its category cannot be changed"
+        );
+    }
+
+    #[tokio::test]
+    async fn clear_category_stores_none() {
+        let user_id = Uuid::new_v4();
+        let op_id = Uuid::new_v4();
+        let mut op_repo = MockOperationRepository::new();
+        op_repo
+            .expect_find_by_id()
+            .times(2)
+            .returning(move |_, _| Box::pin(async move { Ok(make_op(op_id, user_id)) }));
+        op_repo
+            .expect_set_category()
+            .withf(|_, _, cid| cid.is_none())
+            .once()
+            .returning(|_, _, _| Box::pin(async { Ok(true) }));
+
+        let auth = auth_header(user_id, UserRole::User);
+        let req = json_request(
+            "DELETE",
+            &format!("/operations/{op_id}/category"),
+            None,
+            Some(&auth),
+        );
+        let resp = category_app(op_repo, MockCategoryRepository::new())
+            .oneshot(req)
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn list_operations_passes_the_category_filter() {
+        let category_id = Uuid::new_v4();
+        for (query, expected) in [
+            (
+                format!("categoryId={category_id}"),
+                Some(CategoryFilter::Category(category_id)),
+            ),
+            (
+                "uncategorized=true".to_string(),
+                Some(CategoryFilter::Uncategorized),
+            ),
+            (String::new(), None),
+        ] {
+            let mut op_repo = MockOperationRepository::new();
+            op_repo
+                .expect_list()
+                .withf(move |_, params| params.category == expected)
+                .once()
+                .returning(|_, _| Box::pin(async { Ok((vec![], 0)) }));
+
+            let auth = auth_header(Uuid::new_v4(), UserRole::User);
+            let req = json_request("GET", &format!("/operations?{query}"), None, Some(&auth));
+            let resp = category_app(op_repo, MockCategoryRepository::new())
+                .oneshot(req)
+                .await
+                .unwrap();
+
+            assert_eq!(resp.status(), StatusCode::OK, "{query}");
+        }
+    }
+
+    #[tokio::test]
+    async fn list_operations_rejects_both_category_filters() {
+        let mut op_repo = MockOperationRepository::new();
+        op_repo.expect_list().never();
+
+        let auth = auth_header(Uuid::new_v4(), UserRole::User);
+        let uri = format!(
+            "/operations?categoryId={}&uncategorized=true",
+            Uuid::new_v4()
+        );
+        let req = json_request("GET", &uri, None, Some(&auth));
+        let resp = category_app(op_repo, MockCategoryRepository::new())
+            .oneshot(req)
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn replace_splits_unknown_category_returns_400() {
+        let user_id = Uuid::new_v4();
+        let op_id = Uuid::new_v4();
+        let category_id = Uuid::new_v4();
+        let mut op_repo = MockOperationRepository::new();
+        expect_find_returning(&mut op_repo, make_op(op_id, user_id));
+        op_repo.expect_replace_splits().never();
+
+        let body = format!(
+            r#"{{"splits":[{{"amount":"-20","budgetId":null,"categoryId":"{category_id}"}},{{"amount":"-30","budgetId":null}}]}}"#
+        );
+        let app = category_app(op_repo, categories_existing(false));
+        let resp = put_splits(app, user_id, op_id, &body).await;
+
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+        assert_eq!(
+            error_message(resp).await,
+            format!("unknown category {category_id}")
+        );
+    }
+
+    #[tokio::test]
+    async fn replace_splits_stores_part_categories() {
+        let user_id = Uuid::new_v4();
+        let op_id = Uuid::new_v4();
+        let category_id = Uuid::new_v4();
+        let mut op_repo = MockOperationRepository::new();
+        op_repo
+            .expect_find_by_id()
+            .times(2)
+            .returning(move |_, _| Box::pin(async move { Ok(make_op(op_id, user_id)) }));
+        op_repo
+            .expect_replace_splits()
+            .withf(move |_, _, splits| {
+                splits.iter().map(|s| s.category_id).collect::<Vec<_>>()
+                    == [Some(category_id), None]
+            })
+            .once()
+            .returning(|_, _, _| Box::pin(async { Ok(true) }));
+
+        let body = format!(
+            r#"{{"splits":[{{"amount":"-20","budgetId":null,"categoryId":"{category_id}"}},{{"amount":"-30","budgetId":null}}]}}"#
+        );
+        let app = category_app(op_repo, categories_existing(true));
+        let resp = put_splits(app, user_id, op_id, &body).await;
+
+        assert_eq!(resp.status(), StatusCode::OK);
     }
 }

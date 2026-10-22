@@ -22,13 +22,17 @@ vi.mock("@/lib/api", () => ({
 const { apiFetch, ApiError } = await import("@/lib/api");
 const apiFetchMock = vi.mocked(apiFetch);
 
-/** Answer data calls with `handler`; the account balance section finds no balance. */
+/**
+ * Answer data calls with `handler`; the account balance section finds no balance and the
+ * categories section no category.
+ */
 function mockApi(handler: (path: string) => Promise<unknown>) {
-	apiFetchMock.mockImplementation((path: string) =>
-		path === "/users/me/balance"
-			? Promise.reject(new ApiError(404, "Not Found"))
-			: handler(path),
-	);
+	apiFetchMock.mockImplementation((path: string) => {
+		if (path === "/users/me/balance") {
+			return Promise.reject(new ApiError(404, "Not Found"));
+		}
+		return path === "/categories" ? Promise.resolve([]) : handler(path);
+	});
 }
 
 function renderPage() {
@@ -119,6 +123,8 @@ describe("SettingsPage data section", () => {
 	it("imports a JSON file and displays the result counts", async () => {
 		mockApi(() =>
 			Promise.resolve({
+				importedCategories: 4,
+				skippedCategories: 1,
 				importedBudgets: 2,
 				skippedBudgets: 1,
 				importedOperations: 5,
@@ -148,7 +154,7 @@ describe("SettingsPage data section", () => {
 		});
 		expect(
 			await screen.findByText(
-				"2 budget(s) importé(s) (1 ignoré(s)), 5 opération(s) importée(s) (3 ignorée(s))",
+				"4 catégorie(s) importée(s) (1 déjà présente(s)), 2 budget(s) importé(s) (1 ignoré(s)), 5 opération(s) importée(s) (3 ignorée(s))",
 			),
 		).toBeInTheDocument();
 	});
@@ -197,6 +203,8 @@ describe("SettingsPage data section", () => {
 	it("says when the import recorded the account balance", async () => {
 		mockApi(() =>
 			Promise.resolve({
+				importedCategories: 0,
+				skippedCategories: 0,
 				importedBudgets: 0,
 				skippedBudgets: 0,
 				importedOperations: 0,

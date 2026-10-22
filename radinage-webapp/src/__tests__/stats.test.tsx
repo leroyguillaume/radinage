@@ -12,6 +12,7 @@ import {
 import { render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { i18n } from "@/i18n";
+import type { CategoryResponse, CategorySummaryResponse } from "@/lib/types";
 import { theme } from "@/theme";
 
 vi.mock("@/lib/api", () => ({
@@ -70,9 +71,19 @@ const mockSummaryResponse = {
 	],
 };
 
-function setupMocks(response = mockSummaryResponse) {
+function setupMocks(
+	response = mockSummaryResponse,
+	categories: CategoryResponse[] = [],
+	categorySummary: CategorySummaryResponse = { categories: [] },
+) {
 	apiFetchMock.mockReset();
 	apiFetchMock.mockImplementation((path: string) => {
+		if (path === "/categories") {
+			return Promise.resolve(categories);
+		}
+		if (path.startsWith("/summary/categories")) {
+			return Promise.resolve(categorySummary);
+		}
 		if (path.startsWith("/summary")) {
 			return Promise.resolve(response);
 		}
@@ -279,5 +290,46 @@ describe("StatsPage", () => {
 
 		// No charts should be rendered (empty data)
 		expect(screen.queryByTestId("bar-chart")).not.toBeInTheDocument();
+	});
+
+	it("ranks the expenses by category with their share", async () => {
+		setupMocks(
+			mockSummaryResponse,
+			[
+				{
+					id: "c1",
+					name: "Courses",
+					color: "teal",
+					createdAt: "2026-01-01T00:00:00Z",
+				},
+			],
+			{
+				categories: [
+					{ categoryId: null, income: "0", expense: "-100.00" },
+					{ categoryId: "c1", income: "20.00", expense: "-300.00" },
+					{ categoryId: "c2", income: "500.00", expense: "0" },
+				],
+			},
+		);
+		await renderStatsPage();
+
+		const rows = await screen.findAllByRole("progressbar");
+		expect(rows.map((row) => row.getAttribute("aria-label"))).toEqual([
+			expect.stringMatching(/^Courses : 300,00/),
+			expect.stringMatching(/^Sans catégorie : 100,00/),
+		]);
+		expect(screen.getByText(/· 75 %/)).toBeInTheDocument();
+	});
+
+	it("leaves the category breakdown out without categories", async () => {
+		await renderStatsPage();
+
+		expect(await screen.findByText("Statistiques")).toBeInTheDocument();
+		await waitFor(() =>
+			expect(apiFetchMock).toHaveBeenCalledWith("/categories"),
+		);
+		expect(
+			screen.queryByText("Dépenses par catégorie"),
+		).not.toBeInTheDocument();
 	});
 });

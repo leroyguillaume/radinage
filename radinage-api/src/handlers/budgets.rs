@@ -2,12 +2,14 @@ use crate::{
     AppState,
     auth::middleware::AuthUser,
     domain::budget::{
-        Budget, BudgetKind, BudgetType, ClosedPeriod, CurrentPeriod, LabelPattern, Recurrence,
-        Rule, YearMonth,
+        Budget, BudgetFields, BudgetKind, BudgetType, ClosedPeriod, CurrentPeriod, LabelPattern,
+        Recurrence, Rule, YearMonth,
     },
     error::{AppError, AppResult},
+    handlers::categories::ensure_category_is_users,
     repositories::{
-        BudgetRepository, BudgetSortField, ListBudgetsParams, OperationRepository, SortOrder,
+        BudgetRepository, BudgetSortField, CategoryRepository, ListBudgetsParams,
+        OperationRepository, SortOrder,
     },
     services::matcher::{MatcherService, MatcherServiceImpl},
 };
@@ -38,6 +40,9 @@ pub struct BudgetResponse {
     pub kind: BudgetKind,
     /// Auto-matching rules used to link operations to this budget.
     pub rules: Vec<Rule>,
+    /// Default category of the operations and split parts linked to this budget, `null` when
+    /// none.
+    pub category_id: Option<Uuid>,
     /// Timestamp when the budget was created.
     pub created_at: DateTime<Utc>,
 }
@@ -50,6 +55,7 @@ impl From<Budget> for BudgetResponse {
             budget_type: b.budget_type,
             kind: b.kind,
             rules: b.rules,
+            category_id: b.category_id,
             created_at: b.created_at,
         }
     }
@@ -66,6 +72,10 @@ pub struct CreateBudgetRequest {
     pub kind: BudgetKindRequest,
     /// Auto-matching rules for linking operations automatically.
     pub rules: Vec<RuleRequest>,
+    /// One of the caller's categories, given to the operations and split parts linked to the
+    /// budget that have none of their own; `null` (the default) for none.
+    #[serde(default)]
+    pub category_id: Option<Uuid>,
 }
 
 /// Defines the budget scheduling type. Discriminated by the `type` field.
@@ -176,8 +186,8 @@ pub struct ApplyBudgetResponse {
 
 // ── Handlers ─────────────────────────────────────────────────────────────────
 
-pub async fn list_budgets<U, O, B: BudgetRepository, P>(
-    State(state): State<AppState<U, O, B, P>>,
+pub async fn list_budgets<U, O, B: BudgetRepository, P, C>(
+    State(state): State<AppState<U, O, B, P, C>>,
     auth_user: AuthUser,
     Query(q): Query<ListBudgetsQuery>,
 ) -> AppResult<Json<Vec<BudgetResponse>>> {
@@ -195,8 +205,8 @@ pub async fn list_budgets<U, O, B: BudgetRepository, P>(
     Ok(Json(data))
 }
 
-pub async fn get_budget<U, O, B: BudgetRepository, P>(
-    State(state): State<AppState<U, O, B, P>>,
+pub async fn get_budget<U, O, B: BudgetRepository, P, C>(
+    State(state): State<AppState<U, O, B, P, C>>,
     auth_user: AuthUser,
     Path(id): Path<Uuid>,
 ) -> AppResult<Json<BudgetResponse>> {
@@ -204,8 +214,8 @@ pub async fn get_budget<U, O, B: BudgetRepository, P>(
     Ok(Json(BudgetResponse::from(budget)))
 }
 
-pub async fn create_budget<U, O, B: BudgetRepository, P>(
-    State(state): State<AppState<U, O, B, P>>,
+pub async fn create_budget<U, O, B: BudgetRepository, P, C: CategoryRepository>(
+    State(state): State<AppState<U, O, B, P, C>>,
     auth_user: AuthUser,
     Json(body): Json<CreateBudgetRequest>,
 ) -> AppResult<(StatusCode, Json<BudgetResponse>)> {
@@ -214,40 +224,38 @@ pub async fn create_budget<U, O, B: BudgetRepository, P>(
     if count >= i64::from(max) {
         return Err(AppError::Conflict(format!("budget limit reached ({max})")));
     }
-    let (kind, rules) = request_to_domain(body.kind, body.rules);
-    kind.validate_no_overlap().map_err(AppError::BadRequest)?;
-    let budget = state
-        .budget_repo
-        .create(auth_user.id, &body.label, body.budget_type, &kind, &rules)
-        .await?;
+    let fields = request_to_fields(body);
+    fields
+        .kind
+        .validate_no_overlap()
+        .map_err(AppError::BadRequest)?;
+    ensure_category_is_users(&state.category_repo, fields.category_id, auth_user.id).await?;
+    let budget = state.budget_repo.create(auth_user.id, &fields).await?;
     Ok((StatusCode::CREATED, Json(BudgetResponse::from(budget))))
 }
 
-pub async fn update_budget<U, O, B: BudgetRepository, P>(
-    State(state): State<AppState<U, O, B, P>>,
+pub async fn update_budget<U, O, B: BudgetRepository, P, C: CategoryRepository>(
+    State(state): State<AppState<U, O, B, P, C>>,
     auth_user: AuthUser,
     Path(id): Path<Uuid>,
     Json(body): Json<CreateBudgetRequest>,
 ) -> AppResult<Json<BudgetResponse>> {
-    let (kind, rules) = request_to_domain(body.kind, body.rules);
-    kind.validate_no_overlap().map_err(AppError::BadRequest)?;
+    let fields = request_to_fields(body);
+    fields
+        .kind
+        .validate_no_overlap()
+        .map_err(AppError::BadRequest)?;
+    ensure_category_is_users(&state.category_repo, fields.category_id, auth_user.id).await?;
     let budget = state
         .budget_repo
-        .update(
-            id,
-            auth_user.id,
-            &body.label,
-            body.budget_type,
-            &kind,
-            &rules,
-        )
+        .update(id, auth_user.id, &fields)
         .await?
         .ok_or(AppError::NotFound)?;
     Ok(Json(BudgetResponse::from(budget)))
 }
 
-pub async fn delete_budget<U, O, B: BudgetRepository, P>(
-    State(state): State<AppState<U, O, B, P>>,
+pub async fn delete_budget<U, O, B: BudgetRepository, P, C>(
+    State(state): State<AppState<U, O, B, P, C>>,
     auth_user: AuthUser,
     Path(id): Path<Uuid>,
 ) -> AppResult<StatusCode> {
@@ -258,8 +266,8 @@ pub async fn delete_budget<U, O, B: BudgetRepository, P>(
     Ok(StatusCode::NO_CONTENT)
 }
 
-pub async fn apply_budget<U, O: OperationRepository, B: BudgetRepository, P>(
-    State(state): State<AppState<U, O, B, P>>,
+pub async fn apply_budget<U, O: OperationRepository, B: BudgetRepository, P, C>(
+    State(state): State<AppState<U, O, B, P, C>>,
     auth_user: AuthUser,
     Path(budget_id): Path<Uuid>,
     Json(body): Json<ApplyBudgetRequest>,
@@ -291,9 +299,9 @@ pub async fn apply_budget<U, O: OperationRepository, B: BudgetRepository, P>(
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-/// Convert request DTOs to domain types.
-fn request_to_domain(kind: BudgetKindRequest, rules: Vec<RuleRequest>) -> (BudgetKind, Vec<Rule>) {
-    let domain_kind = match kind {
+/// Convert a request DTO to the domain fields it writes.
+fn request_to_fields(body: CreateBudgetRequest) -> BudgetFields {
+    let kind = match body.kind {
         BudgetKindRequest::Recurring {
             recurrence,
             closed_periods,
@@ -325,7 +333,8 @@ fn request_to_domain(kind: BudgetKindRequest, rules: Vec<RuleRequest>) -> (Budge
         },
     };
 
-    let domain_rules = rules
+    let rules = body
+        .rules
         .into_iter()
         .map(|r| Rule {
             label_pattern: match r.label_pattern {
@@ -337,7 +346,13 @@ fn request_to_domain(kind: BudgetKindRequest, rules: Vec<RuleRequest>) -> (Budge
         })
         .collect();
 
-    (domain_kind, domain_rules)
+    BudgetFields {
+        label: body.label,
+        budget_type: body.budget_type,
+        kind,
+        rules,
+        category_id: body.category_id,
+    }
 }
 
 #[cfg(test)]
@@ -350,8 +365,14 @@ mod tests {
             user::UserRole,
         },
         error::AppError,
-        repositories::{MockBudgetRepository, MockOperationRepository, MockUserRepository},
-        test_util::{auth_header, build_test_router, json_request, make_test_state, response_json},
+        repositories::{
+            MockBudgetRepository, MockCategoryRepository, MockOperationRepository,
+            MockUserRepository,
+        },
+        test_util::{
+            auth_header, build_test_router, json_request, make_test_state,
+            make_test_state_with_categories, response_json,
+        },
     };
     use axum::http::StatusCode;
     use chrono::{NaiveDate, Utc};
@@ -375,6 +396,7 @@ mod tests {
                 },
             },
             rules: vec![],
+            category_id: None,
             created_at: Utc::now(),
         }
     }
@@ -389,6 +411,8 @@ mod tests {
             effective_date: None,
             budget_link: BudgetLink::Unlinked,
             ignored: false,
+            category_id: None,
+            budget_category_id: None,
             splits: vec![],
         }
     }
@@ -407,6 +431,7 @@ mod tests {
                 },
             },
             rules: vec![],
+            category_id: None,
         })
         .unwrap()
     }
@@ -445,13 +470,10 @@ mod tests {
             .expect_count()
             .once()
             .returning(|_| Box::pin(async { Ok(0) }));
-        budget_repo
-            .expect_create()
-            .once()
-            .returning(move |_, _, _, _, _| {
-                let budget = budget.clone();
-                Box::pin(async { Ok(budget) })
-            });
+        budget_repo.expect_create().once().returning(move |_, _| {
+            let budget = budget.clone();
+            Box::pin(async { Ok(budget) })
+        });
 
         let app = build_test_router(make_test_state(
             MockUserRepository::new(),
@@ -537,7 +559,7 @@ mod tests {
         budget_repo
             .expect_update()
             .once()
-            .returning(|_, _, _, _, _, _| Box::pin(async { Ok(None) }));
+            .returning(|_, _, _| Box::pin(async { Ok(None) }));
 
         let app = build_test_router(make_test_state(
             MockUserRepository::new(),
@@ -637,11 +659,15 @@ mod tests {
                     id: Uuid::new_v4(),
                     amount: Decimal::new(-20, 0),
                     budget_id: None,
+                    category_id: None,
+                    budget_category_id: None,
                 },
                 OperationSplit {
                     id: Uuid::new_v4(),
                     amount: Decimal::new(-30, 0),
                     budget_id: None,
+                    category_id: None,
+                    budget_category_id: None,
                 },
             ],
             ..make_op_unlinked(user_id)
@@ -770,6 +796,7 @@ mod tests {
                 },
             },
             rules: vec![],
+            category_id: None,
             created_at: Utc::now(),
         };
         let resp = BudgetResponse::from(budget);
@@ -814,5 +841,91 @@ mod tests {
         }"#;
         let req: CreateBudgetRequest = serde_json::from_str(json).unwrap();
         assert_eq!(req.label, "Vacances");
+    }
+
+    fn budget_json_in_category(category_id: Uuid) -> String {
+        let mut body: serde_json::Value = serde_json::from_str(&create_budget_json()).unwrap();
+        body["categoryId"] = serde_json::json!(category_id);
+        body.to_string()
+    }
+
+    fn categories_existing(found: bool) -> MockCategoryRepository {
+        let mut repo = MockCategoryRepository::new();
+        repo.expect_exists()
+            .returning(move |_, _| Box::pin(async move { Ok(found) }));
+        repo
+    }
+
+    #[tokio::test]
+    async fn create_budget_stores_its_category() {
+        let category_id = Uuid::new_v4();
+        let mut budget_repo = MockBudgetRepository::new();
+        budget_repo
+            .expect_count()
+            .returning(|_| Box::pin(async { Ok(0) }));
+        budget_repo
+            .expect_create()
+            .withf(move |_, fields| fields.category_id == Some(category_id))
+            .once()
+            .returning(|user_id, fields| {
+                let budget = Budget {
+                    id: Uuid::new_v4(),
+                    user_id,
+                    label: fields.label.clone(),
+                    budget_type: fields.budget_type,
+                    kind: fields.kind.clone(),
+                    rules: fields.rules.clone(),
+                    category_id: fields.category_id,
+                    created_at: Utc::now(),
+                };
+                Box::pin(async { Ok(budget) })
+            });
+
+        let app = build_test_router(make_test_state_with_categories(
+            MockUserRepository::new(),
+            MockOperationRepository::new(),
+            budget_repo,
+            categories_existing(true),
+        ));
+        let auth = auth_header(Uuid::new_v4(), UserRole::User);
+        let body = budget_json_in_category(category_id);
+        let resp = app
+            .oneshot(json_request("POST", "/budgets", Some(&body), Some(&auth)))
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::CREATED);
+        let json: BudgetResponse = response_json(resp).await;
+        assert_eq!(json.category_id, Some(category_id));
+    }
+
+    #[tokio::test]
+    async fn create_or_update_budget_with_unknown_category_returns_400() {
+        for (method, uri) in [
+            ("POST", "/budgets".to_string()),
+            ("PUT", format!("/budgets/{}", Uuid::new_v4())),
+        ] {
+            let mut budget_repo = MockBudgetRepository::new();
+            budget_repo
+                .expect_count()
+                .returning(|_| Box::pin(async { Ok(0) }));
+            budget_repo.expect_create().never();
+            budget_repo.expect_update().never();
+
+            let app = build_test_router(make_test_state_with_categories(
+                MockUserRepository::new(),
+                MockOperationRepository::new(),
+                budget_repo,
+                categories_existing(false),
+            ));
+            let auth = auth_header(Uuid::new_v4(), UserRole::User);
+            let body = budget_json_in_category(Uuid::new_v4());
+            let resp = app
+                .oneshot(json_request(method, &uri, Some(&body), Some(&auth)))
+                .await
+                .unwrap();
+
+            assert_eq!(resp.status(), StatusCode::BAD_REQUEST, "{method}");
+        }
     }
 }

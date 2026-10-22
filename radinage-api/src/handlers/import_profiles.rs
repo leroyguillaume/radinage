@@ -119,8 +119,8 @@ impl TryFrom<ImportProfileRequest> for ImportProfileFields {
 
 // ── Handlers ─────────────────────────────────────────────────────────────────
 
-pub async fn list_import_profiles<U, O, B, P: ImportProfileRepository>(
-    State(state): State<AppState<U, O, B, P>>,
+pub async fn list_import_profiles<U, O, B, P: ImportProfileRepository, C>(
+    State(state): State<AppState<U, O, B, P, C>>,
     auth_user: AuthUser,
 ) -> AppResult<Json<Vec<ImportProfileResponse>>> {
     let profiles = state.import_profile_repo.list(auth_user.id).await?;
@@ -132,8 +132,8 @@ pub async fn list_import_profiles<U, O, B, P: ImportProfileRepository>(
     ))
 }
 
-pub async fn create_import_profile<U, O, B, P: ImportProfileRepository>(
-    State(state): State<AppState<U, O, B, P>>,
+pub async fn create_import_profile<U, O, B, P: ImportProfileRepository, C>(
+    State(state): State<AppState<U, O, B, P, C>>,
     auth_user: AuthUser,
     Json(body): Json<ImportProfileRequest>,
 ) -> AppResult<(StatusCode, Json<ImportProfileResponse>)> {
@@ -151,8 +151,8 @@ pub async fn create_import_profile<U, O, B, P: ImportProfileRepository>(
     Ok((StatusCode::CREATED, Json(profile.into())))
 }
 
-pub async fn update_import_profile<U, O, B, P: ImportProfileRepository>(
-    State(state): State<AppState<U, O, B, P>>,
+pub async fn update_import_profile<U, O, B, P: ImportProfileRepository, C>(
+    State(state): State<AppState<U, O, B, P, C>>,
     auth_user: AuthUser,
     Path(id): Path<Uuid>,
     Json(body): Json<ImportProfileRequest>,
@@ -166,8 +166,8 @@ pub async fn update_import_profile<U, O, B, P: ImportProfileRepository>(
     Ok(Json(profile.into()))
 }
 
-pub async fn delete_import_profile<U, O, B, P: ImportProfileRepository>(
-    State(state): State<AppState<U, O, B, P>>,
+pub async fn delete_import_profile<U, O, B, P: ImportProfileRepository, C>(
+    State(state): State<AppState<U, O, B, P, C>>,
     auth_user: AuthUser,
     Path(id): Path<Uuid>,
 ) -> AppResult<StatusCode> {

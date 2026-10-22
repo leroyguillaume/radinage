@@ -38,6 +38,7 @@ import {
 	IconScissors,
 	IconSortAscending,
 	IconSortDescending,
+	IconTag,
 	IconUpload,
 	IconX,
 } from "@tabler/icons-react";
@@ -47,6 +48,7 @@ import { type ReactNode, useId, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { BudgetInitialValues } from "@/components/BudgetModal";
 import { BudgetModal } from "@/components/BudgetModal";
+import { CategoryBadge, CategorySelect } from "@/components/CategoryBadge";
 import { ImportModal } from "@/components/ImportModal";
 import { SplitOperationModal } from "@/components/SplitOperationModal";
 import { StatTile } from "@/components/StatTile";
@@ -57,9 +59,11 @@ import {
 import { formatAmount, formatSignedAmount } from "@/lib/format";
 import {
 	useBudgets,
+	useCategories,
 	useForecast,
 	useLinkBudget,
 	useMonthlyOperations,
+	useSetOperationCategory,
 	useSetOperationIgnored,
 	useUnlinkBudget,
 	useUpdateEffectiveDate,
@@ -78,6 +82,7 @@ import {
 import type {
 	BudgetResponse,
 	BudgetType,
+	CategoryResponse,
 	ImportResult,
 	OperationResponse,
 } from "@/lib/types";
@@ -272,12 +277,28 @@ function sortGroups(groups: BudgetGroup[], sort: SortState): BudgetGroup[] {
 	return sorted;
 }
 
+/** All entries (null), the uncategorized ones, or those of one category. */
+type CategoryFilter =
+	| null
+	| { kind: "none" }
+	| { kind: "category"; id: string };
+
+const NO_CATEGORY_OPTION = "__none";
+
+function matchesCategory(entry: OperationEntry, filter: CategoryFilter) {
+	if (filter === null) return true;
+	return filter.kind === "none"
+		? entry.categoryId === null
+		: entry.categoryId === filter.id;
+}
+
 function groupOperationsByBudget(
 	operations: OperationResponse[],
 	budgets: BudgetResponse[],
 	forecast: number | null,
 	year: number,
 	month: number,
+	categoryFilter: CategoryFilter = null,
 ): BudgetGroup[] {
 	const budgetMap = new Map<string, BudgetResponse>();
 	for (const b of budgets) {
@@ -286,7 +307,10 @@ function groupOperationsByBudget(
 
 	const groups = new Map<string | null, OperationEntry[]>();
 
-	for (const entry of operations.flatMap(operationEntries)) {
+	const entries = operations
+		.flatMap(operationEntries)
+		.filter((entry) => matchesCategory(entry, categoryFilter));
+	for (const entry of entries) {
 		const existing = groups.get(entry.budgetId);
 		if (existing) {
 			existing.push(entry);
@@ -327,8 +351,9 @@ function groupOperationsByBudget(
 		}
 	}
 
-	// Add empty groups for budgets with a budgeted amount this month but no linked operations
-	for (const budget of budgets) {
+	// Add empty groups for budgets with a budgeted amount this month but no linked operations,
+	// unless only some categories are shown: those budgets are then off topic.
+	for (const budget of categoryFilter === null ? budgets : []) {
 		if (groups.has(budget.id)) continue;
 		const budgetedAmount = getBudgetedAmountForMonth(budget, year, month);
 		if (budgetedAmount !== null) {
@@ -363,6 +388,8 @@ function formatDate(dateStr: string, locale: string): string {
 
 interface OperationHandlers {
 	budgets: BudgetResponse[];
+	categories: CategoryResponse[];
+	onSetCategory: (opId: string, categoryId: string | null) => void;
 	onCreateBudget: (op: OperationResponse) => void;
 	onLink: (opId: string, budgetId: string) => void;
 	onUnlink: (opId: string) => void;
@@ -389,8 +416,10 @@ function MonthlyOperationsPage() {
 		null,
 	);
 	const [showIgnored, setShowIgnored] = useState(false);
+	const [categoryFilter, setCategoryFilter] = useState<CategoryFilter>(null);
 	const operationsQuery = useMonthlyOperations(year, month, showIgnored);
 	const budgetsQuery = useBudgets();
+	const categoriesQuery = useCategories();
 
 	const forecastQuery = useForecast(year, month, 1);
 
@@ -412,6 +441,7 @@ function MonthlyOperationsPage() {
 	const linkBudget = useLinkBudget();
 	const unlinkBudget = useUnlinkBudget();
 	const setOperationIgnored = useSetOperationIgnored();
+	const setOperationCategory = useSetOperationCategory();
 	const updateEffectiveDate = useUpdateEffectiveDate();
 
 	function navigateMonth(delta: number) {
@@ -449,6 +479,15 @@ function MonthlyOperationsPage() {
 		: null;
 
 	const operations = operationsQuery.data?.operations ?? [];
+	const categories = categoriesQuery.data ?? [];
+	// A filter whose category has been deleted, or with none left to pick, shows everything.
+	const activeFilter =
+		categoryFilter?.kind === "category" &&
+		!categories.some((c) => c.id === categoryFilter.id)
+			? null
+			: categories.length > 0
+				? categoryFilter
+				: null;
 	const ignoredOperations = operations.filter((op) => op.ignored);
 
 	const groups = groupOperationsByBudget(
@@ -457,6 +496,7 @@ function MonthlyOperationsPage() {
 		forecast,
 		year,
 		month,
+		activeFilter,
 	);
 
 	const sections = buildSections(groups);
@@ -477,6 +517,9 @@ function MonthlyOperationsPage() {
 
 	const handlers: OperationHandlers = {
 		budgets: budgetsQuery.data ?? [],
+		categories,
+		onSetCategory: (opId, categoryId) =>
+			setOperationCategory.mutate({ opId, categoryId }),
 		onCreateBudget: handleCreateBudgetFromOp,
 		onLink: (opId, budgetId) => linkBudget.mutate({ opId, budgetId }),
 		onUnlink: (opId) => unlinkBudget.mutate(opId),
@@ -498,6 +541,7 @@ function MonthlyOperationsPage() {
 			<SplitOperationModal
 				operation={splitTarget}
 				budgets={handlers.budgets}
+				categories={categories}
 				onClose={() => setSplitTarget(null)}
 			/>
 			<ImportModal
@@ -563,6 +607,39 @@ function MonthlyOperationsPage() {
 						</ActionIcon>
 					</Group>
 					<Group gap="md" wrap="wrap">
+						{categories.length > 0 && (
+							<CategorySelect
+								aria-label={t("operations.category.filter")}
+								categories={categories}
+								extraOptions={[
+									{ value: "", label: t("operations.category.all") },
+									{
+										value: NO_CATEGORY_OPTION,
+										label: t("operations.category.none"),
+									},
+								]}
+								value={
+									activeFilter === null
+										? ""
+										: activeFilter.kind === "none"
+											? NO_CATEGORY_OPTION
+											: activeFilter.id
+								}
+								onChange={(value) =>
+									setCategoryFilter(
+										!value
+											? null
+											: value === NO_CATEGORY_OPTION
+												? { kind: "none" }
+												: { kind: "category", id: value },
+									)
+								}
+								leftSection={<IconTag size={16} />}
+								allowDeselect={false}
+								w={{ base: "100%", sm: 220 }}
+								styles={{ input: { minHeight: 44 } }}
+							/>
+						)}
 						<Switch
 							size="md"
 							label={t("operations.showIgnored")}
@@ -1108,6 +1185,105 @@ function LinkBudgetMenu({
 	);
 }
 
+function CategoryMenu({
+	categories,
+	entry,
+	height,
+	onSelect,
+}: {
+	categories: CategoryResponse[];
+	entry: OperationEntry;
+	height: number;
+	onSelect: (categoryId: string | null) => void;
+}) {
+	const { t } = useTranslation();
+	const [search, setSearch] = useState("");
+	const current = categories.find((c) => c.id === entry.categoryId);
+	const ownCategory = entry.operation.categoryId;
+
+	const filtered = search
+		? categories.filter((c) =>
+				c.name.toLowerCase().includes(search.toLowerCase()),
+			)
+		: categories;
+
+	return (
+		<Menu position="bottom-end" withinPortal onClose={() => setSearch("")}>
+			<Menu.Target>
+				<Tooltip
+					label={
+						entry.categoryFromBudget
+							? t("operations.category.fromBudget")
+							: t("operations.category.change")
+					}
+				>
+					<Button
+						variant="default"
+						size="xs"
+						h={height}
+						radius="md"
+						maw={180}
+						leftSection={current ? undefined : <IconTag size={16} />}
+						aria-label={
+							current
+								? `${t("operations.category.change")} (${current.name})`
+								: t("operations.category.change")
+						}
+					>
+						{current ? (
+							<CategoryBadge
+								category={current}
+								inherited={entry.categoryFromBudget}
+							/>
+						) : (
+							t("operations.category.set")
+						)}
+					</Button>
+				</Tooltip>
+			</Menu.Target>
+			<Menu.Dropdown>
+				{categories.length === 0 ? (
+					<Menu.Item disabled maw={260} style={{ whiteSpace: "normal" }}>
+						{t("operations.category.noneYet")}
+					</Menu.Item>
+				) : (
+					<>
+						<TextInput
+							placeholder={t("common.search")}
+							size="xs"
+							value={search}
+							onChange={(e) => setSearch(e.currentTarget.value)}
+							onClick={(e: React.MouseEvent) => e.stopPropagation()}
+							onKeyDown={(e: React.KeyboardEvent) => e.stopPropagation()}
+							mb="xs"
+						/>
+						{filtered.length === 0 ? (
+							<Menu.Item disabled>{t("common.noResults")}</Menu.Item>
+						) : (
+							filtered.map((c) => (
+								<Menu.Item key={c.id} onClick={() => onSelect(c.id)}>
+									<CategoryBadge category={c} />
+								</Menu.Item>
+							))
+						)}
+						{ownCategory !== null && (
+							<>
+								<Menu.Divider />
+								<Menu.Item
+									leftSection={<IconX size={14} />}
+									onClick={() => onSelect(null)}
+								>
+									{t("operations.category.clear")}
+								</Menu.Item>
+							</>
+						)}
+					</>
+				)}
+			</Menu.Dropdown>
+		</Menu>
+	);
+}
+
 function OperationRow({
 	entry,
 	locale,
@@ -1123,6 +1299,9 @@ function OperationRow({
 	const [datePopoverOpened, setDatePopoverOpened] = useState(false);
 	const { operation: op, amount, part } = entry;
 	const split = isSplit(op);
+	const partCategory = part
+		? handlers.categories.find((c) => c.id === entry.categoryId)
+		: undefined;
 
 	return (
 		<Box
@@ -1151,6 +1330,12 @@ function OperationRow({
 						</Badge>
 					</Tooltip>
 				)}
+				{partCategory && (
+					<CategoryBadge
+						category={partCategory}
+						inherited={entry.categoryFromBudget}
+					/>
+				)}
 			</Group>
 			<Text
 				fw={700}
@@ -1166,6 +1351,14 @@ function OperationRow({
 				justify="flex-end"
 				className="col-span-full sm:col-auto"
 			>
+				{!split && (
+					<CategoryMenu
+						categories={handlers.categories}
+						entry={entry}
+						height={actionSize}
+						onSelect={(categoryId) => handlers.onSetCategory(op.id, categoryId)}
+					/>
+				)}
 				<Popover
 					opened={datePopoverOpened}
 					onChange={setDatePopoverOpened}
