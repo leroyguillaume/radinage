@@ -4,6 +4,7 @@ import {
 	decimalToCents,
 	formatAmount,
 	formatCompactAmount,
+	formatIsoDate,
 	formatSignedAmount,
 	parseCents,
 	parseSignedCents,
@@ -33,6 +34,13 @@ describe("formatCompactAmount", () => {
 	it("keeps small amounts without decimals", () => {
 		expect(plain(formatCompactAmount(650))).toBe("650 €");
 		expect(plain(formatCompactAmount(0))).toBe("0 €");
+	});
+});
+
+describe("formatIsoDate", () => {
+	it("keeps the calendar day of an API date, year included", () => {
+		expect(formatIsoDate("2024-02-04", "fr-FR")).toBe("04/02/2024");
+		expect(formatIsoDate("2026-12-31", "en-GB")).toBe("31/12/2026");
 	});
 });
 

@@ -205,6 +205,13 @@ splitting clears it and each part carries its own. The operations page filters
 the month it already holds by the same rule, per part, in
 [operation-parts.ts](radinage-webapp/src/lib/operation-parts.ts).
 
+**Search returns whole operations.** `GET /operations` filters across all
+dates, every filter optional, and returns the totals of every match with the
+page, computed by the same query as the count. A split operation matches a
+category or budget filter through any of its parts, but it is listed — and
+summed in `totals` — for its whole amount: the search answers "which bank
+operations", the statistics page "how much went where".
+
 **The forecast is computed by the API.** `GET /forecast` returns, for each
 month of a horizon of up to 24 months, income, expenses, savings, balance and
 running balance. Past months come from the operations accounted so far, later

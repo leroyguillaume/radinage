@@ -308,8 +308,10 @@
 	},
 	"nav": {
 		"operations": "Operations",
+		"search": "Search",
 		"budgets": "Budgets",
 		"stats": "Statistics",
+		"statsShort": "Stats",
 		"forecast": "Summary",
 		"admin": "Admin",
 		"settings": "Settings",
@@ -469,5 +471,58 @@
 		"errorInvalidToken": "This invitation link is invalid or has already been used",
 		"errorPasswordMismatch": "Passwords do not match",
 		"errorMissingToken": "Invalid invitation link: missing token"
+	},
+	"search": {
+		"title": "Search",
+		"subtitle": "Find operations across your whole history",
+		"label": "Label",
+		"labelPlaceholder": "Label — leave empty to list everything",
+		"clearLabel": "Clear the label",
+		"amountMin": "Min amount",
+		"amountMax": "Max amount",
+		"invalidAmount": "Invalid amount",
+		"direction": {
+			"label": "Type",
+			"all": "All",
+			"expense": "Expenses",
+			"income": "Income"
+		},
+		"categories": "Categories",
+		"allCategories": "All categories",
+		"noCategory": "No category",
+		"budgets": "Budgets",
+		"allBudgets": "All budgets",
+		"dates": "Dates",
+		"allDates": "All dates",
+		"includeIgnored": "Include ignored",
+		"ignored": "Ignored",
+		"reset": "Reset",
+		"filters": "Filters",
+		"activeFilters": "Active filters",
+		"removeFilter": "Remove the filter {{name}}",
+		"amountRange": "{{min}} to {{max}}",
+		"amountAtLeast": "≥ {{min}}",
+		"amountAtMost": "≤ {{max}}",
+		"resultsCount": "{{count}} result(s)",
+		"showResults": "Show {{count}} result(s)",
+		"totals": {
+			"count": "Results",
+			"expenses": "Total expenses",
+			"income": "Total income"
+		},
+		"sort": {
+			"label": "Sort by",
+			"date": "Date",
+			"amount": "Amount",
+			"labelKey": "Label"
+		},
+		"showMore": "Show more",
+		"loadedOf": "{{loaded}} of {{total}}",
+		"openMonth": "Open {{month}} in operations",
+		"empty": {
+			"title": "No matching operations",
+			"hint": "Try a shorter label or fewer filters."
+		},
+		"fetchError": "Failed to search operations"
 	}
 }

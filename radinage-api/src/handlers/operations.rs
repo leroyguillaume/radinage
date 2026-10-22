@@ -8,20 +8,19 @@ use crate::{
     handlers::categories::ensure_category_is_users,
     repositories::{
         BudgetRepository, CategoryFilter, CategoryRepository, ListOperationsParams,
-        OperationRepository, OperationSortField, SortOrder,
+        OperationDirection, OperationRepository, OperationSortField, OperationTotals, SortOrder,
     },
     services::matcher::{MatcherService, MatcherServiceImpl},
 };
 use axum::{
     Json,
-    extract::{Path, Query, State},
+    extract::{Path, State},
     http::StatusCode,
 };
+use axum_extra::extract::Query;
 use chrono::NaiveDate;
 use rust_decimal::Decimal;
 use schemars::JsonSchema;
-#[cfg(test)]
-use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -212,6 +211,14 @@ pub struct ListOperationsQuery {
     /// Filter by exact amount.
     #[schemars(with = "Option<String>")]
     pub amount: Option<Decimal>,
+    /// Include only operations whose absolute amount is at least this.
+    #[schemars(with = "Option<String>")]
+    pub amount_min: Option<Decimal>,
+    /// Include only operations whose absolute amount is at most this.
+    #[schemars(with = "Option<String>")]
+    pub amount_max: Option<Decimal>,
+    /// Include only expenses (negative amounts) or only income (positive amounts).
+    pub direction: Option<OperationDirection>,
     /// Page number (1-based, default: 1).
     #[schemars(range(min = 1), default = "default_page")]
     pub page: Option<u32>,
@@ -221,13 +228,19 @@ pub struct ListOperationsQuery {
     /// Include ignored operations in results (default: false).
     #[serde(default)]
     pub include_ignored: bool,
-    /// Include only operations counting towards this category: an unsplit operation through
-    /// its effective category, a split one through any of its parts.
-    pub category_id: Option<Uuid>,
-    /// Include only operations without an effective category, or split with such a part
-    /// (default: false). Cannot be combined with `categoryId`.
+    /// Include only operations counting towards one of these categories: an unsplit
+    /// operation through its effective category, a split one through any of its parts.
+    /// Repeat the parameter for several categories.
+    #[serde(default)]
+    pub category_id: Vec<Uuid>,
+    /// Include operations without an effective category, or split with such a part
+    /// (default: false). Combined with `categoryId`, keeps the operations matching either.
     #[serde(default)]
     pub uncategorized: bool,
+    /// Include only operations linked to one of these budgets, a split operation through any
+    /// of its parts. Repeat the parameter for several budgets.
+    #[serde(default)]
+    pub budget_id: Vec<Uuid>,
 }
 
 fn default_page() -> Option<u32> {
@@ -238,13 +251,14 @@ fn default_operations_page_size() -> Option<u32> {
     Some(100)
 }
 
-/// Paginated list wrapper returned by all list endpoints.
+/// One page of operations, with the totals of every operation matching the filters.
 #[derive(Debug, Serialize, JsonSchema)]
+#[cfg_attr(test, derive(Deserialize))]
 #[serde(rename_all = "camelCase")]
-pub struct PaginatedResponse<T: JsonSchema> {
-    /// Items on the current page.
-    pub data: Vec<T>,
-    /// Total number of items matching the query.
+pub struct OperationListResponse {
+    /// Operations on the current page.
+    pub data: Vec<OperationResponse>,
+    /// Total number of operations matching the query.
     pub total: i64,
     /// Current page number (1-based).
     pub page: u32,
@@ -252,28 +266,36 @@ pub struct PaginatedResponse<T: JsonSchema> {
     pub page_size: u32,
     /// Last available page number.
     pub max_page: u32,
+    /// Aggregates over every matching operation, across all pages.
+    pub totals: OperationTotalsResponse,
 }
 
-#[cfg(test)]
-impl<'de, T: JsonSchema + DeserializeOwned> serde::Deserialize<'de> for PaginatedResponse<T> {
-    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        #[derive(Deserialize)]
-        #[serde(rename_all = "camelCase")]
-        struct Helper<T> {
-            data: Vec<T>,
-            total: i64,
-            page: u32,
-            page_size: u32,
-            max_page: u32,
+/// Aggregates over the operations matching a listing's filters.
+#[derive(Debug, Serialize, JsonSchema)]
+#[cfg_attr(test, derive(Deserialize))]
+#[serde(rename_all = "camelCase")]
+pub struct OperationTotalsResponse {
+    /// Sum of the positive amounts.
+    #[schemars(with = "String")]
+    pub income: Decimal,
+    /// Sum of the negative amounts, zero or negative.
+    #[schemars(with = "String")]
+    pub expense: Decimal,
+    /// Earliest accounting date (effective date if set, otherwise date), `null` when nothing
+    /// matches.
+    pub first_date: Option<NaiveDate>,
+    /// Latest accounting date, `null` when nothing matches.
+    pub last_date: Option<NaiveDate>,
+}
+
+impl From<OperationTotals> for OperationTotalsResponse {
+    fn from(totals: OperationTotals) -> Self {
+        Self {
+            income: totals.income,
+            expense: totals.expense,
+            first_date: totals.first_date,
+            last_date: totals.last_date,
         }
-        let h = Helper::<T>::deserialize(deserializer)?;
-        Ok(Self {
-            data: h.data,
-            total: h.total,
-            page: h.page,
-            page_size: h.page_size,
-            max_page: h.max_page,
-        })
     }
 }
 
@@ -288,19 +310,9 @@ pub async fn list_operations<U, O: OperationRepository, B, P, C>(
     State(state): State<AppState<U, O, B, P, C>>,
     auth_user: AuthUser,
     Query(q): Query<ListOperationsQuery>,
-) -> AppResult<Json<PaginatedResponse<OperationResponse>>> {
+) -> AppResult<Json<OperationListResponse>> {
     let page = q.page.unwrap_or(1).max(1);
     let page_size = q.page_size.unwrap_or(100).clamp(1, 500);
-    let category = match (q.category_id, q.uncategorized) {
-        (Some(_), true) => {
-            return Err(AppError::BadRequest(
-                "categoryId and uncategorized cannot be combined".to_string(),
-            ));
-        }
-        (Some(id), false) => Some(CategoryFilter::Category(id)),
-        (None, true) => Some(CategoryFilter::Uncategorized),
-        (None, false) => None,
-    };
 
     let params = ListOperationsParams {
         date_from: q.date_from,
@@ -308,25 +320,36 @@ pub async fn list_operations<U, O: OperationRepository, B, P, C>(
         label_filter: q
             .label
             .as_deref()
+            .map(str::trim)
+            .filter(|l| !l.is_empty())
             .map(|l| format!("%{}%", l.to_lowercase())),
         amount: q.amount,
+        amount_min: q.amount_min,
+        amount_max: q.amount_max,
+        direction: q.direction,
         sort: q.sort.unwrap_or_default(),
         order: q.order.unwrap_or_default(),
         limit: page_size as i64,
         offset: ((page - 1) * page_size) as i64,
         include_ignored: q.include_ignored,
-        category,
+        category: CategoryFilter {
+            category_ids: q.category_id,
+            uncategorized: q.uncategorized,
+        },
+        budget_ids: q.budget_id,
     };
 
-    let (ops, total) = state.operation_repo.list(auth_user.id, &params).await?;
+    let (ops, totals) = state.operation_repo.list(auth_user.id, &params).await?;
+    let total = totals.count;
     let max_page = compute_max_page(total, page_size);
     let data = ops.into_iter().map(OperationResponse::from).collect();
-    Ok(Json(PaginatedResponse {
+    Ok(Json(OperationListResponse {
         data,
         total,
         page,
         page_size,
         max_page,
+        totals: totals.into(),
     }))
 }
 
@@ -700,7 +723,7 @@ mod tests {
         op_repo
             .expect_list()
             .once()
-            .returning(|_, _| Box::pin(async { Ok((vec![], 0)) }));
+            .returning(|_, _| Box::pin(async { Ok((vec![], OperationTotals::default())) }));
 
         let app = build_test_router(make_test_state(
             MockUserRepository::new(),
@@ -713,7 +736,7 @@ mod tests {
         let resp = app.oneshot(req).await.unwrap();
 
         assert_eq!(resp.status(), StatusCode::OK);
-        let json: PaginatedResponse<OperationResponse> = response_json(resp).await;
+        let json: OperationListResponse = response_json(resp).await;
         assert_eq!(json.data.len(), 0);
         assert_eq!(json.total, 0);
         assert_eq!(json.page, 1);
@@ -727,7 +750,14 @@ mod tests {
         let mut op_repo = MockOperationRepository::new();
         op_repo.expect_list().once().returning(move |_, _| {
             let ops = ops.clone();
-            Box::pin(async move { Ok((ops, 10)) })
+            let totals = OperationTotals {
+                count: 10,
+                income: Decimal::new(1500, 2),
+                expense: Decimal::new(-4250, 2),
+                first_date: NaiveDate::from_ymd_opt(2024, 2, 4),
+                last_date: NaiveDate::from_ymd_opt(2026, 10, 18),
+            };
+            Box::pin(async move { Ok((ops, totals)) })
         });
 
         let app = build_test_router(make_test_state(
@@ -741,10 +771,15 @@ mod tests {
         let resp = app.oneshot(req).await.unwrap();
 
         assert_eq!(resp.status(), StatusCode::OK);
-        let json: PaginatedResponse<OperationResponse> = response_json(resp).await;
+        let json: OperationListResponse = response_json(resp).await;
         assert_eq!(json.page, 2);
         assert_eq!(json.page_size, 5);
         assert_eq!(json.total, 10);
+        assert_eq!(json.max_page, 2);
+        assert_eq!(json.totals.income, Decimal::new(1500, 2));
+        assert_eq!(json.totals.expense, Decimal::new(-4250, 2));
+        assert_eq!(json.totals.first_date, NaiveDate::from_ymd_opt(2024, 2, 4));
+        assert_eq!(json.totals.last_date, NaiveDate::from_ymd_opt(2026, 10, 18));
     }
 
     #[tokio::test]
@@ -1535,55 +1570,74 @@ mod tests {
         assert_eq!(resp.status(), StatusCode::OK);
     }
 
-    #[tokio::test]
-    async fn list_operations_passes_the_category_filter() {
-        let category_id = Uuid::new_v4();
-        for (query, expected) in [
-            (
-                format!("categoryId={category_id}"),
-                Some(CategoryFilter::Category(category_id)),
-            ),
-            (
-                "uncategorized=true".to_string(),
-                Some(CategoryFilter::Uncategorized),
-            ),
-            (String::new(), None),
-        ] {
-            let mut op_repo = MockOperationRepository::new();
-            op_repo
-                .expect_list()
-                .withf(move |_, params| params.category == expected)
-                .once()
-                .returning(|_, _| Box::pin(async { Ok((vec![], 0)) }));
-
-            let auth = auth_header(Uuid::new_v4(), UserRole::User);
-            let req = json_request("GET", &format!("/operations?{query}"), None, Some(&auth));
-            let resp = category_app(op_repo, MockCategoryRepository::new())
-                .oneshot(req)
-                .await
-                .unwrap();
-
-            assert_eq!(resp.status(), StatusCode::OK, "{query}");
-        }
-    }
-
-    #[tokio::test]
-    async fn list_operations_rejects_both_category_filters() {
+    async fn expect_list_params(
+        query: &str,
+        check: impl Fn(&ListOperationsParams) -> bool + Send + 'static,
+    ) {
         let mut op_repo = MockOperationRepository::new();
-        op_repo.expect_list().never();
+        op_repo
+            .expect_list()
+            .withf(move |_, params| check(params))
+            .once()
+            .returning(|_, _| Box::pin(async { Ok((vec![], OperationTotals::default())) }));
 
         let auth = auth_header(Uuid::new_v4(), UserRole::User);
-        let uri = format!(
-            "/operations?categoryId={}&uncategorized=true",
-            Uuid::new_v4()
-        );
-        let req = json_request("GET", &uri, None, Some(&auth));
+        let req = json_request("GET", &format!("/operations?{query}"), None, Some(&auth));
         let resp = category_app(op_repo, MockCategoryRepository::new())
             .oneshot(req)
             .await
             .unwrap();
 
-        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+        assert_eq!(resp.status(), StatusCode::OK, "{query}");
+    }
+
+    #[tokio::test]
+    async fn list_operations_passes_the_category_filter() {
+        let food = Uuid::new_v4();
+        let fun = Uuid::new_v4();
+        for (query, expected) in [
+            (format!("categoryId={food}"), (vec![food], false)),
+            (
+                format!("categoryId={food}&categoryId={fun}"),
+                (vec![food, fun], false),
+            ),
+            ("uncategorized=true".to_string(), (vec![], true)),
+            (
+                format!("categoryId={food}&uncategorized=true"),
+                (vec![food], true),
+            ),
+            (String::new(), (vec![], false)),
+        ] {
+            let expected = CategoryFilter {
+                category_ids: expected.0,
+                uncategorized: expected.1,
+            };
+            expect_list_params(&query, move |params| params.category == expected).await;
+        }
+    }
+
+    #[tokio::test]
+    async fn list_operations_passes_budgets_direction_and_amount_bounds() {
+        let rent = Uuid::new_v4();
+        let food = Uuid::new_v4();
+        let query =
+            format!("budgetId={rent}&budgetId={food}&direction=expense&amountMin=5&amountMax=50.5");
+        expect_list_params(&query, move |params| {
+            params.budget_ids == [rent, food]
+                && params.direction == Some(OperationDirection::Expense)
+                && params.amount_min == Some(Decimal::new(5, 0))
+                && params.amount_max == Some(Decimal::new(505, 1))
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    async fn list_operations_treats_a_blank_label_as_no_filter() {
+        expect_list_params("label=%20%20", |params| params.label_filter.is_none()).await;
+        expect_list_params("label=Amazon", |params| {
+            params.label_filter.as_deref() == Some("%amazon%")
+        })
+        .await;
     }
 
     #[tokio::test]

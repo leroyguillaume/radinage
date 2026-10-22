@@ -15,7 +15,13 @@ import { theme } from "@/theme";
 
 function renderLayout(path: string) {
 	const rootRoute = createRootRoute({ component: RootRoute.options.component });
-	const children = ["/summary", "/operations", "/stats", "/budgets"].map((p) =>
+	const children = [
+		"/summary",
+		"/operations",
+		"/search",
+		"/stats",
+		"/budgets",
+	].map((p) =>
 		createRoute({
 			getParentRoute: () => rootRoute,
 			path: p,
@@ -51,6 +57,23 @@ describe("RootLayout", () => {
 		expect(current).toHaveLength(2);
 		for (const link of current) {
 			expect(link).toHaveTextContent(/opérations|operations/i);
+		}
+	});
+
+	it("puts search between operations and statistics in both navigations", async () => {
+		signIn("user");
+		renderLayout("/search");
+		await screen.findByText("page /search");
+		const navs = screen.getAllByRole("navigation");
+		expect(navs).toHaveLength(2);
+		for (const nav of navs) {
+			const hrefs = within(nav)
+				.getAllByRole("link")
+				.map((link) => link.getAttribute("href"));
+			expect(hrefs.slice(1, 4)).toEqual(["/operations", "/search", "/stats"]);
+			expect(
+				within(nav).getByRole("link", { current: "page" }),
+			).toHaveTextContent(/recherche|search/i);
 		}
 	});
 
