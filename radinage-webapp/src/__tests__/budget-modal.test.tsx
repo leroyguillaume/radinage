@@ -9,6 +9,7 @@ import {
 	waitFor,
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import type { ComponentProps } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { selectMantineOption } from "@/__tests__/mantine";
 import { BudgetModal } from "@/components/BudgetModal";
@@ -26,6 +27,20 @@ vi.mock("@/lib/api", () => ({
 		}
 	},
 	apiFetch: vi.fn(),
+}));
+
+// The modal is rendered without a router; a plain anchor stands in for Link.
+vi.mock("@tanstack/react-router", () => ({
+	Link: ({ to, onClick, ...props }: { to: string } & ComponentProps<"a">) => (
+		<a
+			href={to}
+			{...props}
+			onClick={(e) => {
+				e.preventDefault();
+				onClick?.(e);
+			}}
+		/>
+	),
 }));
 
 const { apiFetch } = await import("@/lib/api");
@@ -709,11 +724,19 @@ describe("BudgetModal", () => {
 		expect(callBody.categoryId).toBe("c1");
 	});
 
-	it("hides the category field while there are no categories", () => {
-		renderModal();
+	it("disables the category field and links to the settings while there are no categories", async () => {
+		const { onClose } = renderModal();
 
 		expect(
-			screen.queryByRole("combobox", { name: "Catégorie par défaut" }),
-		).not.toBeInTheDocument();
+			screen.getByRole("combobox", { name: "Catégorie par défaut" }),
+		).toBeDisabled();
+		expect(
+			screen.getByText("Vous n'avez aucune catégorie."),
+		).toBeInTheDocument();
+
+		const link = screen.getByRole("link", { name: "Créer des catégories" });
+		expect(link).toHaveAttribute("href", "/settings");
+		await userEvent.setup().click(link);
+		expect(onClose).toHaveBeenCalled();
 	});
 });

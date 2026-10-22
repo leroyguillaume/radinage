@@ -188,6 +188,8 @@
 			"matchAmountTooltip": "Amount must match",
 			"category": "Default category",
 			"categoryHint": "Given to the operations linked to this budget that have no category.",
+			"categoryEmpty": "You have no categories.",
+			"categoryCreate": "Create categories",
 			"noCategory": "No category"
 		},
 		"addRule": "Add rule",

@@ -1,6 +1,7 @@
 import {
 	ActionIcon,
 	Alert,
+	Anchor,
 	Button,
 	Group,
 	Modal,
@@ -20,6 +21,7 @@ import {
 	IconPlus,
 	IconTrash,
 } from "@tabler/icons-react";
+import { Link } from "@tanstack/react-router";
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { CategorySelect } from "@/components/CategoryBadge";
@@ -600,18 +602,33 @@ export function BudgetModal({
 					]}
 				/>
 
-				{categories.length > 0 && (
-					<CategorySelect
-						label={t("budgets.fields.category")}
-						description={t("budgets.fields.categoryHint")}
-						placeholder={t("budgets.fields.noCategory")}
-						categories={categories}
-						value={form.categoryId}
-						onChange={(categoryId) => update({ categoryId })}
-						clearable
-						nothingFoundMessage={t("common.noResults")}
-					/>
-				)}
+				<CategorySelect
+					label={t("budgets.fields.category")}
+					description={
+						categories.length > 0 ? (
+							t("budgets.fields.categoryHint")
+						) : (
+							<>
+								{t("budgets.fields.categoryEmpty")}{" "}
+								<Anchor
+									component={Link}
+									to="/settings"
+									onClick={onClose}
+									inherit
+								>
+									{t("budgets.fields.categoryCreate")}
+								</Anchor>
+							</>
+						)
+					}
+					placeholder={t("budgets.fields.noCategory")}
+					categories={categories}
+					value={form.categoryId}
+					onChange={(categoryId) => update({ categoryId })}
+					disabled={categories.length === 0}
+					clearable
+					nothingFoundMessage={t("common.noResults")}
+				/>
 
 				<Select
 					label={t("budgets.fields.kind")}

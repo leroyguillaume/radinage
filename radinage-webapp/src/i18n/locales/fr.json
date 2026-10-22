@@ -188,6 +188,8 @@
 			"matchAmountTooltip": "Le montant doit correspondre",
 			"category": "Catégorie par défaut",
 			"categoryHint": "Donnée aux opérations liées à ce budget qui n'ont pas de catégorie.",
+			"categoryEmpty": "Vous n'avez aucune catégorie.",
+			"categoryCreate": "Créer des catégories",
 			"noCategory": "Aucune catégorie"
 		},
 		"addRule": "Ajouter une règle",
