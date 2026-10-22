@@ -574,7 +574,7 @@ where
             get_with(handlers::summary::get_category_summary, |op| {
                 op.tag("Summary")
                     .summary("Get totals per category over a month range")
-                    .description("Sum, for each category, the positive (`income`) and negative (`expense`) amounts accounted in the given range of months (inclusive), most spent first. An operation counts towards its effective category, a split one through each of its parts; the amounts without a category come under a `null` `categoryId`. Ignored operations are excluded. Returns 400 when from is after to.")
+                    .description("Sum, for each category, the positive (`income`) and negative (`expense`) amounts accounted in the given range of months (inclusive), most spent first. An operation counts towards its effective category, a split one through each of its parts; the amounts without a category come under a `null` `categoryId`. Ignored operations and amounts linked to a savings budget are excluded. Returns 400 when from is after to.")
                     .id("getCategorySummary")
             }),
         )
