@@ -1,4 +1,4 @@
-import { AreaChart, BarChart } from "@mantine/charts";
+import { AreaChart, BarChart, PieChart } from "@mantine/charts";
 import {
 	Alert,
 	Box,
@@ -17,9 +17,15 @@ import { useTranslation } from "react-i18next";
 import { CategoryDot } from "@/components/CategoryBadge";
 import { PageHeader } from "@/components/PageHeader";
 import { StatTile } from "@/components/StatTile";
+import {
+	type CategoryExpenseRow,
+	type CategoryExpenseSlice,
+	categoryExpenseRows,
+	categoryExpenseSlices,
+} from "@/lib/category-expenses";
 import { formatAmount } from "@/lib/format";
 import { useCategories, useCategorySummary, useSummary } from "@/lib/hooks";
-import { balanceTextColor, budgetTypeTones } from "@/lib/tones";
+import { balanceTextColor, budgetTypeTones, categoryFill } from "@/lib/tones";
 import type { CategoryResponse, CategoryTotal } from "@/lib/types";
 import { headingFont, palette } from "@/theme";
 
@@ -62,6 +68,72 @@ const pickerStyles = {
 
 const axisColor = "var(--mantine-color-dimmed)";
 
+// Neutral fills for the slices that are no category of the user's, apart from the
+// shade 6 the categories use.
+const UNCATEGORIZED_FILL = "var(--mantine-color-gray-3)";
+const OTHERS_FILL = "var(--mantine-color-gray-5)";
+
+function NoCategoryDot({ fill }: { fill?: string }) {
+	return (
+		<Box
+			w={10}
+			h={10}
+			bg={fill}
+			style={{
+				borderRadius: "50%",
+				border: fill ? undefined : "1px solid var(--mantine-color-dimmed)",
+				flexShrink: 0,
+			}}
+			aria-hidden
+		/>
+	);
+}
+
+function CategoryPie({ rows }: { rows: CategoryExpenseRow[] }) {
+	const { t } = useTranslation();
+	const slices = categoryExpenseSlices(rows);
+	const fill = (slice: CategoryExpenseSlice) =>
+		slice.category
+			? categoryFill(slice.category.color)
+			: slice.others > 0
+				? OTHERS_FILL
+				: UNCATEGORIZED_FILL;
+	const name = (slice: CategoryExpenseSlice) =>
+		slice.category?.name ??
+		(slice.others > 0
+			? t("stats.otherCategories", { count: slice.others })
+			: t("stats.uncategorized"));
+	const others = slices.find((slice) => slice.others > 0);
+
+	return (
+		<Stack gap="xs" align="center">
+			<PieChart
+				size={200}
+				data={slices.map((slice) => ({
+					key: slice.key,
+					name: name(slice),
+					value: slice.spent,
+					color: fill(slice),
+				}))}
+				strokeWidth={2}
+				strokeColor="var(--mantine-color-body)"
+				withTooltip
+				tooltipDataSource="segment"
+				valueFormatter={(value) => formatAmount(value)}
+				aria-label={t("stats.byCategory")}
+			/>
+			{others && (
+				<Group gap={6} wrap="nowrap">
+					<NoCategoryDot fill={OTHERS_FILL} />
+					<Text size="sm" c="dimmed">
+						{name(others)}
+					</Text>
+				</Group>
+			)}
+		</Stack>
+	);
+}
+
 /** What each category spent over the range, most spent first, with its share. */
 function CategoryExpenses({
 	totals,
@@ -71,15 +143,7 @@ function CategoryExpenses({
 	categories: CategoryResponse[];
 }) {
 	const { t } = useTranslation();
-	const byId = new Map(categories.map((c) => [c.id, c]));
-	const rows = totals
-		.map((total) => ({
-			key: total.categoryId ?? "__none",
-			category: total.categoryId ? byId.get(total.categoryId) : undefined,
-			spent: -Number(total.expense),
-		}))
-		.filter((row) => row.spent > 0)
-		.sort((a, b) => b.spent - a.spent);
+	const rows = categoryExpenseRows(totals, categories);
 	const totalSpent = rows.reduce((sum, row) => sum + row.spent, 0);
 	const maxSpent = rows[0]?.spent ?? 0;
 
@@ -99,56 +163,55 @@ function CategoryExpenses({
 						{t("stats.noCategoryExpenses")}
 					</Text>
 				) : (
-					<Box component="ul" m={0} p={0} className="list-none">
-						{rows.map((row) => {
-							const name = row.category?.name ?? t("stats.uncategorized");
-							const share = Math.round((row.spent / totalSpent) * 100);
-							return (
-								<Box
-									component="li"
-									key={row.key}
-									py={8}
-									style={{ borderTop: `1px solid ${palette.divider}` }}
-								>
-									<Group justify="space-between" wrap="nowrap" gap="sm">
-										<Group gap={8} wrap="nowrap" miw={0}>
-											{row.category ? (
-												<CategoryDot color={row.category.color} />
-											) : (
-												<Box
-													w={10}
-													h={10}
-													style={{
-														borderRadius: "50%",
-														border: "1px solid var(--mantine-color-dimmed)",
-														flexShrink: 0,
-													}}
-													aria-hidden
-												/>
-											)}
-											<Text size="sm" fw={600} truncate>
-												{name}
+					<div className="grid gap-6 sm:grid-cols-[220px_minmax(0,1fr)] sm:items-start">
+						<CategoryPie rows={rows} />
+						<Box component="ul" m={0} p={0} className="list-none">
+							{rows.map((row) => {
+								const name = row.category?.name ?? t("stats.uncategorized");
+								const share = Math.round((row.spent / totalSpent) * 100);
+								return (
+									<Box
+										component="li"
+										key={row.key}
+										py={8}
+										style={{ borderTop: `1px solid ${palette.divider}` }}
+									>
+										<Group justify="space-between" wrap="nowrap" gap="sm">
+											<Group gap={8} wrap="nowrap" miw={0}>
+												{row.category ? (
+													<CategoryDot color={row.category.color} />
+												) : (
+													<NoCategoryDot fill={UNCATEGORIZED_FILL} />
+												)}
+												<Text size="sm" fw={600} truncate>
+													{name}
+												</Text>
+											</Group>
+											<Text size="sm" className="tabular-nums" c="dimmed">
+												<Text
+													span
+													fw={700}
+													c="var(--mantine-color-text)"
+													inherit
+												>
+													{formatAmount(row.spent)}
+												</Text>
+												{` · ${share} %`}
 											</Text>
 										</Group>
-										<Text size="sm" className="tabular-nums" c="dimmed">
-											<Text span fw={700} c="var(--mantine-color-text)" inherit>
-												{formatAmount(row.spent)}
-											</Text>
-											{` · ${share} %`}
-										</Text>
-									</Group>
-									<Progress
-										mt={6}
-										value={(row.spent / maxSpent) * 100}
-										color={budgetTypeTones.expense.fill}
-										bg={palette.track}
-										size="sm"
-										aria-label={`${name} : ${formatAmount(row.spent)}`}
-									/>
-								</Box>
-							);
-						})}
-					</Box>
+										<Progress
+											mt={6}
+											value={(row.spent / maxSpent) * 100}
+											color={budgetTypeTones.expense.fill}
+											bg={palette.track}
+											size="sm"
+											aria-label={`${name} : ${formatAmount(row.spent)}`}
+										/>
+									</Box>
+								);
+							})}
+						</Box>
+					</div>
 				)}
 			</Stack>
 		</Paper>

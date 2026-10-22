@@ -238,6 +238,7 @@
 		"byCategory": "Dépenses par catégorie",
 		"byCategoryHint": "Une opération divisée compte pour chacune de ses parts.",
 		"uncategorized": "Sans catégorie",
+		"otherCategories": "Autres ({{count}} catégories)",
 		"noCategoryExpenses": "Aucune dépense sur la période."
 	},
 	"forecast": {
