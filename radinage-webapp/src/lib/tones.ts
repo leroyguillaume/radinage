@@ -1,4 +1,4 @@
-import type { BudgetType } from "@/lib/types";
+import type { BudgetType, CategoryColor } from "@/lib/types";
 
 export interface Tone {
 	/** Mantine colour key; shade 5 for fills, shade 8 for text. */
@@ -32,4 +32,9 @@ export function balanceTextColor(amount: number): string {
 	if (amount > 0) return budgetTypeTones.income.text;
 	if (amount < 0) return budgetTypeTones.expense.text;
 	return "var(--mantine-color-dimmed)";
+}
+
+/** Fill of the dot identifying a category; its name always goes with it. */
+export function categoryFill(color: CategoryColor): string {
+	return `var(--mantine-color-${color}-6)`;
 }

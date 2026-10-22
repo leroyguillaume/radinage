@@ -9,6 +9,10 @@ export interface OperationEntry {
 	operation: OperationResponse;
 	amount: number;
 	budgetId: string | null;
+	/** Category the amount counts towards: its own, else its budget's. */
+	categoryId: string | null;
+	/** Whether `categoryId` comes from the budget rather than the entry itself. */
+	categoryFromBudget: boolean;
 	/** 1-based position among the parts, null for a whole operation. */
 	part: { index: number; count: number } | null;
 }
@@ -26,6 +30,9 @@ export function operationEntries(op: OperationResponse): OperationEntry[] {
 				amount: Number(op.amount),
 				budgetId:
 					op.budgetLink.type === "unlinked" ? null : op.budgetLink.budgetId,
+				categoryId: op.effectiveCategoryId,
+				categoryFromBudget:
+					op.categoryId === null && op.effectiveCategoryId !== null,
 				part: null,
 			},
 		];
@@ -35,6 +42,9 @@ export function operationEntries(op: OperationResponse): OperationEntry[] {
 		operation: op,
 		amount: Number(split.amount),
 		budgetId: split.budgetId,
+		categoryId: split.effectiveCategoryId,
+		categoryFromBudget:
+			split.categoryId === null && split.effectiveCategoryId !== null,
 		part: { index: i + 1, count: op.splits.length },
 	}));
 }

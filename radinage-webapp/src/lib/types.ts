@@ -17,6 +17,10 @@ export interface OperationResponse {
 	budgetLink: BudgetLink;
 	/** Ignored operations are left out of every total, summary and forecast. */
 	ignored: boolean;
+	/** Category the user put the operation in; always null when split. */
+	categoryId: string | null;
+	/** Own category, else the linked budget's; always null when split. */
+	effectiveCategoryId: string | null;
 	/** Parts of a split operation, in order; empty when the operation is whole. */
 	splits: OperationSplitResponse[];
 }
@@ -26,9 +30,15 @@ export interface OperationSplitResponse {
 	/** Signed decimal, same sign as the parent operation's amount. */
 	amount: string;
 	budgetId: string | null;
+	categoryId: string | null;
+	/** Own category, else the part's budget's. */
+	effectiveCategoryId: string | null;
 }
 
-export type OperationSplitRequest = Omit<OperationSplitResponse, "id">;
+export type OperationSplitRequest = Omit<
+	OperationSplitResponse,
+	"id" | "effectiveCategoryId"
+>;
 
 export type BudgetLink =
 	| { type: "unlinked" }
@@ -54,6 +64,19 @@ export interface MonthlySummary {
 
 export interface SummaryResponse {
 	months: MonthlySummary[];
+}
+
+export interface CategoryTotal {
+	/** Null for the amounts without a category. */
+	categoryId: string | null;
+	income: string;
+	/** Zero or negative. */
+	expense: string;
+}
+
+export interface CategorySummaryResponse {
+	/** Most spent first. */
+	categories: CategoryTotal[];
 }
 
 export type ForecastMonthStatus = "past" | "current" | "future";
@@ -173,6 +196,8 @@ export interface BudgetResponse {
 	budgetType: BudgetType;
 	kind: BudgetKind;
 	rules: Rule[];
+	/** Default category of the operations linked to the budget. */
+	categoryId: string | null;
 	createdAt: string;
 }
 
@@ -208,6 +233,8 @@ export interface ExportDataResponse {
 }
 
 export interface ImportDataResponse {
+	importedCategories: number;
+	skippedCategories: number;
 	importedBudgets: number;
 	skippedBudgets: number;
 	importedOperations: number;
@@ -245,3 +272,31 @@ export interface ImportResult {
 	skipped: number;
 	errors: { row: number; reason: string }[];
 }
+
+/** Keys of the Mantine palette a category can be shown with. */
+export const CATEGORY_COLORS = [
+	"forest",
+	"blue",
+	"cyan",
+	"teal",
+	"lime",
+	"yellow",
+	"orange",
+	"red",
+	"pink",
+	"grape",
+	"violet",
+	"indigo",
+	"gray",
+] as const;
+
+export type CategoryColor = (typeof CATEGORY_COLORS)[number];
+
+export interface CategoryResponse {
+	id: string;
+	name: string;
+	color: CategoryColor;
+	createdAt: string;
+}
+
+export type CategoryRequest = Omit<CategoryResponse, "id" | "createdAt">;

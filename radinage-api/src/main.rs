@@ -19,8 +19,8 @@ use axum::{Extension, Json, Router, response::Html, routing::get};
 use clap::Parser;
 use config::Config;
 use repositories::{
-    PgBudgetRepository, PgImportProfileRepository, PgOperationRepository, PgUserRepository,
-    UserRepository,
+    PgBudgetRepository, PgCategoryRepository, PgImportProfileRepository, PgOperationRepository,
+    PgUserRepository, UserRepository,
 };
 use std::sync::Arc;
 use tower_http::cors::{AllowOrigin, Any, CorsLayer};
@@ -28,11 +28,12 @@ use tower_http::trace::TraceLayer;
 use tracing_subscriber::{EnvFilter, fmt, prelude::*};
 
 /// Inner application state holding repositories and configuration.
-pub struct AppStateInner<U, O, B, P> {
+pub struct AppStateInner<U, O, B, P, C> {
     pub user_repo: U,
     pub operation_repo: O,
     pub budget_repo: B,
     pub import_profile_repo: P,
+    pub category_repo: C,
     pub config: Config,
 }
 
@@ -40,11 +41,11 @@ pub struct AppStateInner<U, O, B, P> {
 ///
 /// Wrapped in [`Arc`] so that it is cheaply cloneable (required by Axum)
 /// without requiring `Clone` on the repository implementations.
-pub struct AppState<U, O, B, P> {
-    inner: Arc<AppStateInner<U, O, B, P>>,
+pub struct AppState<U, O, B, P, C> {
+    inner: Arc<AppStateInner<U, O, B, P, C>>,
 }
 
-impl<U, O, B, P> Clone for AppState<U, O, B, P> {
+impl<U, O, B, P, C> Clone for AppState<U, O, B, P, C> {
     fn clone(&self) -> Self {
         Self {
             inner: Arc::clone(&self.inner),
@@ -52,19 +53,20 @@ impl<U, O, B, P> Clone for AppState<U, O, B, P> {
     }
 }
 
-impl<U, O, B, P> std::ops::Deref for AppState<U, O, B, P> {
-    type Target = AppStateInner<U, O, B, P>;
+impl<U, O, B, P, C> std::ops::Deref for AppState<U, O, B, P, C> {
+    type Target = AppStateInner<U, O, B, P, C>;
     fn deref(&self) -> &Self::Target {
         &self.inner
     }
 }
 
-impl<U, O, B, P> AppState<U, O, B, P> {
+impl<U, O, B, P, C> AppState<U, O, B, P, C> {
     pub fn new(
         user_repo: U,
         operation_repo: O,
         budget_repo: B,
         import_profile_repo: P,
+        category_repo: C,
         config: Config,
     ) -> Self {
         Self {
@@ -73,14 +75,15 @@ impl<U, O, B, P> AppState<U, O, B, P> {
                 operation_repo,
                 budget_repo,
                 import_profile_repo,
+                category_repo,
                 config,
             }),
         }
     }
 }
 
-impl<U, O, B, P> axum::extract::FromRef<AppState<U, O, B, P>> for Config {
-    fn from_ref(state: &AppState<U, O, B, P>) -> Config {
+impl<U, O, B, P, C> axum::extract::FromRef<AppState<U, O, B, P, C>> for Config {
+    fn from_ref(state: &AppState<U, O, B, P, C>) -> Config {
         state.config.clone()
     }
 }
@@ -91,6 +94,7 @@ pub type ProdAppState = AppState<
     PgOperationRepository,
     PgBudgetRepository,
     PgImportProfileRepository,
+    PgCategoryRepository,
 >;
 
 #[tokio::main]
@@ -125,7 +129,8 @@ async fn main() -> anyhow::Result<()> {
         user_repo,
         PgOperationRepository::new(pool.clone()),
         PgBudgetRepository::new(pool.clone()),
-        PgImportProfileRepository::new(pool),
+        PgImportProfileRepository::new(pool.clone()),
+        PgCategoryRepository::new(pool),
         config.clone(),
     );
 
@@ -154,12 +159,13 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-pub(crate) fn build_router<U, O, B, P>(state: AppState<U, O, B, P>) -> Router
+pub(crate) fn build_router<U, O, B, P, C>(state: AppState<U, O, B, P, C>) -> Router
 where
     U: repositories::UserRepository + 'static,
     O: repositories::OperationRepository + 'static,
     B: repositories::BudgetRepository + 'static,
     P: repositories::ImportProfileRepository + 'static,
+    C: repositories::CategoryRepository + 'static,
 {
     aide::generate::on_error(|error| {
         tracing::warn!("aide schema generation error: {error}");
@@ -204,6 +210,11 @@ where
                 ..Tag::default()
             },
             Tag {
+                name: "Categories".to_string(),
+                description: Some("Manage the categories a user sorts operations into, each with a name and a colour. An operation, or each part of a split one, counts towards its own category, else towards the default category of the budget it is linked to. Categories are independent of budget types and listed by name.".to_string()),
+                ..Tag::default()
+            },
+            Tag {
                 name: "Import profiles".to_string(),
                 description: Some("Manage the named file layouts a user imports bank statements with: which columns hold the label, the amount and the date, the date format, and how many leading rows to skip. Profiles are listed most recently used first.".to_string()),
                 ..Tag::default()
@@ -220,7 +231,7 @@ where
             },
             Tag {
                 name: "Data".to_string(),
-                description: Some("Export and re-import a user's full data (account balance, budgets and operations) as JSON. Intended for backup and account migration.".to_string()),
+                description: Some("Export and re-import a user's full data (account balance, categories, budgets, operations and import profiles) as JSON. Intended for backup and account migration.".to_string()),
                 ..Tag::default()
             },
         ],
@@ -319,7 +330,7 @@ where
             get_with(handlers::operations::list_operations, |op| {
                 op.tag("Operations")
                     .summary("List operations")
-                    .description("Retrieve a paginated list of bank operations for the authenticated user. Supports filtering by date range, amount range, label search, and budget linkage status. Results are ordered by date descending.")
+                    .description("Retrieve a paginated list of bank operations for the authenticated user. Supports filtering by date range, exact amount, label search and category: `categoryId` keeps the operations counting towards that category (an unsplit operation through its effective category, a split one through any of its parts), `uncategorized` those without one; combining both is a 400. Results are ordered by date descending.")
                     .id("listOperations")
             })
             .post_with(handlers::operations::create_operation, |op| {
@@ -384,11 +395,26 @@ where
             }),
         )
         .api_route(
+            "/operations/{id}/category",
+            put_with(handlers::operations::set_category, |op| {
+                op.tag("Operations")
+                    .summary("Put an operation in a category")
+                    .description("Set the operation's own category, which takes precedence over its budget's default category. Returns 404 if the operation or the category does not exist or belongs to another user, 409 if the operation is split: its parts carry their categories.")
+                    .id("setOperationCategory")
+            })
+            .delete_with(handlers::operations::clear_category, |op| {
+                op.tag("Operations")
+                    .summary("Remove an operation's own category")
+                    .description("Clear the operation's own category; it then counts towards its budget's default category, if any. Returns 409 if the operation is split.")
+                    .id("clearOperationCategory")
+            }),
+        )
+        .api_route(
             "/operations/{id}/splits",
             put_with(handlers::operations::replace_splits, |op| {
                 op.tag("Operations")
                     .summary("Split an operation")
-                    .description("Replace the parts an operation is split into, e.g. a cash withdrawal spread over several budgets. Requires at least 2 parts whose amounts are non-zero, share the operation's sign and sum exactly to the operation amount; each part may reference one of the caller's budgets or none. The operation's own budget link is reset to unlinked, and summaries count each part under its own budget instead of the operation. Returns 400 on invalid parts or unknown budgets, 404 if the operation does not exist.")
+                    .description("Replace the parts an operation is split into, e.g. a cash withdrawal spread over several budgets. Requires at least 2 parts whose amounts are non-zero, share the operation's sign and sum exactly to the operation amount; each part may reference one of the caller's budgets and one of their categories, or none. The operation's own budget link is reset to unlinked and its own category cleared, and summaries count each part under its own budget and category instead of the operation. Returns 400 on invalid parts, unknown budgets or unknown categories, 404 if the operation does not exist.")
                     .id("replaceOperationSplits")
             })
             .delete_with(handlers::operations::clear_splits, |op| {
@@ -425,7 +451,7 @@ where
             .post_with(handlers::budgets::create_budget, |op| {
                 op.tag("Budgets")
                     .summary("Create a budget")
-                    .description("Create a new budget category. A budget can include matcher rules (keywords or patterns) that are used to automatically link operations when applying budget rules.")
+                    .description("Create a new budget category. A budget can include matcher rules (keywords or patterns) that are used to automatically link operations when applying budget rules, and a default category for the operations linked to it that have none of their own. Returns 400 when `categoryId` is not one of the caller's categories.")
                     .id("createBudget")
             }),
         )
@@ -440,7 +466,7 @@ where
             .put_with(handlers::budgets::update_budget, |op| {
                 op.tag("Budgets")
                     .summary("Update a budget")
-                    .description("Update the name, amount, or matcher rules of an existing budget category. All fields in the request body are required and will replace the current values.")
+                    .description("Update the name, amount, matcher rules or default category of an existing budget category. Every field in the request body replaces the current value, an absent `categoryId` clearing the default category. Returns 400 when `categoryId` is not one of the caller's categories.")
                     .id("updateBudget")
             })
             .delete_with(handlers::budgets::delete_budget, |op| {
@@ -457,6 +483,38 @@ where
                     .summary("Apply budget rules to operations")
                     .description("Run the matcher rules of a budget against all unlinked operations of the authenticated user. Operations whose label matches the budget's rules are automatically linked to it. Split operations are never touched. Returns the number of newly linked operations.")
                     .id("applyBudget")
+            }),
+        )
+        // Categories
+        .api_route(
+            "/categories",
+            get_with(handlers::categories::list_categories, |op| {
+                op.tag("Categories")
+                    .summary("List categories")
+                    .description("Retrieve all categories of the authenticated user, by name. A user has at most MAX_CATEGORIES_PER_USER categories.")
+                    .id("listCategories")
+            })
+            .post_with(handlers::categories::create_category, |op| {
+                op.tag("Categories")
+                    .summary("Create a category")
+                    .description("Create a named category. The name is trimmed, 1 to 50 characters long (400 otherwise) and unique for the user (409 otherwise). Returns 409 once the user has MAX_CATEGORIES_PER_USER categories.")
+                    .id("createCategory")
+                    .response::<201, Json<handlers::categories::CategoryResponse>>()
+            }),
+        )
+        .api_route(
+            "/categories/{id}",
+            put_with(handlers::categories::update_category, |op| {
+                op.tag("Categories")
+                    .summary("Update a category")
+                    .description("Replace the name and colour of a category, with the same rules as creation. Returns 404 if the category does not exist or belongs to another user.")
+                    .id("updateCategory")
+            })
+            .delete_with(handlers::categories::delete_category, |op| {
+                op.tag("Categories")
+                    .summary("Delete a category")
+                    .description("Permanently delete a category. The operations, split parts and budgets in it are kept, without a category. Returns 404 if the category does not exist or belongs to another user.")
+                    .id("deleteCategory")
             }),
         )
         // Import profiles
@@ -511,6 +569,15 @@ where
                     .id("getSummary")
             }),
         )
+        .api_route(
+            "/summary/categories",
+            get_with(handlers::summary::get_category_summary, |op| {
+                op.tag("Summary")
+                    .summary("Get totals per category over a month range")
+                    .description("Sum, for each category, the positive (`income`) and negative (`expense`) amounts accounted in the given range of months (inclusive), most spent first. An operation counts towards its effective category, a split one through each of its parts; the amounts without a category come under a `null` `categoryId`. Ignored operations are excluded. Returns 400 when from is after to.")
+                    .id("getCategorySummary")
+            }),
+        )
         // Forecast
         .api_route(
             "/forecast",
@@ -536,7 +603,7 @@ where
             get_with(handlers::data::export_data, |op| {
                 op.tag("Data")
                     .summary("Export all budgets and operations")
-                    .description("Return the authenticated user's full data (recorded account balance, budgets and operations) as a versioned JSON payload. Suitable for backup or migration.")
+                    .description("Return the authenticated user's full data (recorded account balance, categories, budgets, operations and import profiles) as a versioned JSON payload. Suitable for backup or migration.")
                     .id("exportData")
             }),
         )
@@ -545,7 +612,7 @@ where
             post_with(handlers::data::import_data, |op| {
                 op.tag("Data")
                     .summary("Import budgets and operations from a prior export")
-                    .description("Merge budgets and operations from a JSON payload previously obtained via /data/export into the authenticated user's account. Budgets are deduplicated by label, operations by (date, amount, label). Budget links on operations are remapped to existing or newly-created budgets. The payload's account balance, optional, is recorded only when the account has none.")
+                    .description("Merge budgets and operations from a JSON payload previously obtained via /data/export into the authenticated user's account. Categories are deduplicated by name, budgets by label, operations by (date, amount, label). Category and budget references are remapped to existing or newly-created ones. Returns 409, importing nothing, when the new categories would exceed MAX_CATEGORIES_PER_USER. The payload's account balance, optional, is recorded only when the account has none.")
                     .id("importData")
             }),
         )
@@ -607,8 +674,8 @@ pub(crate) mod test_util {
         domain::user::UserRole,
         handlers,
         repositories::{
-            MockBudgetRepository, MockImportProfileRepository, MockOperationRepository,
-            MockUserRepository,
+            MockBudgetRepository, MockCategoryRepository, MockImportProfileRepository,
+            MockOperationRepository, MockUserRepository,
         },
     };
     use axum::{Router, routing};
@@ -622,6 +689,7 @@ pub(crate) mod test_util {
         MockOperationRepository,
         MockBudgetRepository,
         MockImportProfileRepository,
+        MockCategoryRepository,
     >;
 
     pub fn make_test_config() -> Config {
@@ -637,6 +705,7 @@ pub(crate) mod test_util {
             cors_origins: Vec::new(),
             max_budgets_per_user: 100,
             max_import_profiles_per_user: 20,
+            max_categories_per_user: 50,
             root_path: String::new(),
             webapp_url: "http://localhost:5173".to_string(),
         }
@@ -659,6 +728,14 @@ pub(crate) mod test_util {
         repo
     }
 
+    /// A category repository holding none, for tests that only read categories in passing.
+    pub fn no_categories() -> MockCategoryRepository {
+        let mut repo = MockCategoryRepository::new();
+        repo.expect_list()
+            .returning(|_| Box::pin(async { Ok(Vec::new()) }));
+        repo
+    }
+
     /// Build a test state from mock repositories, import profiles included.
     pub fn make_test_state_with_profiles(
         user_repo: MockUserRepository,
@@ -666,11 +743,45 @@ pub(crate) mod test_util {
         budget_repo: MockBudgetRepository,
         profile_repo: MockImportProfileRepository,
     ) -> TestState {
+        make_test_state_with_all(
+            user_repo,
+            op_repo,
+            budget_repo,
+            profile_repo,
+            no_categories(),
+        )
+    }
+
+    /// Build a test state from mock repositories, categories included.
+    pub fn make_test_state_with_categories(
+        user_repo: MockUserRepository,
+        op_repo: MockOperationRepository,
+        budget_repo: MockBudgetRepository,
+        category_repo: MockCategoryRepository,
+    ) -> TestState {
+        make_test_state_with_all(
+            user_repo,
+            op_repo,
+            budget_repo,
+            no_import_profiles(),
+            category_repo,
+        )
+    }
+
+    /// Build a test state from every mock repository.
+    pub fn make_test_state_with_all(
+        user_repo: MockUserRepository,
+        op_repo: MockOperationRepository,
+        budget_repo: MockBudgetRepository,
+        profile_repo: MockImportProfileRepository,
+        category_repo: MockCategoryRepository,
+    ) -> TestState {
         AppState::new(
             user_repo,
             op_repo,
             budget_repo,
             profile_repo,
+            category_repo,
             make_test_config(),
         )
     }
@@ -717,6 +828,16 @@ pub(crate) mod test_util {
                 routing::post(handlers::import::preview_import),
             )
             .route(
+                "/categories",
+                routing::get(handlers::categories::list_categories)
+                    .post(handlers::categories::create_category),
+            )
+            .route(
+                "/categories/{id}",
+                routing::put(handlers::categories::update_category)
+                    .delete(handlers::categories::delete_category),
+            )
+            .route(
                 "/import-profiles",
                 routing::get(handlers::import_profiles::list_import_profiles)
                     .post(handlers::import_profiles::create_import_profile),
@@ -736,6 +857,11 @@ pub(crate) mod test_util {
                 "/operations/{id}/budget",
                 routing::put(handlers::operations::link_budget)
                     .delete(handlers::operations::unlink_budget),
+            )
+            .route(
+                "/operations/{id}/category",
+                routing::put(handlers::operations::set_category)
+                    .delete(handlers::operations::clear_category),
             )
             .route(
                 "/operations/{id}/splits",
@@ -770,6 +896,10 @@ pub(crate) mod test_util {
             )
             // Summary
             .route("/summary", routing::get(handlers::summary::get_summary))
+            .route(
+                "/summary/categories",
+                routing::get(handlers::summary::get_category_summary),
+            )
             .route("/forecast", routing::get(handlers::forecast::get_forecast))
             .route(
                 "/forecast/{year}/{month}",

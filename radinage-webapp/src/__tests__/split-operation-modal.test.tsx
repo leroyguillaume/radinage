@@ -5,7 +5,11 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SplitOperationModal } from "@/components/SplitOperationModal";
 import { i18n } from "@/i18n";
-import type { BudgetResponse, OperationResponse } from "@/lib/types";
+import type {
+	BudgetResponse,
+	CategoryResponse,
+	OperationResponse,
+} from "@/lib/types";
 import { theme } from "@/theme";
 
 vi.mock("@/lib/api", () => ({
@@ -34,6 +38,7 @@ function makeBudget(
 		budgetType,
 		kind: { type: "occasional", month: 4, year: 2026, amount: "-100.00" },
 		rules: [],
+		categoryId: null,
 		createdAt: "2026-01-01T00:00:00Z",
 	};
 }
@@ -55,12 +60,17 @@ function makeOperation(
 		label: "RETRAIT DAB",
 		budgetLink: { type: "unlinked" },
 		ignored: false,
+		categoryId: null,
+		effectiveCategoryId: null,
 		splits: [],
 		...overrides,
 	};
 }
 
-function renderModal(operation: OperationResponse) {
+function renderModal(
+	operation: OperationResponse,
+	categories: CategoryResponse[] = [],
+) {
 	const onClose = vi.fn();
 	const queryClient = new QueryClient({
 		defaultOptions: { queries: { retry: false } },
@@ -71,6 +81,7 @@ function renderModal(operation: OperationResponse) {
 				<SplitOperationModal
 					operation={operation}
 					budgets={budgets}
+					categories={categories}
 					onClose={onClose}
 				/>
 			</MantineProvider>
@@ -162,8 +173,8 @@ describe("SplitOperationModal", () => {
 			method: "PUT",
 			body: {
 				splits: [
-					{ amount: "-30.50", budgetId: "b2" },
-					{ amount: "-69.50", budgetId: null },
+					{ amount: "-30.50", budgetId: "b2", categoryId: null },
+					{ amount: "-69.50", budgetId: null, categoryId: null },
 				],
 			},
 		});
@@ -179,8 +190,8 @@ describe("SplitOperationModal", () => {
 		await waitFor(() =>
 			expect(lastCall().body).toEqual({
 				splits: [
-					{ amount: "200.00", budgetId: null },
-					{ amount: "50.00", budgetId: null },
+					{ amount: "200.00", budgetId: null, categoryId: null },
+					{ amount: "50.00", budgetId: null, categoryId: null },
 				],
 			}),
 		);
@@ -201,9 +212,9 @@ describe("SplitOperationModal", () => {
 		await waitFor(() =>
 			expect(lastCall().body).toEqual({
 				splits: [
-					{ amount: "-30.00", budgetId: null },
-					{ amount: "-30.00", budgetId: null },
-					{ amount: "-40.00", budgetId: null },
+					{ amount: "-30.00", budgetId: null, categoryId: null },
+					{ amount: "-30.00", budgetId: null, categoryId: null },
+					{ amount: "-40.00", budgetId: null, categoryId: null },
 				],
 			}),
 		);
@@ -244,8 +255,20 @@ describe("SplitOperationModal", () => {
 		const { user, onClose } = renderModal(
 			makeOperation({
 				splits: [
-					{ id: "s1", amount: "-30.00", budgetId: "b1" },
-					{ id: "s2", amount: "-70.00", budgetId: null },
+					{
+						id: "s1",
+						amount: "-30.00",
+						budgetId: "b1",
+						categoryId: null,
+						effectiveCategoryId: null,
+					},
+					{
+						id: "s2",
+						amount: "-70.00",
+						budgetId: null,
+						categoryId: null,
+						effectiveCategoryId: null,
+					},
 				],
 			}),
 		);
@@ -290,5 +313,77 @@ describe("SplitOperationModal", () => {
 			await screen.findByText("Impossible d'enregistrer la division"),
 		).toBeInTheDocument();
 		expect(onClose).not.toHaveBeenCalled();
+	});
+
+	describe("categories", () => {
+		const categories: CategoryResponse[] = [
+			{
+				id: "c1",
+				name: "Courses",
+				color: "teal",
+				createdAt: "2026-01-01T00:00:00Z",
+			},
+			{
+				id: "c2",
+				name: "Sorties",
+				color: "grape",
+				createdAt: "2026-01-01T00:00:00Z",
+			},
+		];
+
+		it("sends each part's category, starting from the operation's own", async () => {
+			const { user, onClose } = renderModal(
+				makeOperation({ categoryId: "c1", effectiveCategoryId: "c1" }),
+				categories,
+			);
+
+			expect(
+				screen.getByRole("combobox", { name: "Catégorie (Part 1)" }),
+			).toHaveValue("Courses");
+			await user.type(amountInput(1), "40");
+			await user.type(amountInput(2), "60");
+			await user.click(
+				screen.getByRole("combobox", { name: "Catégorie (Part 2)" }),
+			);
+			await user.click(await screen.findByRole("option", { name: "Sorties" }));
+			await user.click(saveButton());
+
+			await waitFor(() => expect(onClose).toHaveBeenCalled());
+			expect(lastCall().body).toEqual({
+				splits: [
+					{ amount: "-40.00", budgetId: null, categoryId: "c1" },
+					{ amount: "-60.00", budgetId: null, categoryId: "c2" },
+				],
+			});
+		});
+
+		it("names the budget's category a part without its own falls back on", async () => {
+			const original = budgets[0];
+			if (!original) throw new Error("no budget");
+			budgets[0] = { ...original, categoryId: "c2" };
+			try {
+				const { user } = renderModal(makeOperation(), categories);
+				await user.click(
+					screen.getByRole("combobox", { name: "Budget (Part 1)" }),
+				);
+				await user.click(
+					await screen.findByRole("option", { name: "Courses" }),
+				);
+
+				expect(
+					screen.getByRole("combobox", { name: "Catégorie (Part 1)" }),
+				).toHaveAttribute("placeholder", "Catégorie du budget : Sorties");
+			} finally {
+				budgets[0] = original;
+			}
+		});
+
+		it("hides the category field while there are no categories", () => {
+			renderModal(makeOperation());
+
+			expect(
+				screen.queryByRole("combobox", { name: "Catégorie (Part 1)" }),
+			).not.toBeInTheDocument();
+		});
 	});
 });

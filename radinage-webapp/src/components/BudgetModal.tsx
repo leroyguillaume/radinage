@@ -22,8 +22,14 @@ import {
 } from "@tabler/icons-react";
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { CategorySelect } from "@/components/CategoryBadge";
 import { toDisplayAmount, toRawAmount } from "@/lib/format";
-import { useApplyBudget, useCreateBudget, useUpdateBudget } from "@/lib/hooks";
+import {
+	useApplyBudget,
+	useCategories,
+	useCreateBudget,
+	useUpdateBudget,
+} from "@/lib/hooks";
 import type {
 	ApplyBudgetResponse,
 	BudgetResponse,
@@ -94,6 +100,7 @@ interface BudgetForm {
 	displayOccasionalAmount: string;
 	occasionalMonth: Date;
 	rules: RuleForm[];
+	categoryId: string | null;
 }
 
 function defaultForm(): BudgetForm {
@@ -107,6 +114,7 @@ function defaultForm(): BudgetForm {
 		displayOccasionalAmount: "",
 		occasionalMonth: new Date(),
 		rules: [],
+		categoryId: null,
 	};
 }
 
@@ -130,6 +138,7 @@ function formFromBudget(budget: BudgetResponse, locale: string): BudgetForm {
 			displayOccasionalAmount: toDisplayAmount(budget.kind.amount, locale),
 			occasionalMonth: new Date(budget.kind.year, budget.kind.month - 1),
 			rules,
+			categoryId: budget.categoryId,
 		};
 	}
 
@@ -160,6 +169,7 @@ function formFromBudget(budget: BudgetResponse, locale: string): BudgetForm {
 		displayOccasionalAmount: "",
 		occasionalMonth: new Date(),
 		rules,
+		categoryId: budget.categoryId,
 	};
 }
 
@@ -180,6 +190,7 @@ function formToPayload(form: BudgetForm) {
 				amount: form.occasionalAmount,
 			},
 			rules,
+			categoryId: form.categoryId,
 		};
 	}
 
@@ -207,6 +218,7 @@ function formToPayload(form: BudgetForm) {
 			currentPeriod,
 		},
 		rules,
+		categoryId: form.categoryId,
 	};
 }
 
@@ -361,6 +373,7 @@ export function BudgetModal({
 	const createBudget = useCreateBudget();
 	const updateBudget = useUpdateBudget();
 	const applyBudget = useApplyBudget();
+	const categories = useCategories().data ?? [];
 	const [form, setForm] = useState<BudgetForm>(defaultForm);
 	const [error, setError] = useState<string | null>(null);
 	const [applyPrompt, setApplyPrompt] = useState<{
@@ -586,6 +599,19 @@ export function BudgetModal({
 						{ value: "savings", label: t("budgets.types.savings") },
 					]}
 				/>
+
+				{categories.length > 0 && (
+					<CategorySelect
+						label={t("budgets.fields.category")}
+						description={t("budgets.fields.categoryHint")}
+						placeholder={t("budgets.fields.noCategory")}
+						categories={categories}
+						value={form.categoryId}
+						onChange={(categoryId) => update({ categoryId })}
+						clearable
+						nothingFoundMessage={t("common.noResults")}
+					/>
+				)}
 
 				<Select
 					label={t("budgets.fields.kind")}

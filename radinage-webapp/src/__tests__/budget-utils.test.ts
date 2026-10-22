@@ -21,6 +21,7 @@ function makeRecurring(
 			currentPeriod: { start: periodStart, end: null, amount },
 		},
 		rules: [],
+		categoryId: null,
 		createdAt: "2024-01-01T00:00:00Z",
 	};
 }
@@ -36,6 +37,7 @@ function makeOccasional(
 		budgetType: "expense",
 		kind: { type: "occasional", month, year, amount },
 		rules: [],
+		categoryId: null,
 		createdAt: "2024-01-01T00:00:00Z",
 	};
 }
@@ -231,6 +233,7 @@ describe("getBudgetedAmountForMonth", () => {
 					},
 				},
 				rules: [],
+				categoryId: null,
 				createdAt: "2024-01-01T00:00:00Z",
 			};
 			expect(getBudgetedAmountForMonth(budget, 2023, 6)).toBe(-700);
@@ -259,6 +262,7 @@ describe("getBudgetedAmountForMonth", () => {
 					},
 				},
 				rules: [],
+				categoryId: null,
 				createdAt: "2024-01-01T00:00:00Z",
 			};
 			// Closed period starts Feb 2023

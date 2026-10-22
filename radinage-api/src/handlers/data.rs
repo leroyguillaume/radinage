@@ -2,15 +2,17 @@ use crate::{
     AppState,
     auth::middleware::AuthUser,
     domain::{
-        budget::{Budget, BudgetKind, BudgetType, Rule},
+        budget::{Budget, BudgetFields, BudgetKind, BudgetType, Rule},
+        category::{Category, CategoryColor, CategoryFields},
         import_profile::{ImportProfile, ImportProfileFields},
         operation::{BudgetLink, NewOperationSplit, Operation, OperationSplit, validate_splits},
         user::AccountBalance,
     },
     error::{AppError, AppResult},
-    handlers::import_profiles::ImportProfileRequest,
+    handlers::{categories::CategoryRequest, import_profiles::ImportProfileRequest},
     repositories::{
-        BudgetRepository, ImportProfileRepository, OperationRepository, UserRepository,
+        BudgetRepository, CategoryRepository, ImportProfileRepository, OperationRepository,
+        UserRepository,
     },
 };
 use axum::{Json, extract::State, http::StatusCode};
@@ -35,6 +37,9 @@ pub struct ExportBudget {
     pub budget_type: BudgetType,
     pub kind: BudgetKind,
     pub rules: Vec<Rule>,
+    /// Absent from exports made before categories existed.
+    #[serde(default)]
+    pub category_id: Option<Uuid>,
     pub created_at: DateTime<Utc>,
 }
 
@@ -46,7 +51,28 @@ impl From<Budget> for ExportBudget {
             budget_type: b.budget_type,
             kind: b.kind,
             rules: b.rules,
+            category_id: b.category_id,
             created_at: b.created_at,
+        }
+    }
+}
+
+/// A category inside an export payload (omits `userId`).
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ExportCategory {
+    /// Identifier the payload's budgets, operations and split parts refer to it by.
+    pub id: Uuid,
+    pub name: String,
+    pub color: CategoryColor,
+}
+
+impl From<Category> for ExportCategory {
+    fn from(c: Category) -> Self {
+        Self {
+            id: c.id,
+            name: c.fields.name,
+            color: c.fields.color,
         }
     }
 }
@@ -63,6 +89,9 @@ pub struct ExportOperation {
     pub label: String,
     pub budget_link: BudgetLink,
     pub ignored: bool,
+    /// Absent from exports made before categories existed.
+    #[serde(default)]
+    pub category_id: Option<Uuid>,
     /// Parts of a split operation, in order; absent from exports made before splits existed.
     #[serde(default)]
     pub splits: Vec<ExportOperationSplit>,
@@ -75,6 +104,9 @@ pub struct ExportOperationSplit {
     #[schemars(with = "String")]
     pub amount: Decimal,
     pub budget_id: Option<Uuid>,
+    /// Absent from exports made before categories existed.
+    #[serde(default)]
+    pub category_id: Option<Uuid>,
 }
 
 impl From<OperationSplit> for ExportOperationSplit {
@@ -82,6 +114,7 @@ impl From<OperationSplit> for ExportOperationSplit {
         Self {
             amount: split.amount,
             budget_id: split.budget_id,
+            category_id: split.category_id,
         }
     }
 }
@@ -91,6 +124,7 @@ impl From<&ExportOperationSplit> for NewOperationSplit {
         Self {
             amount: split.amount,
             budget_id: split.budget_id,
+            category_id: split.category_id,
         }
     }
 }
@@ -105,6 +139,7 @@ impl From<Operation> for ExportOperation {
             label: op.label,
             budget_link: op.budget_link,
             ignored: op.ignored,
+            category_id: op.category_id,
             splits: op
                 .splits
                 .into_iter()
@@ -190,6 +225,7 @@ pub struct ExportResponse {
     pub exported_at: DateTime<Utc>,
     /// Recorded account balance, null when none is recorded.
     pub balance: Option<ExportAccountBalance>,
+    pub categories: Vec<ExportCategory>,
     pub budgets: Vec<ExportBudget>,
     pub operations: Vec<ExportOperation>,
     pub import_profiles: Vec<ExportImportProfile>,
@@ -205,6 +241,9 @@ pub struct ImportDataRequest {
     /// balances existed.
     #[serde(default)]
     pub balance: Option<ExportAccountBalance>,
+    /// Absent from exports made before categories existed.
+    #[serde(default)]
+    pub categories: Vec<ExportCategory>,
     #[serde(default)]
     pub budgets: Vec<ExportBudget>,
     #[serde(default)]
@@ -218,6 +257,10 @@ pub struct ImportDataRequest {
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ImportDataResponse {
+    pub imported_categories: usize,
+    /// Categories skipped because the account already has one by that name, which is used
+    /// instead.
+    pub skipped_categories: usize,
     pub imported_budgets: usize,
     pub skipped_budgets: usize,
     pub imported_operations: usize,
@@ -237,12 +280,14 @@ pub async fn export_data<
     O: OperationRepository,
     B: BudgetRepository,
     P: ImportProfileRepository,
+    C: CategoryRepository,
 >(
-    State(state): State<AppState<U, O, B, P>>,
+    State(state): State<AppState<U, O, B, P, C>>,
     auth_user: AuthUser,
 ) -> AppResult<Json<ExportResponse>> {
     let user_id = auth_user.id;
     let balance = state.user_repo.find_balance(user_id).await?;
+    let categories = state.category_repo.list(user_id).await?;
     let budgets = state.budget_repo.list_all_for_user(user_id).await?;
     let operations = state.operation_repo.list_all_for_user(user_id).await?;
     let import_profiles = state.import_profile_repo.list(user_id).await?;
@@ -251,6 +296,7 @@ pub async fn export_data<
         version: EXPORT_VERSION,
         exported_at: Utc::now(),
         balance: balance.map(Into::into),
+        categories: categories.into_iter().map(ExportCategory::from).collect(),
         budgets: budgets.into_iter().map(ExportBudget::from).collect(),
         operations: operations.into_iter().map(ExportOperation::from).collect(),
         import_profiles: import_profiles
@@ -265,8 +311,9 @@ pub async fn import_data<
     O: OperationRepository,
     B: BudgetRepository,
     P: ImportProfileRepository,
+    C: CategoryRepository,
 >(
-    State(state): State<AppState<U, O, B, P>>,
+    State(state): State<AppState<U, O, B, P, C>>,
     auth_user: AuthUser,
     Json(body): Json<ImportDataRequest>,
 ) -> AppResult<(StatusCode, Json<ImportDataResponse>)> {
@@ -292,8 +339,30 @@ pub async fn import_data<
                 .map_err(|e| AppError::BadRequest(format!("import profile '{name}': {e}")))
         })
         .collect::<AppResult<Vec<_>>>()?;
+    let categories = body
+        .categories
+        .iter()
+        .map(|c| {
+            let request = CategoryRequest {
+                name: c.name.clone(),
+                color: c.color,
+            };
+            CategoryFields::try_from(request)
+                .map(|fields| (c.id, fields))
+                .map_err(|e| AppError::BadRequest(format!("category '{}': {e}", c.name)))
+        })
+        .collect::<AppResult<Vec<_>>>()?;
 
     let user_id = auth_user.id;
+
+    let (category_id_map, imported_categories) = import_categories(
+        &state.category_repo,
+        user_id,
+        &categories,
+        state.config.max_categories_per_user,
+    )
+    .await?;
+    let remap_category = |id: Option<Uuid>| id.and_then(|id| category_id_map.get(&id).copied());
 
     // Merge budgets by label: keep existing, create missing. Track id mapping
     // so that operations can re-point their budget links to the correct budget.
@@ -312,10 +381,14 @@ pub async fn import_data<
             skipped_budgets += 1;
             continue;
         }
-        let created = state
-            .budget_repo
-            .create(user_id, &b.label, b.budget_type, &b.kind, &b.rules)
-            .await?;
+        let fields = BudgetFields {
+            label: b.label.clone(),
+            budget_type: b.budget_type,
+            kind: b.kind.clone(),
+            rules: b.rules.clone(),
+            category_id: remap_category(b.category_id),
+        };
+        let created = state.budget_repo.create(user_id, &fields).await?;
         budget_id_map.insert(b.id, created.id);
         imported_budgets += 1;
     }
@@ -352,6 +425,7 @@ pub async fn import_data<
                 .iter()
                 .map(|s| NewOperationSplit {
                     budget_id: s.budget_id.and_then(|bid| budget_id_map.get(&bid).copied()),
+                    category_id: remap_category(s.category_id),
                     ..s.into()
                 })
                 .collect();
@@ -383,6 +457,14 @@ pub async fn import_data<
                 .await?;
         }
 
+        let category_id = remap_category(op.category_id);
+        if op.splits.is_empty() && category_id.is_some() {
+            state
+                .operation_repo
+                .set_category(new_id, user_id, category_id)
+                .await?;
+        }
+
         if op.ignored {
             state
                 .operation_repo
@@ -407,6 +489,8 @@ pub async fn import_data<
     Ok((
         StatusCode::OK,
         Json(ImportDataResponse {
+            imported_categories,
+            skipped_categories: categories.len() - imported_categories,
             imported_budgets,
             skipped_budgets,
             imported_operations,
@@ -416,6 +500,55 @@ pub async fn import_data<
             imported_balance,
         }),
     ))
+}
+
+/// Create the payload's categories the account has no category by that name for, and map each
+/// payload id to the account's category of that name; returns the map and how many were created.
+/// Fails with `Conflict`, creating none, when they would exceed `max` categories.
+async fn import_categories(
+    repo: &impl CategoryRepository,
+    user_id: Uuid,
+    incoming: &[(Uuid, CategoryFields)],
+    max: u32,
+) -> AppResult<(HashMap<Uuid, Uuid>, usize)> {
+    let mut id_map = HashMap::new();
+    if incoming.is_empty() {
+        return Ok((id_map, 0));
+    }
+    let mut by_name: HashMap<String, Uuid> = repo
+        .list(user_id)
+        .await?
+        .into_iter()
+        .map(|c| (c.fields.name, c.id))
+        .collect();
+    let mut new_names: Vec<&str> = incoming
+        .iter()
+        .map(|(_, fields)| fields.name.as_str())
+        .filter(|name| !by_name.contains_key(*name))
+        .collect();
+    new_names.sort_unstable();
+    new_names.dedup();
+    if by_name.len() + new_names.len() > max as usize {
+        return Err(AppError::Conflict(format!(
+            "importing {} new categories would exceed the category limit ({max})",
+            new_names.len()
+        )));
+    }
+
+    let mut imported = 0usize;
+    for (incoming_id, fields) in incoming {
+        let id = match by_name.get(&fields.name) {
+            Some(id) => *id,
+            None => {
+                let created = repo.create(user_id, fields).await?;
+                by_name.insert(created.fields.name, created.id);
+                imported += 1;
+                created.id
+            }
+        };
+        id_map.insert(*incoming_id, id);
+    }
+    Ok((id_map, imported))
 }
 
 /// Create the payload's profiles the account has no profile by that name for; returns how many
@@ -455,12 +588,12 @@ mod tests {
             user::UserRole,
         },
         repositories::{
-            MockBudgetRepository, MockImportProfileRepository, MockOperationRepository,
-            MockUserRepository,
+            MockBudgetRepository, MockCategoryRepository, MockImportProfileRepository,
+            MockOperationRepository, MockUserRepository,
         },
         test_util::{
             auth_header, build_test_router, json_request, make_test_state,
-            make_test_state_with_profiles, response_json,
+            make_test_state_with_categories, make_test_state_with_profiles, response_json,
         },
     };
     use chrono::NaiveDate;
@@ -479,6 +612,21 @@ mod tests {
                 amount: Decimal::new(10000, 2),
             },
             rules: vec![],
+            category_id: None,
+            created_at: Utc::now(),
+        }
+    }
+
+    /// The budget a mocked `create` returns for `fields`.
+    fn created_budget(user_id: Uuid, fields: &BudgetFields) -> Budget {
+        Budget {
+            id: Uuid::new_v4(),
+            user_id,
+            label: fields.label.clone(),
+            budget_type: fields.budget_type,
+            kind: fields.kind.clone(),
+            rules: fields.rules.clone(),
+            category_id: fields.category_id,
             created_at: Utc::now(),
         }
     }
@@ -493,6 +641,8 @@ mod tests {
             label: label.to_string(),
             budget_link,
             ignored: false,
+            category_id: None,
+            budget_category_id: None,
             splits: vec![],
         }
     }
@@ -600,16 +750,8 @@ mod tests {
         budget_repo
             .expect_create()
             .times(1)
-            .returning(move |uid, label, bt, kind, rules| {
-                let created = Budget {
-                    id: Uuid::new_v4(),
-                    user_id: uid,
-                    label: label.to_string(),
-                    budget_type: bt,
-                    kind: kind.clone(),
-                    rules: rules.to_vec(),
-                    created_at: Utc::now(),
-                };
+            .returning(move |uid, fields| {
+                let created = created_budget(uid, fields);
                 Box::pin(async move { Ok(created) })
             });
         op_repo
@@ -898,11 +1040,15 @@ mod tests {
                     id: Uuid::new_v4(),
                     amount: Decimal::new(-234, 2),
                     budget_id: Some(budget_id),
+                    category_id: None,
+                    budget_category_id: None,
                 },
                 OperationSplit {
                     id: Uuid::new_v4(),
                     amount: Decimal::new(-1000, 2),
                     budget_id: None,
+                    category_id: None,
+                    budget_category_id: None,
                 },
             ],
             ..make_operation(user_id, "Cash", BudgetLink::Unlinked)
@@ -972,10 +1118,12 @@ mod tests {
                             NewOperationSplit {
                                 amount: Decimal::new(-30, 0),
                                 budget_id: Some(existing_id),
+                                category_id: None,
                             },
                             NewOperationSplit {
                                 amount: Decimal::new(-70, 0),
                                 budget_id: None,
+                                category_id: None,
                             },
                         ]
             })
@@ -1087,10 +1235,10 @@ mod tests {
             .returning(|_| Box::pin(async { Ok(vec![]) }));
         budget_repo
             .expect_create()
-            .withf(|_uid, label, _bt, kind, _rules| {
-                *label == *"Rent"
+            .withf(|_uid, fields| {
+                fields.label == "Rent"
                     && matches!(
-                        kind,
+                        fields.kind,
                         BudgetKind::Recurring {
                             recurrence: Recurrence::Monthly,
                             ..
@@ -1098,16 +1246,8 @@ mod tests {
                     )
             })
             .times(1)
-            .returning(move |uid, label, bt, kind, rules| {
-                let created = Budget {
-                    id: Uuid::new_v4(),
-                    user_id: uid,
-                    label: label.to_string(),
-                    budget_type: bt,
-                    kind: kind.clone(),
-                    rules: rules.to_vec(),
-                    created_at: Utc::now(),
-                };
+            .returning(move |uid, fields| {
+                let created = created_budget(uid, fields);
                 Box::pin(async move { Ok(created) })
             });
 
@@ -1133,6 +1273,7 @@ mod tests {
                 },
             },
             rules: vec![],
+            category_id: None,
             created_at: Utc::now(),
         };
         // Round-trip: serialize the export payload and feed it back as input.
@@ -1140,6 +1281,7 @@ mod tests {
             version: EXPORT_VERSION,
             exported_at: Utc::now(),
             balance: None,
+            categories: vec![],
             budgets: vec![ExportBudget::from(budget)],
             operations: vec![],
             import_profiles: vec![],
@@ -1399,5 +1541,206 @@ mod tests {
                 .await;
 
         assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    }
+
+    fn make_category(user_id: Uuid, name: &str) -> Category {
+        Category {
+            id: Uuid::new_v4(),
+            user_id,
+            fields: CategoryFields {
+                name: name.to_string(),
+                color: CategoryColor::Teal,
+            },
+            created_at: Utc::now(),
+        }
+    }
+
+    fn categories_listing(existing: Vec<Category>) -> MockCategoryRepository {
+        let mut repo = MockCategoryRepository::new();
+        repo.expect_list().returning(move |_| {
+            let existing = existing.clone();
+            Box::pin(async move { Ok(existing) })
+        });
+        repo
+    }
+
+    async fn post_import(app: axum::Router, user_id: Uuid, body: &str) -> axum::response::Response {
+        let auth = auth_header(user_id, UserRole::User);
+        app.oneshot(json_request(
+            "POST",
+            "/data/import",
+            Some(body),
+            Some(&auth),
+        ))
+        .await
+        .unwrap()
+    }
+
+    #[tokio::test]
+    async fn export_includes_categories_and_their_references() {
+        let user_id = Uuid::new_v4();
+        let category = make_category(user_id, "Food");
+        let category_id = category.id;
+        let budget = Budget {
+            category_id: Some(category_id),
+            ..make_budget(user_id, "Groceries")
+        };
+        let op = Operation {
+            category_id: Some(category_id),
+            ..make_operation(user_id, "Carrefour", BudgetLink::Unlinked)
+        };
+        let mut op_repo = MockOperationRepository::new();
+        let mut budget_repo = MockBudgetRepository::new();
+        budget_repo.expect_list_all_for_user().returning(move |_| {
+            let budget = budget.clone();
+            Box::pin(async { Ok(vec![budget]) })
+        });
+        op_repo.expect_list_all_for_user().returning(move |_| {
+            let op = op.clone();
+            Box::pin(async { Ok(vec![op]) })
+        });
+        let mut user_repo = MockUserRepository::new();
+        user_repo
+            .expect_find_balance()
+            .returning(|_| Box::pin(async { Ok(None) }));
+
+        let app = build_test_router(make_test_state_with_categories(
+            user_repo,
+            op_repo,
+            budget_repo,
+            categories_listing(vec![category]),
+        ));
+        let auth = auth_header(user_id, UserRole::User);
+        let resp = app
+            .oneshot(json_request("GET", "/data/export", None, Some(&auth)))
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        let json: serde_json::Value = response_json(resp).await;
+        assert_eq!(json["categories"][0]["id"], category_id.to_string());
+        assert_eq!(json["categories"][0]["name"], "Food");
+        assert_eq!(json["categories"][0]["color"], "teal");
+        assert!(json["categories"][0].get("userId").is_none());
+        assert_eq!(json["budgets"][0]["categoryId"], category_id.to_string());
+        assert_eq!(json["operations"][0]["categoryId"], category_id.to_string());
+    }
+
+    #[tokio::test]
+    async fn import_merges_categories_by_name_and_remaps_references() {
+        let user_id = Uuid::new_v4();
+        let existing = make_category(user_id, "Food");
+        let existing_id = existing.id;
+        let created_id = Uuid::new_v4();
+
+        let mut category_repo = categories_listing(vec![existing]);
+        category_repo
+            .expect_create()
+            .withf(|_, fields| fields.name == "Fun")
+            .once()
+            .returning(move |user_id, fields| {
+                let created = Category {
+                    id: created_id,
+                    ..make_category(user_id, &fields.name)
+                };
+                Box::pin(async move { Ok(created) })
+            });
+        let mut budget_repo = MockBudgetRepository::new();
+        budget_repo
+            .expect_list_all_for_user()
+            .returning(|_| Box::pin(async { Ok(vec![]) }));
+        budget_repo
+            .expect_create()
+            .withf(move |_, fields| fields.category_id == Some(created_id))
+            .once()
+            .returning(|uid, fields| {
+                let created = created_budget(uid, fields);
+                Box::pin(async move { Ok(created) })
+            });
+        let mut op_repo = MockOperationRepository::new();
+        op_repo
+            .expect_exists_by_fields()
+            .returning(|_, _, _, _| Box::pin(async { Ok(false) }));
+        op_repo
+            .expect_insert()
+            .returning(|_, _, _, _, _, _| Box::pin(async { Ok(()) }));
+        op_repo
+            .expect_set_category()
+            .withf(move |_, _, category_id| *category_id == Some(existing_id))
+            .once()
+            .returning(|_, _, _| Box::pin(async { Ok(true) }));
+
+        let body = r#"{
+            "version": 1,
+            "categories": [
+                {"id": "11111111-1111-1111-1111-111111111111", "name": "Food", "color": "orange"},
+                {"id": "22222222-2222-2222-2222-222222222222", "name": "Fun", "color": "grape"}
+            ],
+            "budgets": [
+                {
+                    "id": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+                    "label": "Outings",
+                    "budgetType": "expense",
+                    "kind": {"type":"occasional","month":1,"year":2024,"amount":"100"},
+                    "rules": [],
+                    "categoryId": "22222222-2222-2222-2222-222222222222",
+                    "createdAt": "2024-01-01T00:00:00Z"
+                }
+            ],
+            "operations": [
+                {
+                    "id": "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+                    "amount": "-12.34",
+                    "date": "2024-03-15",
+                    "effectiveDate": null,
+                    "label": "Carrefour",
+                    "budgetLink": {"type":"unlinked"},
+                    "ignored": false,
+                    "categoryId": "11111111-1111-1111-1111-111111111111"
+                }
+            ]
+        }"#;
+        let app = build_test_router(make_test_state_with_categories(
+            MockUserRepository::new(),
+            op_repo,
+            budget_repo,
+            category_repo,
+        ));
+        let resp = post_import(app, user_id, body).await;
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        let json: ImportDataResponse = response_json(resp).await;
+        assert_eq!(json.imported_categories, 1);
+        assert_eq!(json.skipped_categories, 1);
+    }
+
+    #[tokio::test]
+    async fn import_beyond_the_category_limit_is_a_conflict_before_writing() {
+        let user_id = Uuid::new_v4();
+        let existing = (0..49)
+            .map(|i| make_category(user_id, &format!("C{i}")))
+            .collect();
+        let mut category_repo = categories_listing(existing);
+        category_repo.expect_create().never();
+        let mut op_repo = MockOperationRepository::new();
+        op_repo.expect_insert().never();
+
+        let body = r#"{
+            "version": 1,
+            "categories": [
+                {"id": "11111111-1111-1111-1111-111111111111", "name": "New 1", "color": "red"},
+                {"id": "22222222-2222-2222-2222-222222222222", "name": "New 2", "color": "red"},
+                {"id": "33333333-3333-3333-3333-333333333333", "name": "C0", "color": "red"}
+            ]
+        }"#;
+        let app = build_test_router(make_test_state_with_categories(
+            MockUserRepository::new(),
+            op_repo,
+            MockBudgetRepository::new(),
+            category_repo,
+        ));
+        let resp = post_import(app, user_id, body).await;
+
+        assert_eq!(resp.status(), StatusCode::CONFLICT);
     }
 }

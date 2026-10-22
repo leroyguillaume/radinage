@@ -3,7 +3,7 @@ use crate::{
     auth::middleware::AuthUser,
     domain::{budget::BudgetType, last_day_of_month},
     error::{AppError, AppResult},
-    repositories::{OperationRepository, SummaryCategory},
+    repositories::{CategoryTotal, OperationRepository, SummaryCategory},
 };
 use axum::{
     Json,
@@ -13,6 +13,7 @@ use chrono::NaiveDate;
 use rust_decimal::Decimal;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 // ── DTOs ─────────────────────────────────────────────────────────────────────
 
@@ -65,21 +66,77 @@ pub struct SummaryResponse {
     pub months: Vec<MonthlySummary>,
 }
 
-// ── Handler ──────────────────────────────────────────────────────────────────
+/// What one category received and spent over the range.
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct CategoryTotalResponse {
+    /// The category, `null` for the amounts without one.
+    pub category_id: Option<Uuid>,
+    /// Sum of the positive amounts.
+    #[schemars(with = "String")]
+    pub income: Decimal,
+    /// Sum of the negative amounts (zero or negative).
+    #[schemars(with = "String")]
+    pub expense: Decimal,
+}
 
-pub async fn get_summary<U, O: OperationRepository, B, P>(
-    State(state): State<AppState<U, O, B, P>>,
+impl From<CategoryTotal> for CategoryTotalResponse {
+    fn from(t: CategoryTotal) -> Self {
+        Self {
+            category_id: t.category_id,
+            income: t.income,
+            expense: t.expense,
+        }
+    }
+}
+
+/// Totals per category over a month range, most spent first.
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct CategorySummaryResponse {
+    pub categories: Vec<CategoryTotalResponse>,
+}
+
+// ── Handlers ─────────────────────────────────────────────────────────────────
+
+/// First and last day of the inclusive month range of `q`.
+fn range_bounds(q: &SummaryQuery) -> AppResult<(NaiveDate, NaiveDate)> {
+    if (q.from_year, q.from_month) > (q.to_year, q.to_month) {
+        return Err(AppError::BadRequest("from must be <= to".to_string()));
+    }
+    let invalid = |year, month| AppError::BadRequest(format!("invalid year/month: {year}-{month}"));
+    let start = NaiveDate::from_ymd_opt(q.from_year, q.from_month, 1)
+        .ok_or_else(|| invalid(q.from_year, q.from_month))?;
+    let end =
+        last_day_of_month(q.to_year, q.to_month).ok_or_else(|| invalid(q.to_year, q.to_month))?;
+    Ok((start, end))
+}
+
+pub async fn get_category_summary<U, O: OperationRepository, B, P, C>(
+    State(state): State<AppState<U, O, B, P, C>>,
+    auth_user: AuthUser,
+    Query(q): Query<SummaryQuery>,
+) -> AppResult<Json<CategorySummaryResponse>> {
+    let (start, end) = range_bounds(&q)?;
+    let totals = state
+        .operation_repo
+        .category_totals(auth_user.id, start, end)
+        .await?;
+    Ok(Json(CategorySummaryResponse {
+        categories: totals.into_iter().map(Into::into).collect(),
+    }))
+}
+
+pub async fn get_summary<U, O: OperationRepository, B, P, C>(
+    State(state): State<AppState<U, O, B, P, C>>,
     auth_user: AuthUser,
     Query(q): Query<SummaryQuery>,
 ) -> AppResult<Json<SummaryResponse>> {
     let user_id = auth_user.id;
+    range_bounds(&q)?;
 
     let from = (q.from_year, q.from_month);
     let to = (q.to_year, q.to_month);
-    if from > to {
-        return Err(AppError::BadRequest("from must be <= to".to_string()));
-    }
-
     let mut months = Vec::new();
     let (mut year, mut month) = from;
 
@@ -279,6 +336,66 @@ mod tests {
             Some(&auth),
         );
         let resp = app.oneshot(req).await.unwrap();
+
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn category_summary_covers_the_whole_month_range() {
+        let category_id = Uuid::new_v4();
+        let mut or = MockOperationRepository::new();
+        or.expect_category_totals()
+            .withf(|_, from, to| {
+                *from == NaiveDate::from_ymd_opt(2024, 11, 1).unwrap()
+                    && *to == NaiveDate::from_ymd_opt(2025, 2, 28).unwrap()
+            })
+            .once()
+            .returning(move |_, _, _| {
+                Box::pin(async move {
+                    Ok(vec![
+                        CategoryTotal {
+                            category_id: Some(category_id),
+                            income: Decimal::new(5, 0),
+                            expense: Decimal::new(-70, 0),
+                        },
+                        CategoryTotal {
+                            category_id: None,
+                            income: Decimal::ZERO,
+                            expense: Decimal::new(-7, 0),
+                        },
+                    ])
+                })
+            });
+
+        let auth = auth_header(Uuid::new_v4(), UserRole::User);
+        let req = json_request(
+            "GET",
+            "/summary/categories?fromYear=2024&fromMonth=11&toYear=2025&toMonth=2",
+            None,
+            Some(&auth),
+        );
+        let resp = summary_app(or).oneshot(req).await.unwrap();
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        let json: serde_json::Value = response_json(resp).await;
+        assert_eq!(json["categories"][0]["categoryId"], category_id.to_string());
+        assert_eq!(json["categories"][0]["expense"], "-70");
+        assert_eq!(json["categories"][1]["categoryId"], serde_json::Value::Null);
+    }
+
+    #[tokio::test]
+    async fn category_summary_rejects_a_reversed_range() {
+        let mut or = MockOperationRepository::new();
+        or.expect_category_totals().never();
+
+        let auth = auth_header(Uuid::new_v4(), UserRole::User);
+        let req = json_request(
+            "GET",
+            "/summary/categories?fromYear=2025&fromMonth=2&toYear=2024&toMonth=11",
+            None,
+            Some(&auth),
+        );
+        let resp = summary_app(or).oneshot(req).await.unwrap();
 
         assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
     }

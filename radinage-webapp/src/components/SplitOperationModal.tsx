@@ -22,6 +22,7 @@ import {
 } from "@tabler/icons-react";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
+import { CategorySelect } from "@/components/CategoryBadge";
 import {
 	centsToDecimal,
 	decimalToCents,
@@ -35,6 +36,7 @@ import { isSplit } from "@/lib/operation-parts";
 import { budgetTypeTones } from "@/lib/tones";
 import type {
 	BudgetResponse,
+	CategoryResponse,
 	OperationResponse,
 	OperationSplitRequest,
 } from "@/lib/types";
@@ -48,10 +50,15 @@ interface PartForm {
 	id: number;
 	display: string;
 	budgetId: string | null;
+	categoryId: string | null;
 }
 
-function createPart(display = "", budgetId: string | null = null): PartForm {
-	return { id: ++partIdCounter, display, budgetId };
+function createPart(
+	display = "",
+	budgetId: string | null = null,
+	categoryId: string | null = null,
+): PartForm {
+	return { id: ++partIdCounter, display, budgetId, categoryId };
 }
 
 function initialParts(op: OperationResponse, locale: string): PartForm[] {
@@ -63,12 +70,13 @@ function initialParts(op: OperationResponse, locale: string): PartForm[] {
 					locale,
 				),
 				split.budgetId,
+				split.categoryId,
 			),
 		);
 	}
 	const currentBudget =
 		op.budgetLink.type === "unlinked" ? null : op.budgetLink.budgetId;
-	return [createPart("", currentBudget), createPart()];
+	return [createPart("", currentBudget, op.categoryId), createPart()];
 }
 
 /** Budgets whose type fits the operation's sign come first, then the rest. */
@@ -93,10 +101,12 @@ function formatOperationDate(date: string, locale: string): string {
 export function SplitOperationModal({
 	operation,
 	budgets,
+	categories,
 	onClose,
 }: {
 	operation: OperationResponse | null;
 	budgets: BudgetResponse[];
+	categories: CategoryResponse[];
 	onClose: () => void;
 }) {
 	const { t } = useTranslation();
@@ -115,6 +125,7 @@ export function SplitOperationModal({
 					key={operation.id}
 					operation={operation}
 					budgets={budgets}
+					categories={categories}
 					onClose={onClose}
 				/>
 			)}
@@ -125,10 +136,12 @@ export function SplitOperationModal({
 function SplitForm({
 	operation,
 	budgets,
+	categories,
 	onClose,
 }: {
 	operation: OperationResponse;
 	budgets: BudgetResponse[];
+	categories: CategoryResponse[];
 	onClose: () => void;
 }) {
 	const { t, i18n } = useTranslation();
@@ -175,6 +188,7 @@ function SplitForm({
 		const splits: OperationSplitRequest[] = parts.map((p, i) => ({
 			amount: centsToDecimal(sign * (partCents[i] ?? 0)),
 			budgetId: p.budgetId,
+			categoryId: p.categoryId,
 		}));
 		try {
 			await splitOperation.mutateAsync({ opId: operation.id, splits });
@@ -233,6 +247,10 @@ function SplitForm({
 
 			{parts.map((part, index) => {
 				const partLabel = t("operations.split.partLabel", { n: index + 1 });
+				const budgetCategory = categories.find(
+					(c) =>
+						c.id === budgets.find((b) => b.id === part.budgetId)?.categoryId,
+				);
 				return (
 					<Paper key={part.id} radius="lg" p="md" withBorder>
 						<Stack gap="xs">
@@ -299,6 +317,27 @@ function SplitForm({
 									nothingFoundMessage={t("common.noResults")}
 									comboboxProps={{ withinPortal: true }}
 								/>
+								{categories.length > 0 && (
+									<CategorySelect
+										label={t("operations.split.category")}
+										aria-label={`${t("operations.split.category")} (${partLabel})`}
+										className="sm:col-span-2"
+										categories={categories}
+										placeholder={
+											budgetCategory
+												? t("operations.split.budgetCategory", {
+														name: budgetCategory.name,
+													})
+												: t("operations.split.noCategory")
+										}
+										value={part.categoryId}
+										onChange={(value) =>
+											updatePart(index, { categoryId: value })
+										}
+										clearable
+										nothingFoundMessage={t("common.noResults")}
+									/>
+								)}
 							</div>
 						</Stack>
 					</Paper>

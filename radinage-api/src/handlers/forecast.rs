@@ -192,8 +192,8 @@ struct ForecastData {
 }
 
 impl ForecastData {
-    async fn load<U, O: OperationRepository, B: BudgetRepository, P>(
-        state: &AppState<U, O, B, P>,
+    async fn load<U, O: OperationRepository, B: BudgetRepository, P, C>(
+        state: &AppState<U, O, B, P, C>,
         user_id: Uuid,
         (start, end): (NaiveDate, NaiveDate),
         today: NaiveDate,
@@ -245,8 +245,8 @@ fn horizon_dates(from: YearMonth, months: usize) -> Option<(NaiveDate, NaiveDate
     Some((from.first_day()?, horizon(from, months).last()?.last_day()?))
 }
 
-pub async fn get_forecast<U: UserRepository, O: OperationRepository, B: BudgetRepository, P>(
-    State(state): State<AppState<U, O, B, P>>,
+pub async fn get_forecast<U: UserRepository, O: OperationRepository, B: BudgetRepository, P, C>(
+    State(state): State<AppState<U, O, B, P, C>>,
     auth_user: AuthUser,
     Query(q): Query<ForecastQuery>,
 ) -> AppResult<Json<ForecastResponse>> {
@@ -386,8 +386,8 @@ impl From<MonthBreakdown> for ForecastMonthBreakdownResponse {
     }
 }
 
-pub async fn get_forecast_month<U, O: OperationRepository, B: BudgetRepository, P>(
-    State(state): State<AppState<U, O, B, P>>,
+pub async fn get_forecast_month<U, O: OperationRepository, B: BudgetRepository, P, C>(
+    State(state): State<AppState<U, O, B, P, C>>,
     auth_user: AuthUser,
     Path(path): Path<ForecastMonthPath>,
 ) -> AppResult<Json<ForecastMonthBreakdownResponse>> {
@@ -434,6 +434,7 @@ mod tests {
                 },
             },
             rules: vec![],
+            category_id: None,
             created_at: chrono::Utc::now(),
         }
     }

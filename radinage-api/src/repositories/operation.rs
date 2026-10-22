@@ -31,9 +31,9 @@ pub enum OperationSortField {
 impl OperationSortField {
     pub fn as_sql(&self) -> &'static str {
         match self {
-            Self::Date => "COALESCE(effective_date, date)",
-            Self::Label => "label",
-            Self::Amount => "amount",
+            Self::Date => "COALESCE(o.effective_date, o.date)",
+            Self::Label => "o.label",
+            Self::Amount => "o.amount",
         }
     }
 }
@@ -51,6 +51,28 @@ pub struct ListOperationsParams {
     pub offset: i64,
     /// When false (default), ignored operations are excluded from results.
     pub include_ignored: bool,
+    pub category: Option<CategoryFilter>,
+}
+
+/// Which category the operations listed must count towards.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CategoryFilter {
+    /// Unsplit operations whose effective category is this one, and split operations with a
+    /// part in it.
+    Category(Uuid),
+    /// Unsplit operations with no effective category, and split operations with such a part.
+    Uncategorized,
+}
+
+/// Non-ignored amounts of one effective category over a date range.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CategoryTotal {
+    /// `None` for amounts without a category.
+    pub category_id: Option<Uuid>,
+    /// Sum of the positive amounts.
+    pub income: Decimal,
+    /// Sum of the negative amounts.
+    pub expense: Decimal,
 }
 
 /// A single row returned by the monthly-summary query: an unsplit operation, or one split
@@ -146,6 +168,15 @@ pub trait OperationRepository: Send + Sync + 'static {
         link: &BudgetLink,
     ) -> impl std::future::Future<Output = AppResult<bool>> + Send;
 
+    /// Set or clear the category of an operation scoped to the given user.
+    /// Returns `true` if found, `false` if not.
+    fn set_category(
+        &self,
+        id: Uuid,
+        user_id: Uuid,
+        category_id: Option<Uuid>,
+    ) -> impl std::future::Future<Output = AppResult<bool>> + Send;
+
     /// Set an auto budget link without a user-id check (used internally by the matcher).
     /// Split operations are left untouched.
     fn set_auto_link(
@@ -177,7 +208,8 @@ pub trait OperationRepository: Send + Sync + 'static {
         label: &str,
     ) -> impl std::future::Future<Output = AppResult<bool>> + Send;
 
-    /// Atomically replace an operation's splits and reset its own budget link to unlinked.
+    /// Atomically replace an operation's splits and reset its own budget link to unlinked and
+    /// its own category to none.
     /// Returns `true` if found, `false` if not.
     fn replace_splits(
         &self,
@@ -202,6 +234,15 @@ pub trait OperationRepository: Send + Sync + 'static {
         month_start: NaiveDate,
         month_end: NaiveDate,
     ) -> impl std::future::Future<Output = AppResult<Vec<SummaryRow>>> + Send;
+
+    /// Totals per effective category of the non-ignored amounts whose accounting date falls in
+    /// `[from, to]`, a split operation counting through its parts.
+    fn category_totals(
+        &self,
+        user_id: Uuid,
+        from: NaiveDate,
+        to: NaiveDate,
+    ) -> impl std::future::Future<Output = AppResult<Vec<CategoryTotal>>> + Send;
 }
 
 /// PostgreSQL-backed operation repository.
@@ -214,6 +255,72 @@ impl PgOperationRepository {
     pub fn new(pool: PgPool) -> Self {
         Self { pool }
     }
+}
+
+/// Columns read into an [`Operation`], from `operations o`.
+const OPERATION_COLUMNS: &str = "o.id, o.user_id, o.amount, o.date, o.effective_date, o.label, \
+     o.budget_link_type, o.budget_link_id, o.ignored, o.category_id, \
+     (SELECT b.category_id FROM budgets b WHERE b.id = o.budget_link_id) AS budget_category_id";
+
+/// Effective category of an unsplit operation `o`.
+const OPERATION_CATEGORY: &str = "COALESCE(o.category_id, \
+     (SELECT b.category_id FROM budgets b WHERE b.id = o.budget_link_id))";
+
+/// Effective category of a split part `s`.
+const SPLIT_CATEGORY: &str =
+    "COALESCE(s.category_id, (SELECT b.category_id FROM budgets b WHERE b.id = s.budget_id))";
+
+/// Filters shared by the listing and its count, binding `$1` to `$6` as [`bind_list_filters`]
+/// does.
+fn list_filters_sql(params: &ListOperationsParams) -> String {
+    let ignored = if params.include_ignored {
+        ""
+    } else {
+        "AND o.ignored = FALSE"
+    };
+    let category = match params.category {
+        None => String::new(),
+        Some(filter) => {
+            let test = match filter {
+                CategoryFilter::Category(_) => "= $6",
+                CategoryFilter::Uncategorized => "IS NULL",
+            };
+            format!(
+                "AND CASE WHEN EXISTS (SELECT 1 FROM operation_splits s WHERE s.operation_id = o.id)
+                     THEN EXISTS (SELECT 1 FROM operation_splits s
+                                  WHERE s.operation_id = o.id AND {SPLIT_CATEGORY} {test})
+                     ELSE {OPERATION_CATEGORY} {test}
+                 END"
+            )
+        }
+    };
+    format!(
+        "WHERE o.user_id = $1
+           AND ($2::date IS NULL OR COALESCE(o.effective_date, o.date) >= $2)
+           AND ($3::date IS NULL OR COALESCE(o.effective_date, o.date) <= $3)
+           AND ($4::text IS NULL OR LOWER(o.label) LIKE $4)
+           AND ($5::numeric IS NULL OR o.amount = $5)
+           {ignored}
+           {category}"
+    )
+}
+
+fn bind_list_filters<'q>(
+    query: sqlx::query::Query<'q, sqlx::Postgres, sqlx::postgres::PgArguments>,
+    user_id: Uuid,
+    params: &'q ListOperationsParams,
+) -> sqlx::query::Query<'q, sqlx::Postgres, sqlx::postgres::PgArguments> {
+    let category_id = match params.category {
+        Some(CategoryFilter::Category(id)) => Some(id),
+        _ => None,
+    };
+    query
+        .bind(user_id)
+        .bind(params.date_from)
+        .bind(params.date_to)
+        .bind(params.label_filter.as_deref())
+        .bind(params.amount)
+        .bind(category_id)
 }
 
 /// Build a `BudgetLink` from the raw database columns.
@@ -242,6 +349,8 @@ fn row_to_operation(row: &sqlx::postgres::PgRow) -> AppResult<Operation> {
         label: row.try_get("label")?,
         budget_link: budget_link_from_cols(link_type, link_id),
         ignored: row.try_get("ignored").unwrap_or(false),
+        category_id: row.try_get("category_id")?,
+        budget_category_id: row.try_get("budget_category_id")?,
         splits: Vec::new(),
     })
 }
@@ -253,8 +362,10 @@ async fn attach_splits(pool: &PgPool, ops: &mut [Operation]) -> AppResult<()> {
     }
     let ids: Vec<Uuid> = ops.iter().map(|op| op.id).collect();
     let rows = sqlx::query(
-        "SELECT id, operation_id, amount, budget_id FROM operation_splits
-         WHERE operation_id = ANY($1) ORDER BY operation_id, position",
+        "SELECT s.id, s.operation_id, s.amount, s.budget_id, s.category_id,
+                (SELECT b.category_id FROM budgets b WHERE b.id = s.budget_id) AS budget_category_id
+         FROM operation_splits s
+         WHERE s.operation_id = ANY($1) ORDER BY s.operation_id, s.position",
     )
     .bind(&ids)
     .fetch_all(pool)
@@ -269,6 +380,8 @@ async fn attach_splits(pool: &PgPool, ops: &mut [Operation]) -> AppResult<()> {
                 id: row.try_get("id")?,
                 amount: row.try_get("amount")?,
                 budget_id: row.try_get("budget_id")?,
+                category_id: row.try_get("category_id")?,
+                budget_category_id: row.try_get("budget_category_id")?,
             });
     }
     for op in ops {
@@ -281,10 +394,9 @@ async fn attach_splits(pool: &PgPool, ops: &mut [Operation]) -> AppResult<()> {
 
 impl OperationRepository for PgOperationRepository {
     async fn find_by_id(&self, id: Uuid, user_id: Uuid) -> AppResult<Operation> {
-        let row = sqlx::query(
-            "SELECT id, user_id, amount, date, effective_date, label, budget_link_type, budget_link_id, ignored
-             FROM operations WHERE id = $1 AND user_id = $2",
-        )
+        let row = sqlx::query(&format!(
+            "SELECT {OPERATION_COLUMNS} FROM operations o WHERE o.id = $1 AND o.user_id = $2"
+        ))
         .bind(id)
         .bind(user_id)
         .fetch_optional(&self.pool)
@@ -302,53 +414,23 @@ impl OperationRepository for PgOperationRepository {
         user_id: Uuid,
         params: &ListOperationsParams,
     ) -> AppResult<(Vec<Operation>, i64)> {
-        let ignored_filter = if params.include_ignored {
-            ""
-        } else {
-            "AND ignored = FALSE"
-        };
+        let filters = list_filters_sql(params);
         let sql = format!(
-            r#"SELECT id, user_id, amount, date, effective_date, label, budget_link_type, budget_link_id, ignored
-               FROM operations
-               WHERE user_id = $1
-                 AND ($2::date IS NULL OR COALESCE(effective_date, date) >= $2)
-                 AND ($3::date IS NULL OR COALESCE(effective_date, date) <= $3)
-                 AND ($4::text IS NULL OR LOWER(label) LIKE $4)
-                 AND ($5::numeric IS NULL OR amount = $5)
-                 {ignored_filter}
-               ORDER BY {sort_col} {sort_dir}, id DESC
-               LIMIT $6 OFFSET $7"#,
+            "SELECT {OPERATION_COLUMNS} FROM operations o
+             {filters}
+             ORDER BY {sort_col} {sort_dir}, o.id DESC
+             LIMIT $7 OFFSET $8",
             sort_col = params.sort.as_sql(),
             sort_dir = params.order.as_sql(),
         );
-
-        let rows = sqlx::query(&sql)
-            .bind(user_id)
-            .bind(params.date_from)
-            .bind(params.date_to)
-            .bind(params.label_filter.as_deref())
-            .bind(params.amount)
+        let rows = bind_list_filters(sqlx::query(&sql), user_id, params)
             .bind(params.limit)
             .bind(params.offset)
             .fetch_all(&self.pool)
             .await?;
 
-        let count_sql = format!(
-            r#"SELECT COUNT(*) AS count
-               FROM operations
-               WHERE user_id = $1
-                 AND ($2::date IS NULL OR COALESCE(effective_date, date) >= $2)
-                 AND ($3::date IS NULL OR COALESCE(effective_date, date) <= $3)
-                 AND ($4::text IS NULL OR LOWER(label) LIKE $4)
-                 AND ($5::numeric IS NULL OR amount = $5)
-                 {ignored_filter}"#,
-        );
-        let count_row = sqlx::query(&count_sql)
-            .bind(user_id)
-            .bind(params.date_from)
-            .bind(params.date_to)
-            .bind(params.label_filter.as_deref())
-            .bind(params.amount)
+        let count_sql = format!("SELECT COUNT(*) AS count FROM operations o {filters}");
+        let count_row = bind_list_filters(sqlx::query(&count_sql), user_id, params)
             .fetch_one(&self.pool)
             .await?;
 
@@ -436,6 +518,23 @@ impl OperationRepository for PgOperationRepository {
         Ok(affected > 0)
     }
 
+    async fn set_category(
+        &self,
+        id: Uuid,
+        user_id: Uuid,
+        category_id: Option<Uuid>,
+    ) -> AppResult<bool> {
+        let affected =
+            sqlx::query("UPDATE operations SET category_id = $1 WHERE id = $2 AND user_id = $3")
+                .bind(category_id)
+                .bind(id)
+                .bind(user_id)
+                .execute(&self.pool)
+                .await?
+                .rows_affected();
+        Ok(affected > 0)
+    }
+
     async fn set_auto_link(&self, op_id: Uuid, budget_id: Uuid) -> AppResult<()> {
         sqlx::query(
             "UPDATE operations SET budget_link_type = 'auto', budget_link_id = $1
@@ -450,10 +549,9 @@ impl OperationRepository for PgOperationRepository {
     }
 
     async fn list_all_for_user(&self, user_id: Uuid) -> AppResult<Vec<Operation>> {
-        let rows = sqlx::query(
-            "SELECT id, user_id, amount, date, effective_date, label, budget_link_type, budget_link_id, ignored
-             FROM operations WHERE user_id = $1",
-        )
+        let rows = sqlx::query(&format!(
+            "SELECT {OPERATION_COLUMNS} FROM operations o WHERE o.user_id = $1"
+        ))
         .bind(user_id)
         .fetch_all(&self.pool)
         .await?;
@@ -506,7 +604,8 @@ impl OperationRepository for PgOperationRepository {
         let mut tx = self.pool.begin().await?;
         // Locking the row serialises concurrent replacements of the same operation's splits.
         let found = sqlx::query(
-            "UPDATE operations SET budget_link_type = 'unlinked', budget_link_id = NULL
+            "UPDATE operations
+             SET budget_link_type = 'unlinked', budget_link_id = NULL, category_id = NULL
              WHERE id = $1 AND user_id = $2",
         )
         .bind(id)
@@ -525,13 +624,14 @@ impl OperationRepository for PgOperationRepository {
             .await?;
         for (position, split) in (0_i32..).zip(splits) {
             sqlx::query(
-                "INSERT INTO operation_splits (operation_id, position, amount, budget_id)
-                 VALUES ($1, $2, $3, $4)",
+                "INSERT INTO operation_splits (operation_id, position, amount, budget_id, category_id)
+                 VALUES ($1, $2, $3, $4, $5)",
             )
             .bind(id)
             .bind(position)
             .bind(split.amount)
             .bind(split.budget_id)
+            .bind(split.category_id)
             .execute(&mut *tx)
             .await?;
         }
@@ -598,6 +698,53 @@ impl OperationRepository for PgOperationRepository {
                     budget_link_type: r.try_get("budget_link_type")?,
                     budget_id: r.try_get("budget_id")?,
                     budget_type: r.try_get("budget_type")?,
+                })
+            })
+            .collect::<Result<_, sqlx::Error>>()?)
+    }
+
+    async fn category_totals(
+        &self,
+        user_id: Uuid,
+        from: NaiveDate,
+        to: NaiveDate,
+    ) -> AppResult<Vec<CategoryTotal>> {
+        let rows = sqlx::query(&format!(
+            "WITH amounts AS (
+                 SELECT o.amount, {OPERATION_CATEGORY} AS category_id
+                 FROM operations o
+                 WHERE o.user_id = $1
+                   AND COALESCE(o.effective_date, o.date) BETWEEN $2 AND $3
+                   AND o.ignored = FALSE
+                   AND NOT EXISTS (SELECT 1 FROM operation_splits s WHERE s.operation_id = o.id)
+                 UNION ALL
+                 SELECT s.amount, {SPLIT_CATEGORY}
+                 FROM operation_splits s
+                 JOIN operations o ON o.id = s.operation_id
+                 WHERE o.user_id = $1
+                   AND COALESCE(o.effective_date, o.date) BETWEEN $2 AND $3
+                   AND o.ignored = FALSE
+             )
+             SELECT category_id,
+                    COALESCE(SUM(amount) FILTER (WHERE amount > 0), 0) AS income,
+                    COALESCE(SUM(amount) FILTER (WHERE amount < 0), 0) AS expense
+             FROM amounts
+             GROUP BY category_id
+             ORDER BY expense, income DESC"
+        ))
+        .bind(user_id)
+        .bind(from)
+        .bind(to)
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(rows
+            .iter()
+            .map(|r| {
+                Ok(CategoryTotal {
+                    category_id: r.try_get("category_id")?,
+                    income: r.try_get("income")?,
+                    expense: r.try_get("expense")?,
                 })
             })
             .collect::<Result<_, sqlx::Error>>()?)
@@ -817,6 +964,7 @@ mod integration_tests {
             limit: 2,
             offset: 0,
             include_ignored: false,
+            category: None,
         };
 
         let (ops, total) = repo.list(user_id, &params).await.unwrap();
@@ -878,6 +1026,7 @@ mod integration_tests {
             limit: 10,
             offset: 0,
             include_ignored: false,
+            category: None,
         };
 
         let (ops, _) = repo.list(user_id, &params).await.unwrap();
@@ -919,7 +1068,11 @@ mod integration_tests {
     }
 
     fn part(amount: Decimal, budget_id: Option<Uuid>) -> NewOperationSplit {
-        NewOperationSplit { amount, budget_id }
+        NewOperationSplit {
+            amount,
+            budget_id,
+            category_id: None,
+        }
     }
 
     fn split_amounts(op: &Operation) -> Vec<(Decimal, Option<Uuid>)> {
@@ -1038,6 +1191,7 @@ mod integration_tests {
             limit: 10,
             offset: 0,
             include_ignored: false,
+            category: None,
         };
         let (ops, _) = repo.list(user_id, &params).await.unwrap();
         assert_eq!(ops.len(), 1);
@@ -1275,5 +1429,281 @@ mod integration_tests {
 
         let op = repo.find_by_id(op_id, user_id).await.unwrap();
         assert_eq!(op.budget_link, BudgetLink::Auto { budget_id });
+    }
+
+    async fn setup_category(pool: &PgPool, user_id: Uuid, name: &str) -> Uuid {
+        sqlx::query_scalar(
+            "INSERT INTO categories (user_id, name, color) VALUES ($1, $2, 'teal') RETURNING id",
+        )
+        .bind(user_id)
+        .bind(name)
+        .fetch_one(pool)
+        .await
+        .unwrap()
+    }
+
+    async fn set_budget_category(pool: &PgPool, budget_id: Uuid, category_id: Uuid) {
+        sqlx::query("UPDATE budgets SET category_id = $1 WHERE id = $2")
+            .bind(category_id)
+            .bind(budget_id)
+            .execute(pool)
+            .await
+            .unwrap();
+    }
+
+    fn category_params(category: Option<CategoryFilter>) -> ListOperationsParams {
+        ListOperationsParams {
+            date_from: None,
+            date_to: None,
+            label_filter: None,
+            amount: None,
+            sort: OperationSortField::Amount,
+            order: SortOrder::Asc,
+            limit: 10,
+            offset: 0,
+            include_ignored: false,
+            category,
+        }
+    }
+
+    async fn listed_ids(
+        repo: &PgOperationRepository,
+        user_id: Uuid,
+        category: Option<CategoryFilter>,
+    ) -> (Vec<Uuid>, i64) {
+        let (ops, total) = repo
+            .list(user_id, &category_params(category))
+            .await
+            .unwrap();
+        (ops.into_iter().map(|op| op.id).collect(), total)
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn own_category_takes_precedence_over_the_budgets(pool: PgPool) {
+        let repo = PgOperationRepository::new(pool.clone());
+        let user_id = setup_user(&pool).await;
+        let food = setup_category(&pool, user_id, "Food").await;
+        let fun = setup_category(&pool, user_id, "Fun").await;
+        let budget_id = setup_budget(&pool, user_id, "expense").await;
+        set_budget_category(&pool, budget_id, food).await;
+        let op_id = insert_op(&repo, user_id, dec!(-10)).await;
+        repo.set_budget_link(op_id, user_id, &BudgetLink::Manual { budget_id })
+            .await
+            .unwrap();
+
+        let op = repo.find_by_id(op_id, user_id).await.unwrap();
+        assert_eq!(op.category_id, None);
+        assert_eq!(op.effective_category_id(), Some(food));
+
+        assert!(repo.set_category(op_id, user_id, Some(fun)).await.unwrap());
+        let op = repo.find_by_id(op_id, user_id).await.unwrap();
+        assert_eq!(op.category_id, Some(fun));
+        assert_eq!(op.effective_category_id(), Some(fun));
+
+        assert!(repo.set_category(op_id, user_id, None).await.unwrap());
+        let op = repo.find_by_id(op_id, user_id).await.unwrap();
+        assert_eq!(op.effective_category_id(), Some(food));
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn set_category_of_other_users_operation_returns_false(pool: PgPool) {
+        let repo = PgOperationRepository::new(pool.clone());
+        let user_id = setup_user(&pool).await;
+        let other_id = setup_user(&pool).await;
+        let category = setup_category(&pool, user_id, "Food").await;
+        let op_id = insert_op(&repo, user_id, dec!(-10)).await;
+
+        assert!(
+            !repo
+                .set_category(op_id, other_id, Some(category))
+                .await
+                .unwrap()
+        );
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn replace_splits_clears_own_category_and_stores_parts_ones(pool: PgPool) {
+        let repo = PgOperationRepository::new(pool.clone());
+        let user_id = setup_user(&pool).await;
+        let food = setup_category(&pool, user_id, "Food").await;
+        let fun = setup_category(&pool, user_id, "Fun").await;
+        let budget_id = setup_budget(&pool, user_id, "expense").await;
+        set_budget_category(&pool, budget_id, fun).await;
+        let op_id = insert_op(&repo, user_id, dec!(-100)).await;
+        repo.set_category(op_id, user_id, Some(food)).await.unwrap();
+
+        let parts = [
+            NewOperationSplit {
+                category_id: Some(food),
+                ..part(dec!(-60), None)
+            },
+            part(dec!(-40), Some(budget_id)),
+        ];
+        repo.replace_splits(op_id, user_id, &parts).await.unwrap();
+
+        let op = repo.find_by_id(op_id, user_id).await.unwrap();
+        assert_eq!(op.category_id, None);
+        let effective: Vec<_> = op
+            .splits
+            .iter()
+            .map(OperationSplit::effective_category_id)
+            .collect();
+        assert_eq!(effective, [Some(food), Some(fun)]);
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn list_filters_by_effective_category_and_split_parts(pool: PgPool) {
+        let repo = PgOperationRepository::new(pool.clone());
+        let user_id = setup_user(&pool).await;
+        let food = setup_category(&pool, user_id, "Food").await;
+        let fun = setup_category(&pool, user_id, "Fun").await;
+        let budget_id = setup_budget(&pool, user_id, "expense").await;
+        set_budget_category(&pool, budget_id, food).await;
+
+        let own = insert_op(&repo, user_id, dec!(-1)).await;
+        repo.set_category(own, user_id, Some(food)).await.unwrap();
+        let through_budget = insert_op(&repo, user_id, dec!(-2)).await;
+        repo.set_budget_link(through_budget, user_id, &BudgetLink::Manual { budget_id })
+            .await
+            .unwrap();
+        let overridden = insert_op(&repo, user_id, dec!(-3)).await;
+        repo.set_budget_link(overridden, user_id, &BudgetLink::Manual { budget_id })
+            .await
+            .unwrap();
+        repo.set_category(overridden, user_id, Some(fun))
+            .await
+            .unwrap();
+        let none = insert_op(&repo, user_id, dec!(-4)).await;
+        let split = insert_op(&repo, user_id, dec!(-100)).await;
+        let parts = [
+            NewOperationSplit {
+                category_id: Some(fun),
+                ..part(dec!(-60), None)
+            },
+            part(dec!(-40), None),
+        ];
+        repo.replace_splits(split, user_id, &parts).await.unwrap();
+
+        assert_eq!(
+            listed_ids(&repo, user_id, Some(CategoryFilter::Category(food))).await,
+            (vec![through_budget, own], 2)
+        );
+        assert_eq!(
+            listed_ids(&repo, user_id, Some(CategoryFilter::Category(fun))).await,
+            (vec![split, overridden], 2)
+        );
+        assert_eq!(
+            listed_ids(&repo, user_id, Some(CategoryFilter::Uncategorized)).await,
+            (vec![split, none], 2)
+        );
+        assert_eq!(listed_ids(&repo, user_id, None).await.1, 5);
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn deleting_a_category_uncategorizes_operations_and_parts(pool: PgPool) {
+        let repo = PgOperationRepository::new(pool.clone());
+        let user_id = setup_user(&pool).await;
+        let food = setup_category(&pool, user_id, "Food").await;
+        let op_id = insert_op(&repo, user_id, dec!(-10)).await;
+        repo.set_category(op_id, user_id, Some(food)).await.unwrap();
+        let split_id = insert_op(&repo, user_id, dec!(-100)).await;
+        let parts = [
+            NewOperationSplit {
+                category_id: Some(food),
+                ..part(dec!(-60), None)
+            },
+            part(dec!(-40), None),
+        ];
+        repo.replace_splits(split_id, user_id, &parts)
+            .await
+            .unwrap();
+
+        sqlx::query("DELETE FROM categories WHERE id = $1")
+            .bind(food)
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            repo.find_by_id(op_id, user_id).await.unwrap().category_id,
+            None
+        );
+        let split = repo.find_by_id(split_id, user_id).await.unwrap();
+        assert!(split.splits.iter().all(|s| s.category_id.is_none()));
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn category_totals_sum_income_and_expense_per_effective_category(pool: PgPool) {
+        let repo = PgOperationRepository::new(pool.clone());
+        let user_id = setup_user(&pool).await;
+        let food = setup_category(&pool, user_id, "Food").await;
+        let fun = setup_category(&pool, user_id, "Fun").await;
+        let budget_id = setup_budget(&pool, user_id, "expense").await;
+        set_budget_category(&pool, budget_id, food).await;
+
+        let spent = insert_op(&repo, user_id, dec!(-30)).await;
+        repo.set_category(spent, user_id, Some(food)).await.unwrap();
+        let refund = insert_op(&repo, user_id, dec!(5)).await;
+        repo.set_budget_link(refund, user_id, &BudgetLink::Manual { budget_id })
+            .await
+            .unwrap();
+        let ignored = insert_op(&repo, user_id, dec!(-1000)).await;
+        repo.set_category(ignored, user_id, Some(food))
+            .await
+            .unwrap();
+        repo.set_ignored(ignored, user_id, true).await.unwrap();
+        insert_op(&repo, user_id, dec!(-7)).await;
+        let split = insert_op(&repo, user_id, dec!(-100)).await;
+        let parts = [
+            NewOperationSplit {
+                category_id: Some(fun),
+                ..part(dec!(-60), None)
+            },
+            part(dec!(-40), Some(budget_id)),
+        ];
+        repo.replace_splits(split, user_id, &parts).await.unwrap();
+        repo.insert(
+            Uuid::new_v4(),
+            user_id,
+            dec!(-500),
+            NaiveDate::from_ymd_opt(2024, 4, 1).unwrap(),
+            None,
+            "Next month",
+        )
+        .await
+        .unwrap();
+
+        let march = (
+            NaiveDate::from_ymd_opt(2024, 3, 1).unwrap(),
+            NaiveDate::from_ymd_opt(2024, 3, 31).unwrap(),
+        );
+        let totals = repo
+            .category_totals(user_id, march.0, march.1)
+            .await
+            .unwrap();
+
+        let total = |category_id| CategoryTotal {
+            category_id,
+            income: Decimal::ZERO,
+            expense: Decimal::ZERO,
+        };
+        assert_eq!(
+            totals,
+            [
+                CategoryTotal {
+                    income: dec!(5),
+                    expense: dec!(-70),
+                    ..total(Some(food))
+                },
+                CategoryTotal {
+                    expense: dec!(-60),
+                    ..total(Some(fun))
+                },
+                CategoryTotal {
+                    expense: dec!(-7),
+                    ..total(None)
+                },
+            ]
+        );
     }
 }

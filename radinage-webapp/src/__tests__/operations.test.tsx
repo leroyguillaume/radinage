@@ -13,8 +13,13 @@ import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { i18n } from "@/i18n";
-import type { ForecastResponse, MonthlyOperationsResponse } from "@/lib/types";
+import type {
+	CategoryResponse,
+	ForecastResponse,
+	MonthlyOperationsResponse,
+} from "@/lib/types";
 import { theme } from "@/theme";
+import { selectMantineOption } from "./mantine";
 
 vi.mock("@/lib/api", () => ({
 	ApiError: class ApiError extends Error {
@@ -41,6 +46,8 @@ const mockMonthlyResponse: MonthlyOperationsResponse = {
 			label: "Groceries",
 			budgetLink: { type: "manual", budgetId: "b1" },
 			ignored: false,
+			categoryId: null,
+			effectiveCategoryId: null,
 			splits: [],
 		},
 		{
@@ -51,6 +58,8 @@ const mockMonthlyResponse: MonthlyOperationsResponse = {
 			label: "Restaurant",
 			budgetLink: { type: "manual", budgetId: "b1" },
 			ignored: false,
+			categoryId: null,
+			effectiveCategoryId: null,
 			splits: [],
 		},
 		{
@@ -61,6 +70,8 @@ const mockMonthlyResponse: MonthlyOperationsResponse = {
 			label: "Electricity",
 			budgetLink: { type: "unlinked" },
 			ignored: false,
+			categoryId: null,
+			effectiveCategoryId: null,
 			splits: [],
 		},
 		{
@@ -71,6 +82,8 @@ const mockMonthlyResponse: MonthlyOperationsResponse = {
 			label: "Salary",
 			budgetLink: { type: "auto", budgetId: "b2" },
 			ignored: false,
+			categoryId: null,
+			effectiveCategoryId: null,
 			splits: [],
 		},
 	],
@@ -92,6 +105,7 @@ const mockBudgetsResponse = [
 			},
 		},
 		rules: [],
+		categoryId: null,
 		createdAt: "2026-01-01T00:00:00Z",
 	},
 	{
@@ -109,6 +123,7 @@ const mockBudgetsResponse = [
 			},
 		},
 		rules: [],
+		categoryId: null,
 		createdAt: "2026-01-01T00:00:00Z",
 	},
 ];
@@ -152,10 +167,12 @@ function setupMocks(
 	overrides?: Partial<{
 		budgets: typeof mockBudgetsResponse;
 		operations: typeof mockMonthlyResponse;
+		categories: CategoryResponse[];
 	}>,
 ) {
 	const budgets = overrides?.budgets ?? mockBudgetsResponse;
 	const operations = overrides?.operations ?? mockMonthlyResponse;
+	const categories = overrides?.categories ?? [];
 
 	apiCalls = [];
 	apiFetchMock.mockImplementation((path: string, options?: unknown) => {
@@ -185,6 +202,8 @@ function setupMocks(
 				label: "Op",
 				budgetLink: { type: "unlinked" },
 				ignored: false,
+				categoryId: null,
+				effectiveCategoryId: null,
 				splits: [],
 			});
 		}
@@ -206,6 +225,12 @@ function setupMocks(
 		}
 		if (path.startsWith("/budgets")) {
 			return Promise.resolve(budgets);
+		}
+		if (path === "/categories") {
+			return Promise.resolve(categories);
+		}
+		if (/^\/operations\/[^/]+\/category$/.test(path)) {
+			return Promise.resolve(operations.operations[0]);
 		}
 		return Promise.reject(new Error(`Unexpected path: ${path}`));
 	});
@@ -548,6 +573,7 @@ describe("MonthlyOperationsPage", () => {
 					},
 				},
 				rules: [],
+				categoryId: null,
 				createdAt: "2026-01-01T00:00:00Z",
 			},
 		];
@@ -584,6 +610,7 @@ describe("MonthlyOperationsPage", () => {
 					},
 				},
 				rules: [],
+				categoryId: null,
 				createdAt: "2026-01-01T00:00:00Z",
 			},
 			{
@@ -601,6 +628,7 @@ describe("MonthlyOperationsPage", () => {
 					},
 				},
 				rules: [],
+				categoryId: null,
 				createdAt: "2026-01-01T00:00:00Z",
 			},
 			{
@@ -618,6 +646,7 @@ describe("MonthlyOperationsPage", () => {
 					},
 				},
 				rules: [],
+				categoryId: null,
 				createdAt: "2026-01-01T00:00:00Z",
 			},
 			{
@@ -635,6 +664,7 @@ describe("MonthlyOperationsPage", () => {
 					},
 				},
 				rules: [],
+				categoryId: null,
 				createdAt: "2026-01-01T00:00:00Z",
 			},
 		];
@@ -649,6 +679,8 @@ describe("MonthlyOperationsPage", () => {
 					label: "Groceries",
 					budgetLink: { type: "manual", budgetId: "b1" },
 					ignored: false,
+					categoryId: null,
+					effectiveCategoryId: null,
 					splits: [],
 				},
 				{
@@ -659,6 +691,8 @@ describe("MonthlyOperationsPage", () => {
 					label: "Bus ticket",
 					budgetLink: { type: "manual", budgetId: "b4" },
 					ignored: false,
+					categoryId: null,
+					effectiveCategoryId: null,
 					splits: [],
 				},
 				{
@@ -669,6 +703,8 @@ describe("MonthlyOperationsPage", () => {
 					label: "Salary",
 					budgetLink: { type: "auto", budgetId: "b2" },
 					ignored: false,
+					categoryId: null,
+					effectiveCategoryId: null,
 					splits: [],
 				},
 				{
@@ -679,6 +715,8 @@ describe("MonthlyOperationsPage", () => {
 					label: "Freelance gig",
 					budgetLink: { type: "auto", budgetId: "b5" },
 					ignored: false,
+					categoryId: null,
+					effectiveCategoryId: null,
 					splits: [],
 				},
 			],
@@ -742,6 +780,7 @@ describe("MonthlyOperationsPage", () => {
 				currentPeriod: { start: { year: 2026, month: 1 }, end: null, amount },
 			},
 			rules: [],
+			categoryId: null,
 			createdAt: "2026-01-01T00:00:00Z",
 		}));
 		const sortOperations: MonthlyOperationsResponse = {
@@ -754,6 +793,8 @@ describe("MonthlyOperationsPage", () => {
 					label: "Groceries",
 					budgetLink: { type: "manual", budgetId: "b1" },
 					ignored: false,
+					categoryId: null,
+					effectiveCategoryId: null,
 					splits: [],
 				},
 				{
@@ -764,6 +805,8 @@ describe("MonthlyOperationsPage", () => {
 					label: "Bus ticket",
 					budgetLink: { type: "manual", budgetId: "b4" },
 					ignored: false,
+					categoryId: null,
+					effectiveCategoryId: null,
 					splits: [],
 				},
 			],
@@ -803,6 +846,8 @@ describe("MonthlyOperationsPage", () => {
 					label: "Groceries",
 					budgetLink: { type: "manual" as const, budgetId: "b1" },
 					ignored: false,
+					categoryId: null,
+					effectiveCategoryId: null,
 					splits: [],
 				},
 				{
@@ -813,6 +858,8 @@ describe("MonthlyOperationsPage", () => {
 					label: "Restaurant",
 					budgetLink: { type: "manual" as const, budgetId: "b1" },
 					ignored: false,
+					categoryId: null,
+					effectiveCategoryId: null,
 					splits: [],
 				},
 			],
@@ -847,6 +894,8 @@ describe("MonthlyOperationsPage", () => {
 					label: "Salary",
 					budgetLink: { type: "unlinked" },
 					ignored: false,
+					categoryId: null,
+					effectiveCategoryId: null,
 					splits: [],
 				},
 				{
@@ -857,6 +906,8 @@ describe("MonthlyOperationsPage", () => {
 					label: "Groceries",
 					budgetLink: { type: "unlinked" },
 					ignored: false,
+					categoryId: null,
+					effectiveCategoryId: null,
 					splits: [],
 				},
 				{
@@ -867,6 +918,8 @@ describe("MonthlyOperationsPage", () => {
 					label: "Taxi",
 					budgetLink: { type: "unlinked" },
 					ignored: false,
+					categoryId: null,
+					effectiveCategoryId: null,
 					splits: [],
 				},
 			],
@@ -910,6 +963,7 @@ describe("MonthlyOperationsPage", () => {
 					},
 				},
 				rules: [],
+				categoryId: null,
 				createdAt: "2026-01-01T00:00:00Z",
 			},
 		];
@@ -957,6 +1011,8 @@ describe("MonthlyOperationsPage", () => {
 					label: "Groceries",
 					budgetLink: { type: "manual", budgetId: "b1" },
 					ignored: false,
+					categoryId: null,
+					effectiveCategoryId: null,
 					splits: [],
 				},
 			],
@@ -981,6 +1037,8 @@ describe("MonthlyOperationsPage", () => {
 					label: "Salary",
 					budgetLink: { type: "auto", budgetId: "b2" },
 					ignored: false,
+					categoryId: null,
+					effectiveCategoryId: null,
 					splits: [],
 				},
 			],
@@ -1004,6 +1062,8 @@ describe("MonthlyOperationsPage", () => {
 					label: "Groceries",
 					budgetLink: { type: "manual", budgetId: "b1" },
 					ignored: false,
+					categoryId: null,
+					effectiveCategoryId: null,
 					splits: [],
 				},
 				{
@@ -1014,9 +1074,23 @@ describe("MonthlyOperationsPage", () => {
 					label: "CASH WITHDRAWAL",
 					budgetLink: { type: "unlinked" },
 					ignored: false,
+					categoryId: null,
+					effectiveCategoryId: null,
 					splits: [
-						{ id: "s1", amount: "-30.00", budgetId: "b1" },
-						{ id: "s2", amount: "-70.00", budgetId: null },
+						{
+							id: "s1",
+							amount: "-30.00",
+							budgetId: "b1",
+							categoryId: null,
+							effectiveCategoryId: null,
+						},
+						{
+							id: "s2",
+							amount: "-70.00",
+							budgetId: null,
+							categoryId: null,
+							effectiveCategoryId: null,
+						},
 					],
 				},
 				{
@@ -1027,6 +1101,8 @@ describe("MonthlyOperationsPage", () => {
 					label: "Taxi",
 					budgetLink: { type: "unlinked" },
 					ignored: false,
+					categoryId: null,
+					effectiveCategoryId: null,
 					splits: [],
 				},
 			],
@@ -1121,6 +1197,8 @@ describe("MonthlyOperationsPage", () => {
 					label: "Internal transfer",
 					budgetLink: { type: "unlinked" },
 					ignored: true,
+					categoryId: null,
+					effectiveCategoryId: null,
 					splits: [],
 				},
 			],
@@ -1199,6 +1277,74 @@ describe("MonthlyOperationsPage", () => {
 					),
 				).toBeDefined();
 			});
+		});
+	});
+
+	describe("categories", () => {
+		const categories: CategoryResponse[] = [
+			{
+				id: "c1",
+				name: "Courses",
+				color: "teal",
+				createdAt: "2026-01-01T00:00:00Z",
+			},
+		];
+		// op1 takes Courses from its budget; op3 is daily and uncategorized.
+		const operations: MonthlyOperationsResponse = {
+			operations: mockMonthlyResponse.operations.map((op) =>
+				op.id === "op1" ? { ...op, effectiveCategoryId: "c1" } : op,
+			),
+		};
+
+		it("puts an operation in a category", async () => {
+			setupMocks({ operations, categories });
+			await renderOperationsPage();
+			const user = userEvent.setup();
+
+			await user.click(
+				await screen.findByRole("button", { name: "Changer la catégorie" }),
+			);
+			await user.click(
+				await screen.findByRole("menuitem", { name: "Courses" }),
+			);
+
+			await waitFor(() => {
+				expect(
+					apiCalls.find(
+						(c) =>
+							c.path === "/operations/op3/category" &&
+							c.options?.method === "PUT",
+					)?.options?.body,
+				).toBe(JSON.stringify({ categoryId: "c1" }));
+			});
+		});
+
+		it("shows only the operations of the category picked", async () => {
+			setupMocks({ operations, categories });
+			await renderOperationsPage();
+			expect(await screen.findByText("Opérations quotidiennes")).toBeVisible();
+
+			await selectMantineOption("Filtrer par catégorie", "Courses");
+			expect(screen.getByText("Food")).toBeInTheDocument();
+			expect(screen.queryByText("Income")).not.toBeInTheDocument();
+			expect(
+				screen.queryByText("Opérations quotidiennes"),
+			).not.toBeInTheDocument();
+
+			// Restaurant keeps Food on screen: only Groceries is in Courses.
+			await selectMantineOption("Filtrer par catégorie", "Sans catégorie");
+			expect(screen.getByText("Opérations quotidiennes")).toBeInTheDocument();
+			expect(screen.getByText("Income")).toBeInTheDocument();
+			expect(screen.getByText("Food")).toBeInTheDocument();
+		});
+
+		it("hides the filter while there are no categories", async () => {
+			await renderOperationsPage();
+
+			expect(await screen.findByText("Food")).toBeInTheDocument();
+			expect(
+				screen.queryByRole("combobox", { name: "Filtrer par catégorie" }),
+			).not.toBeInTheDocument();
 		});
 	});
 });

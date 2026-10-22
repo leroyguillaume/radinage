@@ -17,6 +17,10 @@ pub struct Operation {
     pub label: String,
     pub budget_link: BudgetLink,
     pub ignored: bool,
+    /// Category the user put the operation in, if any.
+    pub category_id: Option<Uuid>,
+    /// Category of the budget the operation is linked to, its default category.
+    pub budget_category_id: Option<Uuid>,
     /// Parts the operation is split into, ordered by position; empty when not split.
     pub splits: Vec<OperationSplit>,
 }
@@ -31,6 +35,11 @@ impl Operation {
     pub fn is_split(&self) -> bool {
         !self.splits.is_empty()
     }
+
+    /// The operation's own category, else its budget's; a split operation has none of its own.
+    pub fn effective_category_id(&self) -> Option<Uuid> {
+        self.category_id.or(self.budget_category_id)
+    }
 }
 
 /// One part of a split operation, sharing the operation's dates and ignored flag.
@@ -40,6 +49,17 @@ pub struct OperationSplit {
     pub id: Uuid,
     pub amount: Decimal,
     pub budget_id: Option<Uuid>,
+    /// Category the user put the part in, if any.
+    pub category_id: Option<Uuid>,
+    /// Category of the part's budget, its default category.
+    pub budget_category_id: Option<Uuid>,
+}
+
+impl OperationSplit {
+    /// The part's own category, else its budget's.
+    pub fn effective_category_id(&self) -> Option<Uuid> {
+        self.category_id.or(self.budget_category_id)
+    }
 }
 
 /// A part to store when (re)splitting an operation.
@@ -47,6 +67,7 @@ pub struct OperationSplit {
 pub struct NewOperationSplit {
     pub amount: Decimal,
     pub budget_id: Option<Uuid>,
+    pub category_id: Option<Uuid>,
 }
 
 /// Highest number of decimal places the `NUMERIC(15, 4)` amount column stores exactly.
@@ -132,6 +153,7 @@ mod tests {
             .map(|&amount| NewOperationSplit {
                 amount,
                 budget_id: None,
+                category_id: None,
             })
             .collect()
     }
@@ -226,6 +248,8 @@ mod tests {
             label: "Op".to_string(),
             budget_link: BudgetLink::Unlinked,
             ignored: false,
+            category_id: None,
+            budget_category_id: None,
             splits: vec![],
         };
         assert!(!op.is_split());
@@ -233,8 +257,33 @@ mod tests {
             id: Uuid::nil(),
             amount: dec!(-10),
             budget_id: None,
+            category_id: None,
+            budget_category_id: None,
         });
         assert!(op.is_split());
+    }
+
+    #[test]
+    fn effective_category_prefers_own_over_budgets() {
+        let own = Uuid::new_v4();
+        let budgets = Uuid::new_v4();
+        let split = |category_id, budget_category_id| OperationSplit {
+            id: Uuid::nil(),
+            amount: dec!(-10),
+            budget_id: None,
+            category_id,
+            budget_category_id,
+        };
+
+        assert_eq!(
+            split(Some(own), Some(budgets)).effective_category_id(),
+            Some(own)
+        );
+        assert_eq!(
+            split(None, Some(budgets)).effective_category_id(),
+            Some(budgets)
+        );
+        assert_eq!(split(None, None).effective_category_id(), None);
     }
 
     #[test]

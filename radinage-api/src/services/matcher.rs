@@ -113,6 +113,7 @@ mod tests {
             budget_type: BudgetType::Expense,
             kind,
             rules,
+            category_id: None,
             created_at: chrono::Utc::now(),
         }
     }
@@ -127,6 +128,8 @@ mod tests {
             effective_date: None,
             budget_link: crate::domain::operation::BudgetLink::Unlinked,
             ignored: false,
+            category_id: None,
+            budget_category_id: None,
             splits: vec![],
         }
     }

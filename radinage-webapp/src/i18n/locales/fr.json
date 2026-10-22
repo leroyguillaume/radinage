@@ -84,7 +84,20 @@
 			"unsplit": "Annuler la division",
 			"invalidAmount": "Montant invalide",
 			"saveError": "Impossible d'enregistrer la division",
-			"unsplitError": "Impossible d'annuler la division"
+			"unsplitError": "Impossible d'annuler la division",
+			"category": "Catégorie",
+			"budgetCategory": "Catégorie du budget : {{name}}",
+			"noCategory": "Aucune catégorie"
+		},
+		"category": {
+			"set": "Catégorie",
+			"change": "Changer la catégorie",
+			"fromBudget": "Catégorie par défaut du budget",
+			"clear": "Retirer la catégorie",
+			"filter": "Filtrer par catégorie",
+			"all": "Toutes les catégories",
+			"none": "Sans catégorie",
+			"noneYet": "Crée des catégories dans les paramètres pour classer tes opérations."
 		}
 	},
 	"import": {
@@ -172,7 +185,10 @@
 			"patternType": "Critère",
 			"patternValue": "Valeur",
 			"matchAmount": "Vérifier le montant",
-			"matchAmountTooltip": "Le montant doit correspondre"
+			"matchAmountTooltip": "Le montant doit correspondre",
+			"category": "Catégorie par défaut",
+			"categoryHint": "Donnée aux opérations liées à ce budget qui n'ont pas de catégorie.",
+			"noCategory": "Aucune catégorie"
 		},
 		"addRule": "Ajouter une règle",
 		"addPeriod": "Ajouter une période",
@@ -218,7 +234,11 @@
 		"fetchError": "Impossible de charger les statistiques",
 		"monthlyEvolution": "Revenus, dépenses et épargne",
 		"balanceEvolution": "Évolution de la balance",
-		"cumulative": "Cumul sur la période"
+		"cumulative": "Cumul sur la période",
+		"byCategory": "Dépenses par catégorie",
+		"byCategoryHint": "Une opération divisée compte pour chacune de ses parts.",
+		"uncategorized": "Sans catégorie",
+		"noCategoryExpenses": "Aucune dépense sur la période."
 	},
 	"forecast": {
 		"title": "Résumé",
@@ -363,8 +383,25 @@
 			"exportError": "Erreur lors de l'export",
 			"import": "Importer des données",
 			"importError": "Fichier invalide ou import refusé",
-			"importSuccess": "{{budgets}} budget(s) importé(s) ({{skippedBudgets}} ignoré(s)), {{operations}} opération(s) importée(s) ({{skippedOperations}} ignorée(s))",
+			"importSuccess": "{{categories}} catégorie(s) importée(s) ({{skippedCategories}} déjà présente(s)), {{budgets}} budget(s) importé(s) ({{skippedBudgets}} ignoré(s)), {{operations}} opération(s) importée(s) ({{skippedOperations}} ignorée(s))",
 			"importedBalance": "Solde du compte importé."
+		},
+		"categories": {
+			"title": "Catégories",
+			"description": "Classe tes opérations par catégorie, indépendamment des budgets. Une opération liée à un budget prend la catégorie par défaut du budget, sauf si tu lui en donnes une autre.",
+			"empty": "Aucune catégorie pour l'instant.",
+			"add": "Ajouter une catégorie",
+			"name": "Nom",
+			"color": "Couleur",
+			"colorOption": "Couleur {{color}}",
+			"save": "Enregistrer",
+			"edit": "Modifier {{name}}",
+			"delete": "Supprimer {{name}}",
+			"confirmDelete": "Supprimer « {{name}} » ? Les opérations et budgets qui l'utilisent n'auront plus de catégorie.",
+			"errorName": "Le nom doit faire entre 1 et 50 caractères",
+			"errorNameTaken": "Une catégorie porte déjà ce nom",
+			"errorLimit": "Nombre maximum de catégories atteint",
+			"fetchError": "Impossible de charger les catégories"
 		}
 	},
 	"activate": {
