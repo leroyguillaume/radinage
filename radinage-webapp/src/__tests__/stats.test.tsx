@@ -9,7 +9,7 @@ import {
 	Outlet,
 	RouterProvider,
 } from "@tanstack/react-router";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { i18n } from "@/i18n";
 import type { CategoryResponse, CategorySummaryResponse } from "@/lib/types";
@@ -31,6 +31,13 @@ vi.mock("@/lib/api", () => ({
 vi.mock("@mantine/charts", () => ({
 	BarChart: () => <div data-testid="bar-chart" />,
 	AreaChart: () => <div data-testid="area-chart" />,
+	PieChart: ({ data }: { data: { name: string; value: number }[] }) => (
+		<ul data-testid="pie-chart">
+			{data.map((cell) => (
+				<li key={cell.name}>{`${cell.name}=${cell.value}`}</li>
+			))}
+		</ul>
+	),
 }));
 
 const { apiFetch } = await import("@/lib/api");
@@ -319,6 +326,42 @@ describe("StatsPage", () => {
 			expect.stringMatching(/^Sans catégorie : 100,00/),
 		]);
 		expect(screen.getByText(/· 75 %/)).toBeInTheDocument();
+		expect(
+			within(screen.getByTestId("pie-chart"))
+				.getAllByRole("listitem")
+				.map((cell) => cell.textContent),
+		).toEqual(["Courses=300", "Sans catégorie=100"]);
+	});
+
+	it("folds the smallest categories into one pie slice", async () => {
+		const categories = Array.from({ length: 7 }, (_, i) => ({
+			id: `c${i}`,
+			name: `Cat ${i}`,
+			color: "teal" as const,
+			createdAt: "2026-01-01T00:00:00Z",
+		}));
+		setupMocks(mockSummaryResponse, categories, {
+			categories: categories.map((c, i) => ({
+				categoryId: c.id,
+				income: "0",
+				expense: `-${(7 - i) * 10}.00`,
+			})),
+		});
+		await renderStatsPage();
+
+		const pie = within(await screen.findByTestId("pie-chart"));
+		expect(
+			pie.getAllByRole("listitem").map((cell) => cell.textContent),
+		).toEqual([
+			"Cat 0=70",
+			"Cat 1=60",
+			"Cat 2=50",
+			"Cat 3=40",
+			"Cat 4=30",
+			"Autres (2 catégories)=30",
+		]);
+		// The list below the pie still details every category.
+		expect(screen.getAllByRole("progressbar")).toHaveLength(7);
 	});
 
 	it("leaves the category breakdown out without categories", async () => {

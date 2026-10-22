@@ -238,6 +238,7 @@
 		"byCategory": "Expenses by category",
 		"byCategoryHint": "A split operation counts for each of its parts.",
 		"uncategorized": "Uncategorized",
+		"otherCategories": "Others ({{count}} categories)",
 		"noCategoryExpenses": "No expenses over the period."
 	},
 	"forecast": {
