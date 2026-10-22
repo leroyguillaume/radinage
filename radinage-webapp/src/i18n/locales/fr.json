@@ -397,6 +397,7 @@
 			"name": "Nom",
 			"color": "Couleur",
 			"colorOption": "Couleur {{color}}",
+			"colorOptionTaken": "Couleur {{color}}, déjà prise par {{names}}",
 			"save": "Enregistrer",
 			"edit": "Modifier {{name}}",
 			"delete": "Supprimer {{name}}",
