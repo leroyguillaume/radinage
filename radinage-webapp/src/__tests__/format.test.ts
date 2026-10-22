@@ -3,6 +3,7 @@ import {
 	centsToDecimal,
 	decimalToCents,
 	formatAmount,
+	formatCompactAmount,
 	formatSignedAmount,
 	parseCents,
 	parseSignedCents,
@@ -19,6 +20,19 @@ describe("formatAmount", () => {
 
 	it("accepts the API's string amounts", () => {
 		expect(plain(formatAmount("-42.1"))).toBe("-42,10 €");
+	});
+});
+
+describe("formatCompactAmount", () => {
+	it("abbreviates thousands and millions", () => {
+		expect(plain(formatCompactAmount(26000))).toBe("26 k €");
+		expect(plain(formatCompactAmount(-6500))).toBe("-6,5 k €");
+		expect(plain(formatCompactAmount(1_234_567))).toBe("1,2 M €");
+	});
+
+	it("keeps small amounts without decimals", () => {
+		expect(plain(formatCompactAmount(650))).toBe("650 €");
+		expect(plain(formatCompactAmount(0))).toBe("0 €");
 	});
 });
 

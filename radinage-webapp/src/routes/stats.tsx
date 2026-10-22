@@ -23,7 +23,7 @@ import {
 	categoryExpenseRows,
 	categoryExpenseSlices,
 } from "@/lib/category-expenses";
-import { formatAmount } from "@/lib/format";
+import { formatAmount, formatCompactAmount } from "@/lib/format";
 import { useCategories, useCategorySummary, useSummary } from "@/lib/hooks";
 import { balanceTextColor, budgetTypeTones, categoryFill } from "@/lib/tones";
 import type { CategoryResponse, CategoryTotal } from "@/lib/types";
@@ -313,6 +313,7 @@ function StatsPage() {
 		textAnchor: manyMonths ? ("end" as const) : ("middle" as const),
 		height: manyMonths ? 60 : 30,
 	};
+	const yAxisProps = { tickFormatter: formatCompactAmount };
 
 	const navigateTo = (
 		range: Partial<StatsSearch>,
@@ -421,6 +422,7 @@ function StatsPage() {
 											gridAxis="y"
 											gridProps={{ horizontal: true, vertical: false }}
 											xAxisProps={xAxisProps}
+											yAxisProps={yAxisProps}
 											withLegend
 											legendProps={{ verticalAlign: "top", height: 40 }}
 											valueFormatter={(v) => formatAmount(v)}
@@ -460,6 +462,7 @@ function StatsPage() {
 											gridAxis="y"
 											gridProps={{ horizontal: true, vertical: false }}
 											xAxisProps={xAxisProps}
+											yAxisProps={yAxisProps}
 											withDots={false}
 											fillOpacity={0.18}
 											referenceLines={[
