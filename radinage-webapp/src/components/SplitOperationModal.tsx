@@ -22,6 +22,7 @@ import {
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { CategorySelect } from "@/components/CategoryBadge";
+import { budgetFitsAmount } from "@/lib/budget-utils";
 import {
 	centsToDecimal,
 	decimalToCents,
@@ -83,9 +84,8 @@ function initialParts(op: OperationResponse, locale: string): PartForm[] {
 }
 
 /** Budgets whose type fits the operation's sign come first, then the rest. */
-function budgetOptions(budgets: BudgetResponse[], isIncome: boolean) {
-	const fits = (b: BudgetResponse) =>
-		isIncome ? b.budgetType === "income" : b.budgetType !== "income";
+function budgetOptions(budgets: BudgetResponse[], sign: number) {
+	const fits = (b: BudgetResponse) => budgetFitsAmount(b, sign);
 	return [...budgets]
 		.sort(
 			(a, b) =>
@@ -171,7 +171,7 @@ function SplitForm({
 	const lastCents = partCents[lastIndex] ?? 0;
 	const canFillRemainder = remainder !== 0 && lastCents + remainder > 0;
 
-	const options = budgetOptions(budgets, sign > 0);
+	const options = budgetOptions(budgets, sign);
 	const tone = balanced ? budgetTypeTones.income : budgetTypeTones.expense;
 
 	function updatePart(index: number, patch: Partial<PartForm>) {

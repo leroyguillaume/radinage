@@ -98,6 +98,20 @@
 			"all": "All categories",
 			"none": "Uncategorized",
 			"noneYet": "Create categories in the settings to sort your operations."
+		},
+		"sheet": {
+			"category": "Category",
+			"categoryPlaceholder": "Pick one",
+			"budget": "Budget",
+			"unlinked": "Not linked",
+			"autoLinked": "Linked automatically by a budget rule",
+			"countOn": "Count on",
+			"bankDate": "{{date}} (bank date)",
+			"bankDateBadge": "bank date {{date}}",
+			"openMonth": "See {{month}} in operations",
+			"parts": "Parts",
+			"unclassified": "To sort",
+			"ignored": "Ignored: left out of totals, budgets and forecasts"
 		}
 	},
 	"import": {
@@ -564,7 +578,6 @@
 		},
 		"showMore": "Show more",
 		"loadedOf": "{{loaded}} of {{total}}",
-		"openMonth": "Open {{month}} in operations",
 		"empty": {
 			"title": "No matching operations",
 			"hint": "Try a shorter label or fewer filters."

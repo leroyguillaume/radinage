@@ -98,6 +98,20 @@
 			"all": "Toutes les catégories",
 			"none": "Sans catégorie",
 			"noneYet": "Crée des catégories dans les paramètres pour classer tes opérations."
+		},
+		"sheet": {
+			"category": "Catégorie",
+			"categoryPlaceholder": "À choisir",
+			"budget": "Budget",
+			"unlinked": "Non lié",
+			"autoLinked": "Lié automatiquement par une règle du budget",
+			"countOn": "Compter le",
+			"bankDate": "{{date}} (date bancaire)",
+			"bankDateBadge": "date bancaire {{date}}",
+			"openMonth": "Voir {{month}} dans les opérations",
+			"parts": "Parts",
+			"unclassified": "À classer",
+			"ignored": "Ignorée : exclue des totaux, des budgets et des prévisions"
 		}
 	},
 	"import": {
@@ -564,7 +578,6 @@
 		},
 		"showMore": "Afficher plus",
 		"loadedOf": "{{loaded}} sur {{total}}",
-		"openMonth": "Ouvrir {{month}} dans les opérations",
 		"empty": {
 			"title": "Aucune opération ne correspond",
 			"hint": "Essaie un libellé plus court ou moins de filtres."

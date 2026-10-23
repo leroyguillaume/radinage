@@ -167,49 +167,61 @@ export function useUpdateBudget() {
 	});
 }
 
-export function useApplyBudget() {
+/** Everything computed from operations, to refetch once one of them changes. */
+const operationDataKeys = [
+	["monthly-operations"],
+	["operation-search"],
+	["summary"],
+	["category-summary"],
+	["forecast"],
+];
+
+function useInvalidateOperationData() {
 	const queryClient = useQueryClient();
+	return () => {
+		for (const queryKey of operationDataKeys) {
+			queryClient.invalidateQueries({ queryKey });
+		}
+	};
+}
+
+export function useApplyBudget() {
+	const invalidate = useInvalidateOperationData();
 	return useMutation({
 		mutationFn: ({ id, force }: { id: string; force: boolean }) =>
 			apiFetch<ApplyBudgetResponse>(`/budgets/${id}/apply`, {
 				method: "POST",
 				body: JSON.stringify({ force }),
 			}),
-		onSuccess: () => {
-			queryClient.invalidateQueries({ queryKey: ["monthly-operations"] });
-		},
+		onSuccess: invalidate,
 	});
 }
 
 export function useLinkBudget() {
-	const queryClient = useQueryClient();
+	const invalidate = useInvalidateOperationData();
 	return useMutation({
 		mutationFn: ({ opId, budgetId }: { opId: string; budgetId: string }) =>
 			apiFetch<OperationResponse>(`/operations/${opId}/budget`, {
 				method: "PUT",
 				body: JSON.stringify({ budgetId }),
 			}),
-		onSuccess: () => {
-			queryClient.invalidateQueries({ queryKey: ["monthly-operations"] });
-		},
+		onSuccess: invalidate,
 	});
 }
 
 export function useUnlinkBudget() {
-	const queryClient = useQueryClient();
+	const invalidate = useInvalidateOperationData();
 	return useMutation({
 		mutationFn: (opId: string) =>
 			apiFetch<OperationResponse>(`/operations/${opId}/budget`, {
 				method: "DELETE",
 			}),
-		onSuccess: () => {
-			queryClient.invalidateQueries({ queryKey: ["monthly-operations"] });
-		},
+		onSuccess: invalidate,
 	});
 }
 
 export function useUpdateEffectiveDate() {
-	const queryClient = useQueryClient();
+	const invalidate = useInvalidateOperationData();
 	return useMutation({
 		mutationFn: ({
 			op,
@@ -227,25 +239,13 @@ export function useUpdateEffectiveDate() {
 					label: op.label,
 				}),
 			}),
-		onSuccess: () => {
-			queryClient.invalidateQueries({ queryKey: ["monthly-operations"] });
-		},
+		onSuccess: invalidate,
 	});
-}
-
-function useInvalidateMonthlyData() {
-	const queryClient = useQueryClient();
-	return () => {
-		queryClient.invalidateQueries({ queryKey: ["monthly-operations"] });
-		queryClient.invalidateQueries({ queryKey: ["summary"] });
-		queryClient.invalidateQueries({ queryKey: ["category-summary"] });
-		queryClient.invalidateQueries({ queryKey: ["forecast"] });
-	};
 }
 
 /** Put an unsplit operation in a category, or clear its own with null. */
 export function useSetOperationCategory() {
-	const invalidate = useInvalidateMonthlyData();
+	const invalidate = useInvalidateOperationData();
 	return useMutation({
 		mutationFn: ({
 			opId,
@@ -265,7 +265,7 @@ export function useSetOperationCategory() {
 }
 
 export function useSetOperationIgnored() {
-	const invalidate = useInvalidateMonthlyData();
+	const invalidate = useInvalidateOperationData();
 	return useMutation({
 		mutationFn: ({ opId, ignored }: { opId: string; ignored: boolean }) =>
 			apiFetch<OperationResponse>(`/operations/${opId}/ignore`, {
@@ -276,7 +276,7 @@ export function useSetOperationIgnored() {
 }
 
 export function useSplitOperation() {
-	const invalidate = useInvalidateMonthlyData();
+	const invalidate = useInvalidateOperationData();
 	return useMutation({
 		mutationFn: ({
 			opId,
@@ -294,7 +294,7 @@ export function useSplitOperation() {
 }
 
 export function useUnsplitOperation() {
-	const invalidate = useInvalidateMonthlyData();
+	const invalidate = useInvalidateOperationData();
 	return useMutation({
 		mutationFn: (opId: string) =>
 			apiFetch<OperationResponse>(`/operations/${opId}/splits`, {
@@ -415,6 +415,7 @@ export function useImportData() {
 			}),
 		onSuccess: () => {
 			queryClient.invalidateQueries({ queryKey: ["monthly-operations"] });
+			queryClient.invalidateQueries({ queryKey: ["operation-search"] });
 			queryClient.invalidateQueries({ queryKey: ["budgets"] });
 			queryClient.invalidateQueries({ queryKey: categoriesKey });
 			queryClient.invalidateQueries({ queryKey: ["summary"] });
@@ -488,6 +489,7 @@ export function useImportPreview() {
 
 export function useImportOperations() {
 	const queryClient = useQueryClient();
+	const invalidate = useInvalidateOperationData();
 	return useMutation({
 		mutationFn: ({
 			file,
@@ -510,7 +512,7 @@ export function useImportOperations() {
 			});
 		},
 		onSuccess: () => {
-			queryClient.invalidateQueries({ queryKey: ["monthly-operations"] });
+			invalidate();
 			queryClient.invalidateQueries({ queryKey: importProfilesKey });
 		},
 	});
@@ -554,6 +556,7 @@ export function useDeleteCategory() {
 				categoriesKey,
 				["budgets"],
 				["monthly-operations"],
+				["operation-search"],
 				["category-summary"],
 			]) {
 				queryClient.invalidateQueries({ queryKey });
