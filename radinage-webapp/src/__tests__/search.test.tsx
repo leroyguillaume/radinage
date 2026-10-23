@@ -140,6 +140,9 @@ function setupMocks(
 	apiFetchMock.mockImplementation((path: string) => {
 		if (path === "/categories") return Promise.resolve(categories);
 		if (path.startsWith("/budgets")) return Promise.resolve(budgets);
+		if (/^\/operations\/[^/?]+\/category$/.test(path)) {
+			return Promise.resolve(salary);
+		}
 		if (path.startsWith("/operations?")) {
 			return Promise.resolve(
 				search(new URLSearchParams(path.slice("/operations?".length))),
@@ -331,14 +334,41 @@ describe("SearchPage", () => {
 		expect(within(year2025).getByText("Courses")).toBeInTheDocument();
 	});
 
-	it("links each operation to its month on the operations page", async () => {
-		await renderSearchPage();
+	it("opens an operation's sheet, linking to its accounting month", async () => {
+		const { router } = await renderSearchPage();
 
-		const link = await screen.findByRole("link", { name: /SUPERMARCHE/ });
-		expect(link).toHaveAttribute(
-			"href",
-			expect.stringMatching(/^\/operations\?year=2025&month=11$/),
+		fireEvent.click(await screen.findByRole("button", { name: /SUPERMARCHE/ }));
+
+		const sheet = within(await screen.findByRole("dialog"));
+		expect(sheet.getByText("SUPERMARCHE")).toBeInTheDocument();
+		fireEvent.click(
+			sheet.getByRole("link", {
+				name: "Voir novembre 2025 dans les opérations",
+			}),
 		);
+		await waitFor(() => {
+			expect(router.state.location.pathname).toBe("/operations");
+		});
+		expect(router.state.location.search).toEqual({ year: 2025, month: 11 });
+	});
+
+	it("refreshes the results once an operation changes in its sheet", async () => {
+		await renderSearchPage();
+		fireEvent.click(await screen.findByRole("button", { name: /SALAIRE/ }));
+		await screen.findByRole("dialog");
+		const searchesBefore = searchCalls().length;
+
+		await pickOption("Catégorie", "Courses");
+
+		await waitFor(() => {
+			expect(apiFetchMock).toHaveBeenCalledWith(
+				"/operations/op-salary/category",
+				{ method: "PUT", body: JSON.stringify({ categoryId: "c-food" }) },
+			);
+		});
+		await waitFor(() => {
+			expect(searchCalls().length).toBeGreaterThan(searchesBefore);
+		});
 	});
 
 	it("loads the next page on demand", async () => {

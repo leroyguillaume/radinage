@@ -19,10 +19,8 @@ import {
 	Title,
 	Tooltip,
 	UnstyledButton,
-	useMantineTheme,
 } from "@mantine/core";
-import { DatePicker, MonthPickerInput } from "@mantine/dates";
-import { useMediaQuery } from "@mantine/hooks";
+import { MonthPickerInput } from "@mantine/dates";
 import {
 	IconAlertCircle,
 	IconCalendar,
@@ -46,27 +44,26 @@ import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import type { TFunction } from "i18next";
 import { type ReactNode, useId, useState } from "react";
 import { useTranslation } from "react-i18next";
-import type { BudgetInitialValues } from "@/components/BudgetModal";
-import { BudgetModal } from "@/components/BudgetModal";
 import { CategoryBadge, CategorySelect } from "@/components/CategoryBadge";
 import { ImportModal } from "@/components/ImportModal";
-import { SplitOperationModal } from "@/components/SplitOperationModal";
+import { useOperationActions } from "@/components/OperationActions";
+import {
+	EffectiveDatePicker,
+	type OperationHandlers,
+} from "@/components/OperationSheet";
 import { StatTile } from "@/components/StatTile";
 import {
+	budgetFitsAmount,
 	getBudgetedAmountForMonth,
 	getUnbudgetedForecastForMonth,
 } from "@/lib/budget-utils";
-import { formatAmount, formatSignedAmount } from "@/lib/format";
+import { formatAmount, formatIsoDate, formatSignedAmount } from "@/lib/format";
 import {
+	useBelowBreakpoint,
 	useBudgets,
 	useCategories,
 	useForecast,
-	useLinkBudget,
 	useMonthlyOperations,
-	useSetOperationCategory,
-	useSetOperationIgnored,
-	useUnlinkBudget,
-	useUpdateEffectiveDate,
 } from "@/lib/hooks";
 import {
 	isSplit,
@@ -378,27 +375,12 @@ function groupOperationsByBudget(
 	return result;
 }
 
-function formatDate(dateStr: string, locale: string): string {
-	const date = new Date(dateStr);
-	return new Intl.DateTimeFormat(locale, {
-		day: "2-digit",
-		month: "2-digit",
-	}).format(date);
+function accountingDate(op: OperationResponse): string {
+	return op.effectiveDate ?? op.date;
 }
 
-interface OperationHandlers {
-	budgets: BudgetResponse[];
-	categories: CategoryResponse[];
-	onSetCategory: (opId: string, categoryId: string | null) => void;
-	onCreateBudget: (op: OperationResponse) => void;
-	onLink: (opId: string, budgetId: string) => void;
-	onUnlink: (opId: string) => void;
-	onSetIgnored: (opId: string, ignored: boolean) => void;
-	onSplit: (op: OperationResponse) => void;
-	onEditEffectiveDate: (
-		op: OperationResponse,
-		effectiveDate: string | null,
-	) => void;
+function formatDate(iso: string, locale: string): string {
+	return formatIsoDate(iso, locale, { day: "2-digit", month: "2-digit" });
 }
 
 function MonthlyOperationsPage() {
@@ -408,13 +390,6 @@ function MonthlyOperationsPage() {
 
 	const [importOpened, setImportOpened] = useState(false);
 	const [importResult, setImportResult] = useState<ImportResult | null>(null);
-	const [budgetModalOpened, setBudgetModalOpened] = useState(false);
-	const [budgetInitial, setBudgetInitial] = useState<
-		BudgetInitialValues | undefined
-	>();
-	const [splitTarget, setSplitTarget] = useState<OperationResponse | null>(
-		null,
-	);
 	const [showIgnored, setShowIgnored] = useState(false);
 	const [categoryFilter, setCategoryFilter] = useState<CategoryFilter>(null);
 	const operationsQuery = useMonthlyOperations(year, month, showIgnored);
@@ -438,11 +413,13 @@ function MonthlyOperationsPage() {
 		});
 	}
 
-	const linkBudget = useLinkBudget();
-	const unlinkBudget = useUnlinkBudget();
-	const setOperationIgnored = useSetOperationIgnored();
-	const setOperationCategory = useSetOperationCategory();
-	const updateEffectiveDate = useUpdateEffectiveDate();
+	const operations = operationsQuery.data?.operations ?? [];
+	const categories = categoriesQuery.data ?? [];
+	const { handlers, dialogs } = useOperationActions({
+		operations,
+		budgets: budgetsQuery.data ?? [],
+		categories,
+	});
 
 	function navigateMonth(delta: number) {
 		navigateToDate(new Date(year, month - 1 + delta));
@@ -478,8 +455,6 @@ function MonthlyOperationsPage() {
 			)
 		: null;
 
-	const operations = operationsQuery.data?.operations ?? [];
-	const categories = categoriesQuery.data ?? [];
 	// A filter whose category has been deleted, or with none left to pick, shows everything.
 	const activeFilter =
 		categoryFilter?.kind === "category" &&
@@ -501,49 +476,9 @@ function MonthlyOperationsPage() {
 
 	const sections = buildSections(groups);
 
-	function handleCreateBudgetFromOp(op: OperationResponse) {
-		const selection = window.getSelection()?.toString().trim();
-		setBudgetInitial({
-			amount: op.amount,
-			rules: [
-				{
-					patternType: "contains",
-					patternValue: selection || op.label,
-				},
-			],
-		});
-		setBudgetModalOpened(true);
-	}
-
-	const handlers: OperationHandlers = {
-		budgets: budgetsQuery.data ?? [],
-		categories,
-		onSetCategory: (opId, categoryId) =>
-			setOperationCategory.mutate({ opId, categoryId }),
-		onCreateBudget: handleCreateBudgetFromOp,
-		onLink: (opId, budgetId) => linkBudget.mutate({ opId, budgetId }),
-		onUnlink: (opId) => unlinkBudget.mutate(opId),
-		onSetIgnored: (opId, ignored) =>
-			setOperationIgnored.mutate({ opId, ignored }),
-		onSplit: setSplitTarget,
-		onEditEffectiveDate: (op, effectiveDate) =>
-			updateEffectiveDate.mutate({ op, effectiveDate }),
-	};
-
 	return (
 		<div className="h-full overflow-auto">
-			<BudgetModal
-				opened={budgetModalOpened}
-				onClose={() => setBudgetModalOpened(false)}
-				budget={null}
-				initialValues={budgetInitial}
-			/>
-			<SplitOperationModal
-				operation={splitTarget}
-				budgets={handlers.budgets}
-				categories={categories}
-				onClose={() => setSplitTarget(null)}
-			/>
+			{dialogs}
 			<ImportModal
 				opened={importOpened}
 				onClose={() => setImportOpened(false)}
@@ -606,7 +541,7 @@ function MonthlyOperationsPage() {
 							<IconChevronRight size={20} />
 						</ActionIcon>
 					</Group>
-					<Group gap="md" wrap="wrap">
+					<Group gap="sm" wrap="wrap" miw={0} w={{ base: "100%", sm: "auto" }}>
 						{categories.length > 0 && (
 							<CategorySelect
 								aria-label={t("operations.category.filter")}
@@ -1063,11 +998,8 @@ function BudgetGroupRow({
 	);
 }
 
-function useOperationActionSize(): number {
-	const theme = useMantineTheme();
-	const isDesktop = useMediaQuery(`(min-width: ${theme.breakpoints.sm})`);
-	return isDesktop ? 36 : 44;
-}
+const DESKTOP_ACTION_SIZE = 36;
+const TOUCH_ACTION_SIZE = 44;
 
 function OperationList({
 	entries,
@@ -1078,7 +1010,8 @@ function OperationList({
 	locale: string;
 	handlers: OperationHandlers;
 }) {
-	const actionSize = useOperationActionSize();
+	const isDesktop = !useBelowBreakpoint("sm");
+	const Row = isDesktop ? OperationRow : TappableOperationRow;
 	return (
 		<Box
 			component="ul"
@@ -1088,14 +1021,109 @@ function OperationList({
 			style={{ borderTop: `1px solid ${palette.divider}` }}
 		>
 			{entries.map((entry) => (
-				<OperationRow
+				<Row
 					key={entry.key}
 					entry={entry}
 					locale={locale}
 					handlers={handlers}
-					actionSize={actionSize}
 				/>
 			))}
+		</Box>
+	);
+}
+
+interface OperationRowProps {
+	entry: OperationEntry;
+	locale: string;
+	handlers: OperationHandlers;
+}
+
+/** Badges telling how an entry was linked and which part of its operation it is. */
+function LinkBadges({ entry }: { entry: OperationEntry }) {
+	const { t } = useTranslation();
+	const { operation: op, part } = entry;
+	return (
+		<>
+			{op.budgetLink.type === "auto" && (
+				<Badge size="sm" color="leaf" c="leaf.9" tt="none" flex="none">
+					{t("operations.auto")}
+				</Badge>
+			)}
+			{part && (
+				<Tooltip label={t("operations.split.splitInto", { count: part.count })}>
+					<Badge size="sm" color="forest" c="forest.8" tt="none" flex="none">
+						{t("operations.split.partBadge", part)}
+					</Badge>
+				</Tooltip>
+			)}
+		</>
+	);
+}
+
+/** A whole-row button opening the operation sheet, for a phone. */
+function TappableOperationRow({ entry, locale, handlers }: OperationRowProps) {
+	const { t } = useTranslation();
+	const { operation: op, amount } = entry;
+	const category = entry.categoryId
+		? handlers.categories.find((c) => c.id === entry.categoryId)
+		: undefined;
+	const date = accountingDate(op);
+
+	return (
+		<Box
+			component="li"
+			style={{ borderBottom: `1px dashed ${palette.border}` }}
+		>
+			<UnstyledButton
+				onClick={() => handlers.onOpen(op)}
+				className="grid min-h-[44px] w-full grid-cols-[36px_minmax(0,1fr)_auto] items-start gap-x-3 py-3 text-left"
+			>
+				<Stack gap={0} align="center" className="tabular-nums">
+					<Text fw={700} lh={1.2}>
+						{formatIsoDate(date, locale, { day: "2-digit" })}
+					</Text>
+					<Text size="xs" c="dimmed" lh={1.2}>
+						{formatIsoDate(date, locale, { month: "short" })}
+					</Text>
+				</Stack>
+				<Stack gap={6} miw={0}>
+					<Text
+						fw={600}
+						lh={1.3}
+						className="line-clamp-2 [overflow-wrap:anywhere]"
+					>
+						{op.label}
+					</Text>
+					<Group gap={6} wrap="wrap">
+						{category ? (
+							<CategoryBadge
+								category={category}
+								inherited={entry.categoryFromBudget}
+							/>
+						) : (
+							<Badge size="sm" color="tangerine" c="tangerine.8" tt="none">
+								{t("operations.sheet.unclassified")}
+							</Badge>
+						)}
+						<LinkBadges entry={entry} />
+						{op.effectiveDate && (
+							<Badge size="sm" color="gold" c="gold.8" tt="none">
+								{t("operations.sheet.bankDateBadge", {
+									date: formatDate(op.date, locale),
+								})}
+							</Badge>
+						)}
+					</Group>
+				</Stack>
+				<Text
+					fw={700}
+					className="tabular-nums"
+					c={amount > 0 ? budgetTypeTones.income.text : undefined}
+					style={{ whiteSpace: "nowrap" }}
+				>
+					{formatSignedAmount(amount)}
+				</Text>
+			</UnstyledButton>
 		</Box>
 	);
 }
@@ -1284,21 +1312,13 @@ function CategoryMenu({
 	);
 }
 
-function OperationRow({
-	entry,
-	locale,
-	handlers,
-	actionSize,
-}: {
-	entry: OperationEntry;
-	locale: string;
-	handlers: OperationHandlers;
-	actionSize: number;
-}) {
-	const { t, i18n } = useTranslation();
+/** A row with every action inline, for a wide screen; its label opens the sheet. */
+function OperationRow({ entry, locale, handlers }: OperationRowProps) {
+	const { t } = useTranslation();
 	const [datePopoverOpened, setDatePopoverOpened] = useState(false);
 	const { operation: op, amount, part } = entry;
 	const split = isSplit(op);
+	const actionSize = DESKTOP_ACTION_SIZE;
 	const partCategory = part
 		? handlers.categories.find((c) => c.id === entry.categoryId)
 		: undefined;
@@ -1306,30 +1326,24 @@ function OperationRow({
 	return (
 		<Box
 			component="li"
-			className="grid grid-cols-[48px_minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1 py-2 sm:grid-cols-[56px_minmax(0,1fr)_auto_auto] sm:gap-x-4"
+			className="grid grid-cols-[56px_minmax(0,1fr)_auto_auto] items-center gap-x-4 py-2"
 			style={{ borderBottom: `1px dashed ${palette.border}` }}
 		>
 			<Text size="sm" c="dimmed" className="tabular-nums">
-				{formatDate(op.effectiveDate ?? op.date, locale)}
+				{formatDate(accountingDate(op), locale)}
 			</Text>
 			<Group gap={8} wrap="nowrap" miw={0}>
-				<Text fw={500} truncate title={op.label}>
-					{op.label}
-				</Text>
-				{op.budgetLink.type === "auto" && (
-					<Badge size="sm" color="leaf" c="leaf.9" tt="none" flex="none">
-						{t("operations.auto")}
-					</Badge>
-				)}
-				{part && (
-					<Tooltip
-						label={t("operations.split.splitInto", { count: part.count })}
-					>
-						<Badge size="sm" color="forest" c="forest.8" tt="none" flex="none">
-							{t("operations.split.partBadge", part)}
-						</Badge>
-					</Tooltip>
-				)}
+				<UnstyledButton
+					onClick={() => handlers.onOpen(op)}
+					miw={0}
+					mih={actionSize}
+					className="hover:underline"
+				>
+					<Text fw={500} truncate title={op.label}>
+						{op.label}
+					</Text>
+				</UnstyledButton>
+				<LinkBadges entry={entry} />
 				{partCategory && (
 					<CategoryBadge
 						category={partCategory}
@@ -1345,12 +1359,7 @@ function OperationRow({
 			>
 				{formatSignedAmount(amount)}
 			</Text>
-			<Group
-				gap={2}
-				wrap="nowrap"
-				justify="flex-end"
-				className="col-span-full sm:col-auto"
-			>
+			<Group gap={2} wrap="nowrap" justify="flex-end">
 				{!split && (
 					<CategoryMenu
 						categories={handlers.categories}
@@ -1381,41 +1390,20 @@ function OperationRow({
 						</Tooltip>
 					</Popover.Target>
 					<Popover.Dropdown>
-						<Stack gap="xs" align="center">
-							<DatePicker
-								locale={i18n.language}
-								value={op.effectiveDate}
-								onChange={(date) => {
-									if (date) {
-										handlers.onEditEffectiveDate(op, date);
-									}
-									setDatePopoverOpened(false);
-								}}
-							/>
-							{op.effectiveDate && (
-								<Button
-									variant="subtle"
-									color="tangerine"
-									size="xs"
-									leftSection={<IconX size={14} />}
-									onClick={() => {
-										handlers.onEditEffectiveDate(op, null);
-										setDatePopoverOpened(false);
-									}}
-								>
-									{t("operations.clearEffectiveDate")}
-								</Button>
-							)}
-						</Stack>
+						<EffectiveDatePicker
+							op={op}
+							onChange={(date) => {
+								handlers.onEditEffectiveDate(op, date);
+								setDatePopoverOpened(false);
+							}}
+						/>
 					</Popover.Dropdown>
 				</Popover>
 				{split ? null : op.budgetLink.type === "unlinked" ? (
 					<>
 						<LinkBudgetMenu
 							budgets={handlers.budgets.filter((b) =>
-								amount >= 0
-									? b.budgetType === "income"
-									: b.budgetType !== "income",
+								budgetFitsAmount(b, amount),
 							)}
 							height={actionSize}
 							onSelect={(budgetId) => handlers.onLink(op.id, budgetId)}
@@ -1469,7 +1457,9 @@ function IgnoredOperationsCard({
 }) {
 	const { t } = useTranslation();
 	const titleId = useId();
-	const actionSize = useOperationActionSize();
+	const actionSize = useBelowBreakpoint("sm")
+		? TOUCH_ACTION_SIZE
+		: DESKTOP_ACTION_SIZE;
 
 	return (
 		<Paper
@@ -1513,9 +1503,15 @@ function IgnoredOperationsCard({
 							style={{ borderBottom: `1px dashed ${palette.border}` }}
 						>
 							<Text size="sm" c="dimmed" className="tabular-nums">
-								{formatDate(op.effectiveDate ?? op.date, locale)}
+								{formatDate(accountingDate(op), locale)}
 							</Text>
-							<Text c="dimmed" td="line-through" truncate title={op.label}>
+							<Text
+								c="dimmed"
+								td="line-through"
+								lineClamp={2}
+								title={op.label}
+								className="[overflow-wrap:anywhere]"
+							>
 								{op.label}
 							</Text>
 							<Text

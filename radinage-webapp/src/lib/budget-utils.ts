@@ -86,3 +86,10 @@ export function getUnbudgetedForecastForMonth(
 		Math.round(Number(unbudgetedRate) * daysInMonth(year, month) * 100) / 100
 	);
 }
+
+/** Whether an operation of `amount` can count against `budget`: income for a credit, the rest for a debit. */
+export function budgetFitsAmount(budget: BudgetResponse, amount: number) {
+	return amount >= 0
+		? budget.budgetType === "income"
+		: budget.budgetType !== "income";
+}

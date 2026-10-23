@@ -20,6 +20,7 @@ import type {
 } from "@/lib/types";
 import { theme } from "@/theme";
 import { selectMantineOption } from "./mantine";
+import { resetViewport, setViewportWidth } from "./viewport";
 
 vi.mock("@/lib/api", () => ({
 	ApiError: class ApiError extends Error {
@@ -229,7 +230,7 @@ function setupMocks(
 		if (path === "/categories") {
 			return Promise.resolve(categories);
 		}
-		if (/^\/operations\/[^/]+\/category$/.test(path)) {
+		if (/^\/operations\/[^/]+(\/category)?$/.test(path)) {
 			return Promise.resolve(operations.operations[0]);
 		}
 		return Promise.reject(new Error(`Unexpected path: ${path}`));
@@ -272,12 +273,17 @@ async function renderOperationsPage(year = "2026", month = "4") {
 	return { queryClient };
 }
 
+const DESKTOP_WIDTH = 1280;
+const PHONE_WIDTH = 390;
+
 beforeEach(async () => {
 	await i18n.changeLanguage("fr");
+	setViewportWidth(DESKTOP_WIDTH);
 	setupMocks();
 });
 
 afterEach(() => {
+	resetViewport();
 	vi.restoreAllMocks();
 });
 
@@ -1346,6 +1352,178 @@ describe("MonthlyOperationsPage", () => {
 			expect(
 				screen.queryByRole("combobox", { name: "Filtrer par catégorie" }),
 			).not.toBeInTheDocument();
+		});
+	});
+});
+
+function findApiCall(path: string, method: string) {
+	return apiCalls.find((c) => c.path === path && c.options?.method === method);
+}
+
+describe("operation sheet", () => {
+	const categories: CategoryResponse[] = [
+		{
+			id: "c1",
+			name: "Courses",
+			color: "teal",
+			icon: null,
+			createdAt: "2026-01-01T00:00:00Z",
+		},
+	];
+	const longLabel =
+		"CARTE 19/10/26 TE KAFFIHUS VILLEURBANNE CB*4821 PAIEMENT SANS CONTACT";
+	const operations: MonthlyOperationsResponse = {
+		operations: mockMonthlyResponse.operations.map((op) =>
+			op.id === "op3" ? { ...op, label: longLabel } : op,
+		),
+	};
+
+	async function openSheet(rowName: RegExp | string) {
+		const user = userEvent.setup();
+		await user.click(await screen.findByRole("button", { name: rowName }));
+		const sheet = within(await screen.findByRole("dialog"));
+		return { user, sheet };
+	}
+
+	it("opens from an operation's label on a wide screen", async () => {
+		setupMocks({ operations, categories });
+		await renderOperationsPage();
+
+		const { sheet } = await openSheet(longLabel);
+
+		expect(sheet.getByText(longLabel)).toBeInTheDocument();
+		expect(sheet.getByRole("combobox", { name: "Budget" })).toBeInTheDocument();
+	});
+
+	describe("on a phone", () => {
+		beforeEach(() => {
+			setViewportWidth(PHONE_WIDTH);
+			setupMocks({ operations, categories });
+		});
+
+		it("shows each operation as a single button, without inline actions", async () => {
+			await renderOperationsPage();
+
+			const row = within(
+				await screen.findByRole("button", { name: /KAFFIHUS/ }),
+			);
+			expect(row.getByText("15")).toBeInTheDocument();
+			expect(row.getByText("À classer")).toBeInTheDocument();
+			expect(row.getByText("-100,00 €")).toBeInTheDocument();
+			expect(
+				screen.queryByLabelText("Ignorer l'opération"),
+			).not.toBeInTheDocument();
+			expect(
+				screen.queryByLabelText("Lier à un budget"),
+			).not.toBeInTheDocument();
+		});
+
+		it("shows the whole label and date in the sheet", async () => {
+			await renderOperationsPage();
+
+			const { sheet } = await openSheet(/KAFFIHUS/);
+
+			const label = sheet.getByText(longLabel);
+			expect(label).not.toHaveAttribute("data-truncate");
+			expect(label).not.toHaveAttribute("data-line-clamp");
+			expect(sheet.getByText("Mercredi 15 avril 2026")).toBeInTheDocument();
+		});
+
+		it("puts the operation in a category", async () => {
+			await renderOperationsPage();
+			await openSheet(/KAFFIHUS/);
+
+			await selectMantineOption("Catégorie", "Courses");
+
+			await waitFor(() => {
+				expect(
+					findApiCall("/operations/op3/category", "PUT")?.options?.body,
+				).toBe(JSON.stringify({ categoryId: "c1" }));
+			});
+		});
+
+		it("links the operation to a budget of its sign", async () => {
+			await renderOperationsPage();
+			const { user, sheet } = await openSheet(/KAFFIHUS/);
+
+			await user.click(sheet.getByRole("combobox", { name: "Budget" }));
+			await user.click(await screen.findByRole("option", { name: "Food" }));
+			expect(
+				screen.queryByRole("option", { name: "Income" }),
+			).not.toBeInTheDocument();
+
+			await waitFor(() => {
+				expect(
+					findApiCall("/operations/op3/budget", "PUT")?.options?.body,
+				).toBe(JSON.stringify({ budgetId: "b1" }));
+			});
+		});
+
+		it("unlinks a linked operation", async () => {
+			await renderOperationsPage();
+			const user = userEvent.setup();
+			await user.click(await screen.findByRole("button", { name: /Food/ }));
+			const { sheet } = await openSheet(/Groceries/);
+
+			await user.click(sheet.getByRole("button", { name: "Délier du budget" }));
+
+			await waitFor(() => {
+				expect(findApiCall("/operations/op1/budget", "DELETE")).toBeDefined();
+			});
+		});
+
+		it("counts the operation on another date", async () => {
+			await renderOperationsPage();
+			const { user, sheet } = await openSheet(/KAFFIHUS/);
+
+			await user.click(sheet.getByRole("button", { name: /Compter le/ }));
+			await user.click(sheet.getByRole("button", { name: /^20 / }));
+
+			await waitFor(() => {
+				const body = findApiCall("/operations/op3", "PUT")?.options?.body;
+				expect(JSON.parse(body ?? "{}")).toMatchObject({
+					date: "2026-04-15",
+					effectiveDate: "2026-04-20",
+				});
+			});
+		});
+
+		it("ignores the operation and closes the sheet", async () => {
+			await renderOperationsPage();
+			const { user, sheet } = await openSheet(/KAFFIHUS/);
+
+			await user.click(
+				sheet.getByRole("button", { name: "Ignorer l'opération" }),
+			);
+
+			await waitFor(() => {
+				expect(findApiCall("/operations/op3/ignore", "PUT")).toBeDefined();
+			});
+			await waitFor(() => {
+				expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+			});
+		});
+
+		it("opens the split modal in place of the sheet", async () => {
+			await renderOperationsPage();
+			const { user, sheet } = await openSheet(/KAFFIHUS/);
+
+			await user.click(sheet.getByRole("button", { name: "Diviser" }));
+
+			const dialog = within(await screen.findByRole("dialog"));
+			expect(dialog.getByText("Diviser l'opération")).toBeInTheDocument();
+		});
+
+		it("creates a budget from the operation", async () => {
+			await renderOperationsPage();
+			const { user, sheet } = await openSheet(/KAFFIHUS/);
+
+			await user.click(sheet.getByRole("button", { name: "Créer un budget" }));
+
+			const dialog = within(await screen.findByRole("dialog"));
+			expect(
+				dialog.getByRole("heading", { name: "Créer un budget" }),
+			).toBeInTheDocument();
 		});
 	});
 });
