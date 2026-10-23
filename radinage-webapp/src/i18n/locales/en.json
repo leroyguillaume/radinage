@@ -401,8 +401,9 @@
 			"add": "Add a category",
 			"name": "Name",
 			"color": "Colour",
-			"colorOption": "Colour {{color}}",
-			"colorOptionTaken": "Colour {{color}}, already used by {{names}}",
+			"generateColor": "Generate a colour",
+			"colorClose": "Looks like the colour of {{names}}",
+			"errorColor": "The colour must be a hex code, such as #12b886",
 			"icon": "Icon",
 			"noIcon": "No icon",
 			"icons": {

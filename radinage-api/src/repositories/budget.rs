@@ -663,7 +663,7 @@ mod tests {
         let user_id = setup_user(&pool).await;
         let category = |name: &str| crate::domain::category::CategoryFields {
             name: name.to_string(),
-            color: crate::domain::category::CategoryColor::Teal,
+            color: "#12b886".parse().unwrap(),
             icon: None,
         };
         let food = categories.create(user_id, &category("Food")).await.unwrap();

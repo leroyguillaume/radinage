@@ -3,6 +3,7 @@ import {
 	Alert,
 	Box,
 	Button,
+	ColorInput,
 	Group,
 	Loader,
 	Paper,
@@ -17,18 +18,21 @@ import {
 	IconAlertCircle,
 	IconPencil,
 	IconPlus,
+	IconRefresh,
 	IconTrash,
 } from "@tabler/icons-react";
 import { type FormEvent, type ReactNode, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { CategoryBadge, CategoryDot } from "@/components/CategoryBadge";
 import { ApiError } from "@/lib/api";
-import { categoriesByColor, leastUsedColor } from "@/lib/category-colors";
+import {
+	categoriesCloseTo,
+	generateColor,
+	isHexColor,
+} from "@/lib/category-colors";
 import { categoryIcons } from "@/lib/category-icons";
 import { useCategories, useDeleteCategory, useSaveCategory } from "@/lib/hooks";
-import { categoryFill } from "@/lib/tones";
 import {
-	CATEGORY_COLORS,
 	CATEGORY_ICONS,
 	type CategoryColor,
 	type CategoryIcon,
@@ -90,51 +94,53 @@ function SwatchGroup<T>({
 	);
 }
 
-/** Opacity of a colour other categories already use, still recognisable but receding. */
-const TAKEN_OPACITY = 0.35;
-
 function ColorPicker({
 	value,
 	others,
 	onChange,
 }: {
-	value: CategoryColor;
-	/** The other categories, whose colours are shown as taken. */
+	/** As typed, so possibly not a colour yet. */
+	value: string;
+	/** The other categories, warned about when their colour looks the same. */
 	others: CategoryResponse[];
-	onChange: (color: CategoryColor) => void;
+	onChange: (color: string) => void;
 }) {
 	const { t } = useTranslation();
-	const takenBy = categoriesByColor(others);
+	const close = isHexColor(value) ? categoriesCloseTo(value, others) : [];
+	const generateLabel = t("settings.categories.generateColor");
 	return (
-		<SwatchGroup
-			id="category-color-label"
-			label={t("settings.categories.color")}
-			value={value}
-			onChange={onChange}
-			swatches={CATEGORY_COLORS.map((color) => {
-				const names = takenBy.get(color);
-				return {
-					value: color,
-					label: names
-						? t("settings.categories.colorOptionTaken", {
-								color,
-								names: names.join(", "),
-							})
-						: t("settings.categories.colorOption", { color }),
-					content: (
-						<Box
-							w={24}
-							h={24}
-							bg={categoryFill(color)}
-							opacity={names && color !== value ? TAKEN_OPACITY : 1}
-							style={{ borderRadius: "50%" }}
-						/>
-					),
-				};
-			})}
-		/>
+		<Stack gap={4}>
+			<Group gap="xs" align="flex-end" wrap="nowrap">
+				<ColorInput
+					label={t("settings.categories.color")}
+					value={value}
+					onChange={onChange}
+					format="hex"
+					withEyeDropper={false}
+					className="flex-1"
+				/>
+				<Tooltip label={generateLabel}>
+					<ActionIcon
+						variant="default"
+						size={44}
+						onClick={() => onChange(generateColor(others))}
+						aria-label={generateLabel}
+					>
+						<IconRefresh size={20} />
+					</ActionIcon>
+				</Tooltip>
+			</Group>
+			{close.length > 0 && (
+				<Text size="xs" c="dimmed">
+					{t("settings.categories.colorClose", { names: close.join(", ") })}
+				</Text>
+			)}
+		</Stack>
 	);
 }
+
+/** Shown in the icon swatches while the colour typed is not one yet. */
+const PLACEHOLDER_COLOR = "#adb5bd";
 
 /** Size of the icon swatches: the chosen one previews the category's mark. */
 const ICON_SWATCH_SIZE = 28;
@@ -191,8 +197,8 @@ function CategoryForm({
 	const save = useSaveCategory();
 	const [name, setName] = useState(category?.name ?? "");
 	const others = categories.filter((c) => c.id !== category?.id);
-	const [color, setColor] = useState<CategoryColor>(
-		category?.color ?? leastUsedColor(others),
+	const [color, setColor] = useState(
+		() => category?.color ?? generateColor(others),
 	);
 	const [icon, setIcon] = useState<CategoryIcon | null>(category?.icon ?? null);
 	const [error, setError] = useState<string | null>(null);
@@ -209,10 +215,14 @@ function CategoryForm({
 			setError(t("settings.categories.errorNameTaken"));
 			return;
 		}
+		if (!isHexColor(color)) {
+			setError(t("settings.categories.errorColor"));
+			return;
+		}
 		try {
 			await save.mutateAsync({
 				...(category ? { id: category.id } : {}),
-				body: { name: trimmed, color, icon },
+				body: { name: trimmed, color: color.toLowerCase(), icon },
 			});
 			onDone();
 		} catch (err) {
@@ -237,7 +247,11 @@ function CategoryForm({
 					autoFocus
 				/>
 				<ColorPicker value={color} others={others} onChange={setColor} />
-				<IconPicker value={icon} color={color} onChange={setIcon} />
+				<IconPicker
+					value={icon}
+					color={isHexColor(color) ? color : PLACEHOLDER_COLOR}
+					onChange={setIcon}
+				/>
 				{error && (
 					<Alert color="tangerine" icon={<IconAlertCircle size={16} />}>
 						{error}

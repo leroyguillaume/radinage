@@ -348,7 +348,7 @@ pub async fn import_data<
         .map(|c| {
             let request = CategoryRequest {
                 name: c.name.clone(),
-                color: c.color,
+                color: c.color.clone(),
                 icon: c.icon,
             };
             CategoryFields::try_from(request)
@@ -1553,7 +1553,7 @@ mod tests {
             user_id,
             fields: CategoryFields {
                 name: name.to_string(),
-                color: CategoryColor::Teal,
+                color: "#12b886".parse::<CategoryColor>().unwrap(),
                 icon: None,
             },
             created_at: Utc::now(),
@@ -1625,7 +1625,7 @@ mod tests {
         let json: serde_json::Value = response_json(resp).await;
         assert_eq!(json["categories"][0]["id"], category_id.to_string());
         assert_eq!(json["categories"][0]["name"], "Food");
-        assert_eq!(json["categories"][0]["color"], "teal");
+        assert_eq!(json["categories"][0]["color"], "#12b886");
         assert!(json["categories"][0].get("userId").is_none());
         assert_eq!(json["budgets"][0]["categoryId"], category_id.to_string());
         assert_eq!(json["operations"][0]["categoryId"], category_id.to_string());
@@ -1675,10 +1675,10 @@ mod tests {
             .once()
             .returning(|_, _, _| Box::pin(async { Ok(true) }));
 
-        let body = r#"{
+        let body = r##"{
             "version": 1,
             "categories": [
-                {"id": "11111111-1111-1111-1111-111111111111", "name": "Food", "color": "orange"},
+                {"id": "11111111-1111-1111-1111-111111111111", "name": "Food", "color": "#fd7e14"},
                 {"id": "22222222-2222-2222-2222-222222222222", "name": "Fun", "color": "grape", "icon": "games"}
             ],
             "budgets": [
@@ -1704,7 +1704,7 @@ mod tests {
                     "categoryId": "11111111-1111-1111-1111-111111111111"
                 }
             ]
-        }"#;
+        }"##;
         let app = build_test_router(make_test_state_with_categories(
             MockUserRepository::new(),
             op_repo,
@@ -1730,14 +1730,14 @@ mod tests {
         let mut op_repo = MockOperationRepository::new();
         op_repo.expect_insert().never();
 
-        let body = r#"{
+        let body = r##"{
             "version": 1,
             "categories": [
-                {"id": "11111111-1111-1111-1111-111111111111", "name": "New 1", "color": "red"},
-                {"id": "22222222-2222-2222-2222-222222222222", "name": "New 2", "color": "red"},
-                {"id": "33333333-3333-3333-3333-333333333333", "name": "C0", "color": "red"}
+                {"id": "11111111-1111-1111-1111-111111111111", "name": "New 1", "color": "#fa5252"},
+                {"id": "22222222-2222-2222-2222-222222222222", "name": "New 2", "color": "#fa5252"},
+                {"id": "33333333-3333-3333-3333-333333333333", "name": "C0", "color": "#fa5252"}
             ]
-        }"#;
+        }"##;
         let app = build_test_router(make_test_state_with_categories(
             MockUserRepository::new(),
             op_repo,

@@ -26,7 +26,7 @@ const apiFetchMock = vi.mocked(apiFetch);
 const food: CategoryResponse = {
 	id: "c1",
 	name: "Courses",
-	color: "teal",
+	color: "#12b886",
 	icon: null,
 	createdAt: "2026-01-01T00:00:00Z",
 };
@@ -87,7 +87,7 @@ describe("CategoriesSection", () => {
 		).toBeInTheDocument();
 	});
 
-	it("creates a category with the colour picked", async () => {
+	it("creates a category with the colour typed, lowercased", async () => {
 		mockApi([]);
 		const user = renderSection();
 
@@ -95,7 +95,9 @@ describe("CategoriesSection", () => {
 			await screen.findByRole("button", { name: /Ajouter une catégorie/ }),
 		);
 		await user.type(screen.getByRole("textbox", { name: /Nom/ }), " Loisirs ");
-		await user.click(screen.getByRole("radio", { name: "Couleur grape" }));
+		const color = screen.getByRole("textbox", { name: /Couleur/ });
+		await user.clear(color);
+		await user.type(color, "#BE4BDB");
 		await user.click(screen.getByRole("button", { name: "Enregistrer" }));
 
 		await waitFor(() =>
@@ -103,10 +105,46 @@ describe("CategoriesSection", () => {
 				{
 					path: "/categories",
 					method: "POST",
-					body: { name: "Loisirs", color: "grape", icon: null },
+					body: { name: "Loisirs", color: "#be4bdb", icon: null },
 				},
 			]),
 		);
+	});
+
+	it("refuses a colour that is not a hex code without calling the API", async () => {
+		mockApi([]);
+		const user = renderSection();
+
+		await user.click(
+			await screen.findByRole("button", { name: /Ajouter une catégorie/ }),
+		);
+		await user.type(screen.getByRole("textbox", { name: /Nom/ }), "Loisirs");
+		const color = screen.getByRole("textbox", { name: /Couleur/ });
+		await user.clear(color);
+		await user.type(color, "violet");
+		await user.click(screen.getByRole("button", { name: "Enregistrer" }));
+
+		expect(
+			await screen.findByText(/La couleur doit être un code hexadécimal/),
+		).toBeInTheDocument();
+		expect(writes()).toEqual([]);
+	});
+
+	it("generates a new colour on demand", async () => {
+		mockApi([food]);
+		const user = renderSection();
+
+		await user.click(
+			await screen.findByRole("button", { name: "Modifier Courses" }),
+		);
+		const color = screen.getByRole("textbox", { name: /Couleur/ });
+		expect(color).toHaveValue("#12b886");
+		await user.click(
+			screen.getByRole("button", { name: "Générer une couleur" }),
+		);
+
+		expect(color).not.toHaveValue("#12b886");
+		expect((color as HTMLInputElement).value).toMatch(/^#[0-9a-f]{6}$/);
 	});
 
 	it("creates a category with the icon picked, none by default", async () => {
@@ -126,7 +164,11 @@ describe("CategoriesSection", () => {
 				{
 					path: "/categories",
 					method: "POST",
-					body: { name: "Resto", color: "forest", icon: "restaurant" },
+					body: {
+						name: "Resto",
+						color: expect.stringMatching(/^#[0-9a-f]{6}$/),
+						icon: "restaurant",
+					},
 				},
 			]),
 		);
@@ -148,24 +190,13 @@ describe("CategoriesSection", () => {
 				{
 					path: "/categories/c1",
 					method: "PUT",
-					body: { name: "Courses", color: "teal", icon: null },
+					body: { name: "Courses", color: "#12b886", icon: null },
 				},
 			]),
 		);
 	});
 
-	it("defaults a new category to a colour no other category uses", async () => {
-		mockApi([{ ...food, color: "forest" }]);
-		const user = renderSection();
-
-		await user.click(
-			await screen.findByRole("button", { name: /Ajouter une catégorie/ }),
-		);
-
-		expect(screen.getByRole("radio", { name: "Couleur blue" })).toBeChecked();
-	});
-
-	it("shows which category already uses a colour, apart from the one edited", async () => {
+	it("warns when the colour looks like another category's, apart from the one edited", async () => {
 		const leisure: CategoryResponse = { ...food, id: "c2", name: "Loisirs" };
 		mockApi([food, leisure]);
 		const user = renderSection();
@@ -175,13 +206,8 @@ describe("CategoriesSection", () => {
 		);
 
 		expect(
-			screen.getByRole("radio", {
-				name: "Couleur teal, déjà prise par Loisirs",
-			}),
-		).toBeChecked();
-		expect(
-			screen.getByRole("radio", { name: "Couleur grape" }),
-		).not.toBeChecked();
+			screen.getByText("Ressemble à la couleur de Loisirs"),
+		).toBeInTheDocument();
 	});
 
 	it("refuses a name already taken without calling the API", async () => {
@@ -232,7 +258,7 @@ describe("CategoriesSection", () => {
 				{
 					path: "/categories/c1",
 					method: "PUT",
-					body: { name: "Alimentation", color: "teal", icon: null },
+					body: { name: "Alimentation", color: "#12b886", icon: null },
 				},
 			]),
 		);

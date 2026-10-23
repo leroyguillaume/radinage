@@ -42,11 +42,17 @@ const { apiFetch } = await import("@/lib/api");
 const apiFetchMock = vi.mocked(apiFetch);
 
 const categories: CategoryResponse[] = [
-	{ id: "c-food", name: "Courses", color: "orange", icon: null, createdAt: "" },
+	{
+		id: "c-food",
+		name: "Courses",
+		color: "#fd7e14",
+		icon: null,
+		createdAt: "",
+	},
 	{
 		id: "c-home",
 		name: "Logement",
-		color: "blue",
+		color: "#228be6",
 		icon: "home",
 		createdAt: "",
 	},

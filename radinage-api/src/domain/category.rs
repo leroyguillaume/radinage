@@ -3,25 +3,75 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-string_enum! {
-    /// Colour a category is shown with, a key of the web app's palette.
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-    #[schemars(transform = crate::schema::flatten_string_enum)]
-    #[serde(rename_all = "camelCase")]
-    pub enum CategoryColor ("category color") {
-        Forest => "forest",
-        Blue => "blue",
-        Cyan => "cyan",
-        Teal => "teal",
-        Lime => "lime",
-        Yellow => "yellow",
-        Orange => "orange",
-        Red => "red",
-        Pink => "pink",
-        Grape => "grape",
-        Violet => "violet",
-        Indigo => "indigo",
-        Gray => "gray",
+/// Colour a category is shown with, stored as lowercase `#rrggbb`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(try_from = "String", into = "String")]
+pub struct CategoryColor(String);
+
+/// Palette keys category colours were once limited to, with their `#rrggbb` value:
+/// exports made then still carry them, and migration 017 converted stored ones.
+const PALETTE: &[(&str, &str)] = &[
+    ("forest", "#327f56"),
+    ("blue", "#228be6"),
+    ("cyan", "#15aabf"),
+    ("teal", "#12b886"),
+    ("lime", "#82c91e"),
+    ("yellow", "#fab005"),
+    ("orange", "#fd7e14"),
+    ("red", "#fa5252"),
+    ("pink", "#e64980"),
+    ("grape", "#be4bdb"),
+    ("violet", "#7950f2"),
+    ("indigo", "#4c6ef5"),
+    ("gray", "#868e96"),
+];
+
+impl CategoryColor {
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl std::str::FromStr for CategoryColor {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if let Some((_, hex)) = PALETTE.iter().find(|(key, _)| *key == s) {
+            return Ok(Self((*hex).to_string()));
+        }
+        match s.strip_prefix('#') {
+            Some(digits) if digits.len() == 6 && digits.chars().all(|c| c.is_ascii_hexdigit()) => {
+                Ok(Self(s.to_ascii_lowercase()))
+            }
+            _ => Err(format!("category color must be #rrggbb, got {s:?}")),
+        }
+    }
+}
+
+impl TryFrom<String> for CategoryColor {
+    type Error = String;
+    fn try_from(s: String) -> Result<Self, Self::Error> {
+        s.parse()
+    }
+}
+
+impl From<CategoryColor> for String {
+    fn from(color: CategoryColor) -> Self {
+        color.0
+    }
+}
+
+impl JsonSchema for CategoryColor {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "CategoryColor".into()
+    }
+
+    fn json_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        schemars::json_schema!({
+            "type": "string",
+            "pattern": "^#[0-9a-fA-F]{6}$",
+            "description": "Colour a category is shown with, as #rrggbb.",
+            "example": "#12b886",
+        })
     }
 }
 
@@ -114,8 +164,15 @@ mod tests {
     }
 
     #[test]
-    fn color_round_trips_through_its_string() {
-        assert_round_trips(CategoryColor::ALL, CategoryColor::as_str);
+    fn color_is_lowercased_and_sent_as_its_string() {
+        let color: CategoryColor = "#12B886".parse().unwrap();
+        assert_eq!(color.as_str(), "#12b886");
+        assert_eq!(serde_json::to_string(&color).unwrap(), "\"#12b886\"");
+    }
+
+    #[test]
+    fn color_accepts_a_palette_key() {
+        assert_eq!("teal".parse::<CategoryColor>().unwrap().as_str(), "#12b886");
     }
 
     #[test]
@@ -125,7 +182,9 @@ mod tests {
 
     #[test]
     fn unknown_color_is_rejected() {
-        assert!("purple".parse::<CategoryColor>().is_err());
+        for color in ["purple", "#12b88", "#12b8867", "12b886", "#12b88g"] {
+            assert!(color.parse::<CategoryColor>().is_err(), "{color}");
+        }
     }
 
     #[test]

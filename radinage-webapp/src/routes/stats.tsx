@@ -28,7 +28,7 @@ import {
 } from "@/lib/category-totals";
 import { formatAmount, formatCompactAmount } from "@/lib/format";
 import { useCategories, useCategorySummary, useSummary } from "@/lib/hooks";
-import { balanceTextColor, budgetTypeTones, categoryFill } from "@/lib/tones";
+import { balanceTextColor, budgetTypeTones } from "@/lib/tones";
 import type { CategoryResponse, CategoryTotal } from "@/lib/types";
 import { headingFont, palette } from "@/theme";
 
@@ -102,7 +102,7 @@ function CategoryPie({ rows, label }: { rows: CategoryRow[]; label: string }) {
 	const slices = categorySlices(rows);
 	const fill = (slice: CategorySlice) =>
 		slice.category
-			? categoryFill(slice.category.color)
+			? slice.category.color
 			: slice.others > 0
 				? OTHERS_FILL
 				: UNCATEGORIZED_FILL;

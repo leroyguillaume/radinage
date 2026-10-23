@@ -320,14 +320,14 @@ describe("SplitOperationModal", () => {
 			{
 				id: "c1",
 				name: "Courses",
-				color: "teal",
+				color: "#12b886",
 				icon: null,
 				createdAt: "2026-01-01T00:00:00Z",
 			},
 			{
 				id: "c2",
 				name: "Sorties",
-				color: "grape",
+				color: "#be4bdb",
 				icon: null,
 				createdAt: "2026-01-01T00:00:00Z",
 			},

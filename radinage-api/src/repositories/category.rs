@@ -186,7 +186,7 @@ mod tests {
     fn fields(name: &str) -> CategoryFields {
         CategoryFields {
             name: name.to_string(),
-            color: CategoryColor::Teal,
+            color: "#12b886".parse::<CategoryColor>().unwrap(),
             icon: None,
         }
     }
@@ -229,7 +229,7 @@ mod tests {
         let created = repo.create(alice, &fields("Food")).await.unwrap();
         let changed = CategoryFields {
             name: "Groceries".to_string(),
-            color: CategoryColor::Orange,
+            color: "#fd7e14".parse::<CategoryColor>().unwrap(),
             icon: Some(CategoryIcon::Cart),
         };
 

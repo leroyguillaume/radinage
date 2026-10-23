@@ -8,7 +8,6 @@ import {
 	ThemeIcon,
 } from "@mantine/core";
 import { categoryIcons } from "@/lib/category-icons";
-import { categoryFill } from "@/lib/tones";
 import type { CategoryLook, CategoryResponse } from "@/lib/types";
 
 /** Width of a category's mark, with or without an icon, so names line up in a list. */
@@ -26,19 +25,14 @@ export function CategoryDot({
 	return (
 		<Center w={size} h={size} style={{ flexShrink: 0 }} aria-hidden>
 			{Icon ? (
-				<ThemeIcon
-					color={`${category.color}.6`}
-					autoContrast
-					radius="xl"
-					size={size}
-				>
+				<ThemeIcon color={category.color} autoContrast radius="xl" size={size}>
 					<Icon size={size * 0.65} stroke={2} />
 				</ThemeIcon>
 			) : (
 				<Box
 					w={size / 2}
 					h={size / 2}
-					bg={categoryFill(category.color)}
+					bg={category.color}
 					style={{ borderRadius: "50%" }}
 				/>
 			)}

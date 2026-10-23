@@ -66,11 +66,14 @@ state; Zustand holds the client-only session in
 in [src/theme.ts](radinage-webapp/src/theme.ts), and
 [src/lib/tones.ts](radinage-webapp/src/lib/tones.ts) maps each budget type to
 one palette colour so income, expense and savings read the same everywhere.
-A category's colour and icon are each one key of a closed set the API
-validates, drawn by the web app
+A category's colour is any `#rrggbb`, so that categories never compete for a
+handful of palette entries; the web app proposes one generated to look unlike
+the other categories' and warns when the one chosen is close to another's
+([src/lib/category-colors.ts](radinage-webapp/src/lib/category-colors.ts)).
+Its icon is one key of a closed set the API validates
 ([src/lib/category-icons.ts](radinage-webapp/src/lib/category-icons.ts) maps
-icons to Tabler components): a dozen colours stop being told apart well before
-a user runs out of categories, so the icon is what keeps two of them distinct.
+icons to Tabler components). Colours alone stop being told apart well before a
+user runs out of categories, so the icon is what keeps two of them distinct.
 
 **Packaging**: the [Dockerfile](Dockerfile) builds two images from one
 build graph, each running as UID/GID 65532:
