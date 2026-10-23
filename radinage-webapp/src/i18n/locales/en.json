@@ -23,7 +23,7 @@
 		"createBudget": "Create budget",
 		"linkBudget": "Link to budget",
 		"unlinkBudget": "Unlink from budget",
-		"ignoreOperation": "Ignore operation",
+		"ignoreOperation": "Ignore",
 		"unignoreOperation": "Stop ignoring",
 		"showIgnored": "Show ignored",
 		"ignored": {

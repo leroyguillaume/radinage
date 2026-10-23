@@ -23,7 +23,7 @@
 		"createBudget": "Créer un budget",
 		"linkBudget": "Lier à un budget",
 		"unlinkBudget": "Délier du budget",
-		"ignoreOperation": "Ignorer l'opération",
+		"ignoreOperation": "Ignorer",
 		"unignoreOperation": "Ne plus ignorer",
 		"showIgnored": "Afficher les ignorées",
 		"ignored": {

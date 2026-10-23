@@ -451,7 +451,7 @@ describe("MonthlyOperationsPage", () => {
 		});
 
 		// Ignore buttons should be present on every operation row
-		const ignoreButtons = screen.getAllByLabelText("Ignorer l'opération");
+		const ignoreButtons = screen.getAllByLabelText("Ignorer");
 		expect(ignoreButtons.length).toBeGreaterThanOrEqual(1);
 
 		// Click the ignore button
@@ -1410,9 +1410,7 @@ describe("operation sheet", () => {
 			expect(row.getByText("15")).toBeInTheDocument();
 			expect(row.getByText("À classer")).toBeInTheDocument();
 			expect(row.getByText("-100,00 €")).toBeInTheDocument();
-			expect(
-				screen.queryByLabelText("Ignorer l'opération"),
-			).not.toBeInTheDocument();
+			expect(screen.queryByLabelText("Ignorer")).not.toBeInTheDocument();
 			expect(
 				screen.queryByLabelText("Lier à un budget"),
 			).not.toBeInTheDocument();
@@ -1492,9 +1490,7 @@ describe("operation sheet", () => {
 			await renderOperationsPage();
 			const { user, sheet } = await openSheet(/KAFFIHUS/);
 
-			await user.click(
-				sheet.getByRole("button", { name: "Ignorer l'opération" }),
-			);
+			await user.click(sheet.getByRole("button", { name: "Ignorer" }));
 
 			await waitFor(() => {
 				expect(findApiCall("/operations/op3/ignore", "PUT")).toBeDefined();
