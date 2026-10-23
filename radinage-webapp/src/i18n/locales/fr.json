@@ -406,8 +406,9 @@
 			"add": "Ajouter une catégorie",
 			"name": "Nom",
 			"color": "Couleur",
-			"colorOption": "Couleur {{color}}",
-			"colorOptionTaken": "Couleur {{color}}, déjà prise par {{names}}",
+			"generateColor": "Générer une couleur",
+			"colorClose": "Ressemble à la couleur de {{names}}",
+			"errorColor": "La couleur doit être un code hexadécimal, par exemple #12b886",
 			"icon": "Icône",
 			"noIcon": "Sans icône",
 			"icons": {

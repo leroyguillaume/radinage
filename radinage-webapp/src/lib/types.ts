@@ -289,24 +289,8 @@ export interface ImportResult {
 	errors: { row: number; reason: string }[];
 }
 
-/** Keys of the Mantine palette a category can be shown with. */
-export const CATEGORY_COLORS = [
-	"forest",
-	"blue",
-	"cyan",
-	"teal",
-	"lime",
-	"yellow",
-	"orange",
-	"red",
-	"pink",
-	"grape",
-	"violet",
-	"indigo",
-	"gray",
-] as const;
-
-export type CategoryColor = (typeof CATEGORY_COLORS)[number];
+/** A category's colour, as `#rrggbb`. */
+export type CategoryColor = string;
 
 /** Icons a category can be shown with, drawn from `categoryIcons`. */
 export const CATEGORY_ICONS = [

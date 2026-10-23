@@ -312,7 +312,7 @@ describe("StatsPage", () => {
 				{
 					id: "c1",
 					name: "Courses",
-					color: "teal",
+					color: "#12b886",
 					icon: null,
 					createdAt: "2026-01-01T00:00:00Z",
 				},
@@ -346,14 +346,14 @@ describe("StatsPage", () => {
 				{
 					id: "c1",
 					name: "Salaire",
-					color: "teal",
+					color: "#12b886",
 					icon: null,
 					createdAt: "2026-01-01T00:00:00Z",
 				},
 				{
 					id: "c2",
 					name: "Courses",
-					color: "orange",
+					color: "#fd7e14",
 					icon: null,
 					createdAt: "2026-01-01T00:00:00Z",
 				},
@@ -386,7 +386,7 @@ describe("StatsPage", () => {
 				{
 					id: "c1",
 					name: "Courses",
-					color: "teal",
+					color: "#12b886",
 					icon: null,
 					createdAt: "2026-01-01T00:00:00Z",
 				},
@@ -408,7 +408,7 @@ describe("StatsPage", () => {
 		const categories = Array.from({ length: 7 }, (_, i) => ({
 			id: `c${i}`,
 			name: `Cat ${i}`,
-			color: "teal" as const,
+			color: "#12b886",
 			icon: null,
 			createdAt: "2026-01-01T00:00:00Z",
 		}));

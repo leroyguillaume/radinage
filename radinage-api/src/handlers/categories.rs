@@ -22,7 +22,7 @@ const MAX_NAME_LEN: usize = 50;
 /// Body of a create or update: the whole category, every field replaced on update.
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-#[schemars(extend("example" = serde_json::json!({ "name": "Groceries", "color": "teal", "icon": "cart" })))]
+#[schemars(extend("example" = serde_json::json!({ "name": "Groceries", "color": "#12b886", "icon": "cart" })))]
 pub struct CategoryRequest {
     /// Name shown on operations, unique per user (1 to 50 characters).
     pub name: String,
@@ -161,7 +161,7 @@ mod tests {
     fn request(name: &str) -> CategoryRequest {
         CategoryRequest {
             name: name.to_string(),
-            color: CategoryColor::Teal,
+            color: "#12b886".parse::<CategoryColor>().unwrap(),
             icon: None,
         }
     }
@@ -192,7 +192,7 @@ mod tests {
     fn request_is_trimmed_into_fields() {
         let fields = CategoryFields::try_from(request("  Food  ")).unwrap();
         assert_eq!(fields.name, "Food");
-        assert_eq!(fields.color, CategoryColor::Teal);
+        assert_eq!(fields.color, "#12b886".parse::<CategoryColor>().unwrap());
     }
 
     #[test]
@@ -246,7 +246,7 @@ mod tests {
         assert_eq!(resp.status(), StatusCode::OK);
         let json: serde_json::Value = response_json(resp).await;
         assert_eq!(json[0]["name"], "Food");
-        assert_eq!(json[0]["color"], "teal");
+        assert_eq!(json[0]["color"], "#12b886");
         assert!(json[0]["icon"].is_null());
         assert!(json[0].get("userId").is_none());
     }
@@ -328,7 +328,7 @@ mod tests {
             .oneshot(json_request(
                 "POST",
                 "/categories",
-                Some(r#"{"name":"Food","color":"teal","icon":"rocket"}"#),
+                Some(r##"{"name":"Food","color":"#12b886","icon":"rocket"}"##),
                 Some(&auth),
             ))
             .await
@@ -375,7 +375,7 @@ mod tests {
         let auth = auth_header(user_id, UserRole::User);
         let req = CategoryRequest {
             name: "Groceries".to_string(),
-            color: CategoryColor::Orange,
+            color: "#fd7e14".parse::<CategoryColor>().unwrap(),
             icon: Some(CategoryIcon::Cart),
         };
         let resp = app(repo)
@@ -391,7 +391,7 @@ mod tests {
         assert_eq!(resp.status(), StatusCode::OK);
         let json: CategoryResponse = response_json(resp).await;
         assert_eq!(json.id, id);
-        assert_eq!(json.color, CategoryColor::Orange);
+        assert_eq!(json.color, "#fd7e14".parse::<CategoryColor>().unwrap());
         assert_eq!(json.icon, Some(CategoryIcon::Cart));
     }
 
