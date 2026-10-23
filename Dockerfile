@@ -60,7 +60,8 @@ USER 65532:65532
 
 EXPOSE 3000
 
-HEALTHCHECK CMD ["wget", "-q", "-O", "/dev/null", "http://127.0.0.1:3000/health"]
+# Through sh so the probe follows ROOT_PATH, which the API nests every route under.
+HEALTHCHECK CMD ["sh", "-c", "p=\"$(printf %s \"$ROOT_PATH\" | sed 's|^/*||')\"; wget -q -O /dev/null \"http://127.0.0.1:3000/${p:+$p/}health\""]
 
 ENTRYPOINT ["radinage-api"]
 
