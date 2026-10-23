@@ -941,3 +941,105 @@ describe("SummaryPage month breakdown", () => {
 		).toBeInTheDocument();
 	});
 });
+
+describe("SummaryPage on a phone", () => {
+	const desktopMatchMedia = window.matchMedia;
+
+	beforeEach(() => {
+		vi.useFakeTimers({ toFake: ["Date"] });
+		vi.setSystemTime(new Date(2026, 9, 15));
+		setupMocks(typicalForecast, (year, month) =>
+			Promise.resolve(breakdownOf(year, month)),
+		);
+		window.matchMedia = (query: string) => ({
+			...desktopMatchMedia(query),
+			matches: query.includes("max-width"),
+		});
+	});
+
+	afterEach(() => {
+		window.matchMedia = desktopMatchMedia;
+	});
+
+	function monthList(): HTMLElement {
+		return screen.getByRole("region", { name: "Détail mensuel" });
+	}
+
+	it("tucks the explanation behind an info button", async () => {
+		const user = userEvent.setup();
+		await renderSummaryPage("?year=2026");
+		await screen.findByRole("region", { name: "Détail mensuel" });
+
+		await user.click(
+			screen.getByRole("button", { name: "Comment c'est calculé" }),
+		);
+
+		const popover = await screen.findByRole("dialog", {
+			name: "Comment c'est calculé",
+		});
+		expect(
+			within(popover).getByText(/Réel pour les mois passés/),
+		).toBeInTheDocument();
+	});
+
+	it("shortens the period switch and keeps the year stepper", async () => {
+		const user = userEvent.setup();
+		const { router } = await renderSummaryPage("?year=2026");
+
+		expect(await screen.findByRole("radio", { name: "Année" })).toBeChecked();
+		expect(
+			screen.getByRole("button", { name: "Année suivante" }),
+		).toBeInTheDocument();
+
+		await user.click(screen.getByRole("radio", { name: "12 mois" }));
+
+		await waitFor(() => {
+			expect(router.state.location.search).toEqual({
+				year: 2026,
+				mode: "rolling",
+			});
+		});
+	});
+
+	it("leads with the headline amount and the period totals", async () => {
+		await renderSummaryPage("?year=2025");
+
+		const hero = await screen.findByRole("region", { name: "Excédent 2025" });
+		const text = compact(hero);
+		expect(text).toMatch(/\+19200,00/);
+		expect(text).toMatch(/Revenus30000,00€/);
+		expect(text).toMatch(/Dépenses-10800,00€/);
+		expect(text).toMatch(/Épargne-3600,00€/);
+		expect(
+			within(hero).getByRole("img", {
+				name: "Évolution du cumulé sur la période",
+			}),
+		).toBeInTheDocument();
+	});
+
+	it("lists the months instead of the wide table", async () => {
+		await renderSummaryPage("?year=2026");
+
+		await screen.findByRole("region", { name: "Détail mensuel" });
+		expect(screen.queryByRole("table")).not.toBeInTheDocument();
+		const months = within(monthList()).getAllByRole("button");
+		expect(months).toHaveLength(12);
+		expect(compact(months[0] as HTMLElement)).toBe("janv.Réel+1300,00€");
+		expect(months[9]).toHaveAttribute("aria-current", "date");
+		expect(compact(months[9] as HTMLElement)).toMatch(/^oct\.Encours/);
+		expect(compact(months[11] as HTMLElement)).toMatch(/^déc\.Prévision/);
+	});
+
+	it("opens the month breakdown from the list", async () => {
+		const user = userEvent.setup();
+		await renderSummaryPage("?year=2027");
+		await screen.findByRole("region", { name: "Détail mensuel" });
+
+		await user.click(
+			within(monthList()).getByRole("button", { name: "Détail de mars 2027" }),
+		);
+
+		const drawer = await screen.findByRole("dialog", { name: "mars 2027" });
+		expect(within(drawer).getByText("Salaire")).toBeInTheDocument();
+	});
+});

@@ -14,7 +14,6 @@ import {
 	Tooltip,
 } from "@mantine/core";
 import { MonthPickerInput } from "@mantine/dates";
-import { useMediaQuery } from "@mantine/hooks";
 import {
 	IconAlertCircle,
 	IconCurrencyEuro,
@@ -28,6 +27,7 @@ import { CategorySelect } from "@/components/CategoryBadge";
 import { toDisplayAmount, toRawAmount } from "@/lib/format";
 import {
 	useApplyBudget,
+	useBelowBreakpoint,
 	useCategories,
 	useCreateBudget,
 	useUpdateBudget,
@@ -384,7 +384,7 @@ export function BudgetModal({
 	} | null>(null);
 
 	const isEdit = budget !== null;
-	const isMobile = useMediaQuery("(max-width: 36em)") ?? false;
+	const isMobile = useBelowBreakpoint("xs");
 
 	const initForm = useCallback(() => {
 		if (budget) {
