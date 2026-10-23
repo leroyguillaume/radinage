@@ -153,8 +153,9 @@ function RootLayout() {
 		navigate({ to: "/login" });
 	}
 
+	// dvh, not 100vh: on mobile browsers 100vh ignores the URL bar and hides the bottom tab bar
 	return (
-		<div className="flex h-screen flex-col overflow-hidden">
+		<div className="flex h-dvh flex-col overflow-hidden">
 			{isAuthenticated && (
 				<Box
 					component="header"
@@ -239,6 +240,7 @@ function RootLayout() {
 						borderTop: `1px solid ${palette.border}`,
 						display: "flex",
 						gap: 4,
+						paddingBottom: "calc(0.375rem + env(safe-area-inset-bottom))",
 					}}
 				>
 					{primaryNav.map((item) => (
