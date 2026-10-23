@@ -11,10 +11,10 @@ import {
 	IconLayoutDashboard,
 	IconListDetails,
 	IconLogout,
+	IconMenu2,
 	IconSearch,
 	IconSettings,
 	IconShieldLock,
-	IconUserCircle,
 	IconWallet,
 } from "@tabler/icons-react";
 import {
@@ -196,7 +196,7 @@ function RootLayout() {
 										size={44}
 										aria-label={t("nav.account")}
 									>
-										<IconUserCircle size={22} />
+										<IconMenu2 size={22} />
 									</ActionIcon>
 								</Menu.Target>
 								<Menu.Dropdown>
