@@ -12,7 +12,6 @@ import {
 	TextInput,
 	Tooltip,
 } from "@mantine/core";
-import { useMediaQuery } from "@mantine/hooks";
 import {
 	IconAlertCircle,
 	IconArrowsSplit2,
@@ -31,7 +30,11 @@ import {
 	parseCents,
 	toDisplayAmount,
 } from "@/lib/format";
-import { useSplitOperation, useUnsplitOperation } from "@/lib/hooks";
+import {
+	useBelowBreakpoint,
+	useSplitOperation,
+	useUnsplitOperation,
+} from "@/lib/hooks";
 import { isSplit } from "@/lib/operation-parts";
 import { budgetTypeTones } from "@/lib/tones";
 import type {
@@ -110,7 +113,7 @@ export function SplitOperationModal({
 	onClose: () => void;
 }) {
 	const { t } = useTranslation();
-	const isMobile = useMediaQuery("(max-width: 36em)") ?? false;
+	const isMobile = useBelowBreakpoint("xs");
 
 	return (
 		<Modal

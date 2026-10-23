@@ -1,5 +1,6 @@
 import { MantineProvider } from "@mantine/core";
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
 import { describe, expect, it } from "vitest";
 import { PageHeader } from "@/components/PageHeader";
@@ -25,6 +26,33 @@ describe("PageHeader", () => {
 		expect(screen.getByText("Avancement")).toBeInTheDocument();
 		expect(
 			screen.getByRole("button", { name: "Nouveau budget" }),
+		).toBeInTheDocument();
+	});
+
+	it("only offers an info button when asked for one", () => {
+		renderWithTheme(<PageHeader title="Budgets" subtitle="Avancement" />);
+		expect(screen.queryByRole("button")).not.toBeInTheDocument();
+	});
+
+	it("reveals the subtitle from its info button", async () => {
+		const user = userEvent.setup();
+		renderWithTheme(
+			<PageHeader
+				title="Résumé"
+				subtitle="Réel puis prévision"
+				subtitleInfoLabel="Comment c'est calculé"
+			/>,
+		);
+
+		await user.click(
+			screen.getByRole("button", { name: "Comment c'est calculé" }),
+		);
+
+		const popover = await screen.findByRole("dialog", {
+			name: "Comment c'est calculé",
+		});
+		expect(
+			within(popover).getByText("Réel puis prévision"),
 		).toBeInTheDocument();
 	});
 

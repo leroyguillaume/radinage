@@ -1,3 +1,5 @@
+import { type MantineBreakpoint, useMantineTheme } from "@mantine/core";
+import { useMediaQuery } from "@mantine/hooks";
 import {
 	keepPreviousData,
 	useInfiniteQuery,
@@ -558,4 +560,17 @@ export function useDeleteCategory() {
 			}
 		},
 	});
+}
+
+/**
+ * True below the theme `breakpoint`, matching `hiddenFrom`. Read on the first
+ * render so a phone never paints the desktop layout first.
+ */
+export function useBelowBreakpoint(breakpoint: MantineBreakpoint): boolean {
+	const theme = useMantineTheme();
+	return useMediaQuery(
+		`(max-width: calc(${theme.breakpoints[breakpoint]} - 0.1px))`,
+		false,
+		{ getInitialValueInEffect: false },
+	);
 }

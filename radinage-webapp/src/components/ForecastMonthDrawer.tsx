@@ -11,7 +11,6 @@ import {
 	Text,
 	Title,
 } from "@mantine/core";
-import { useMediaQuery } from "@mantine/hooks";
 import { IconAlertCircle } from "@tabler/icons-react";
 import { useTranslation } from "react-i18next";
 import {
@@ -19,7 +18,7 @@ import {
 	formatMonthYear,
 	formatSignedAmount,
 } from "@/lib/format";
-import { useForecastMonth } from "@/lib/hooks";
+import { useBelowBreakpoint, useForecastMonth } from "@/lib/hooks";
 import { balanceTextColor, budgetTypeTones } from "@/lib/tones";
 import type {
 	BudgetType,
@@ -41,7 +40,7 @@ export function ForecastMonthDrawer({
 	onClose,
 }: ForecastMonthDrawerProps) {
 	const { t, i18n } = useTranslation();
-	const isMobile = useMediaQuery("(max-width: 36em)") ?? false;
+	const isMobile = useBelowBreakpoint("xs");
 	const query = useForecastMonth(month);
 	return (
 		<Drawer
