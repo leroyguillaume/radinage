@@ -7,6 +7,7 @@ import {
 	RouterProvider,
 } from "@tanstack/react-router";
 import { render, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it } from "vitest";
 import "@/i18n";
 import { Route as RootRoute } from "@/routes/__root";
@@ -44,6 +45,18 @@ function signIn(role: string) {
 	useAuthStore.setState({ isAuthenticated: true, role });
 }
 
+async function accountMenuItems(): Promise<string[]> {
+	await userEvent.click(
+		within(screen.getByRole("banner")).getByRole("button", {
+			name: /compte|account/i,
+		}),
+	);
+	// jsdom lays nothing out, so Mantine's floating dropdown hides itself as
+	// detached from its target: the items are only reachable with `hidden`.
+	const items = await screen.findAllByRole("menuitem", { hidden: true });
+	return items.map((item) => item.textContent ?? "");
+}
+
 afterEach(() => {
 	useAuthStore.setState({ isAuthenticated: false, role: null });
 });
@@ -77,17 +90,33 @@ describe("RootLayout", () => {
 		}
 	});
 
-	it("shows the admin entry to admins only", async () => {
+	it("keeps admin out of the navigations and in the account menu", async () => {
 		signIn("admin");
 		const { unmount } = renderLayout("/summary");
 		await screen.findByText("page /summary");
-		expect(screen.getByRole("link", { name: /admin/i })).toBeInTheDocument();
+		for (const nav of screen.getAllByRole("navigation")) {
+			expect(within(nav).queryByRole("link", { name: /admin/i })).toBeNull();
+		}
+		expect(await accountMenuItems()).toContain("Admin");
 		unmount();
 
 		signIn("user");
 		renderLayout("/summary");
 		await screen.findByText("page /summary");
-		expect(screen.queryByRole("link", { name: /admin/i })).toBeNull();
+		expect(await accountMenuItems()).not.toContain("Admin");
+	});
+
+	it("keeps nav pills named when their label is hidden", async () => {
+		signIn("user");
+		renderLayout("/summary");
+		const header = await screen.findByRole("banner");
+		const links = within(within(header).getByRole("navigation")).getAllByRole(
+			"link",
+		);
+		expect(links).toHaveLength(5);
+		for (const link of links) {
+			expect(link).toHaveAttribute("aria-label");
+		}
 	});
 
 	it("hides the navigation when signed out", async () => {
@@ -96,15 +125,12 @@ describe("RootLayout", () => {
 		expect(screen.queryAllByRole("navigation")).toHaveLength(0);
 	});
 
-	it("offers settings and logout as labelled buttons", async () => {
+	it("offers settings and logout from the account menu", async () => {
 		signIn("user");
 		renderLayout("/summary");
-		const header = await screen.findByRole("banner");
-		expect(
-			within(header).getByRole("button", { name: /paramètres|settings/i }),
-		).toBeInTheDocument();
-		expect(
-			within(header).getByRole("button", { name: /déconnecter|log out/i }),
-		).toBeInTheDocument();
+		await screen.findByText("page /summary");
+		const items = await accountMenuItems();
+		expect(items.some((i) => /paramètres|settings/i.test(i))).toBe(true);
+		expect(items.some((i) => /déconnecter|log out/i.test(i))).toBe(true);
 	});
 });

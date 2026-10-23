@@ -316,7 +316,8 @@
 		"admin": "Admin",
 		"settings": "Paramètres",
 		"logout": "Se déconnecter",
-		"menu": "Menu"
+		"menu": "Menu",
+		"account": "Compte"
 	},
 	"auth": {
 		"features": {

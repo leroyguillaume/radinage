@@ -1,4 +1,11 @@
-import { ActionIcon, Box, Group, Menu, Tooltip } from "@mantine/core";
+import {
+	ActionIcon,
+	Box,
+	Group,
+	Menu,
+	Tooltip,
+	useMatches,
+} from "@mantine/core";
 import {
 	IconChartBar,
 	IconLayoutDashboard,
@@ -66,12 +73,11 @@ const primaryNav: NavItem[] = [
 	},
 ];
 
-const adminNav: NavItem = {
-	to: "/admin",
-	activePrefix: "/admin",
-	labelKey: "nav.admin",
-	icon: IconShieldLock,
-};
+/**
+ * Below this breakpoint the header nav pills show their icon only: with labels,
+ * the pills, logo and account menu need roughly 950px and would wrap.
+ */
+const LABELLED_NAV_FROM = "lg";
 
 function useIsActive(prefix: string): boolean {
 	const pathname = useRouterState({ select: (s) => s.location.pathname });
@@ -81,17 +87,24 @@ function useIsActive(prefix: string): boolean {
 function NavPill({ item }: { item: NavItem }) {
 	const { t } = useTranslation();
 	const active = useIsActive(item.activePrefix);
+	const labelled = useMatches({ base: false, [LABELLED_NAV_FROM]: true });
 	const Icon = item.icon;
+	const label = t(item.labelKey);
 	return (
-		<Link
-			to={item.to}
-			className="nav-pill"
-			data-active={active}
-			aria-current={active ? "page" : undefined}
-		>
-			<Icon size={20} />
-			{t(item.labelKey)}
-		</Link>
+		<Tooltip label={label} disabled={labelled}>
+			<Link
+				to={item.to}
+				className="nav-pill"
+				data-active={active}
+				aria-current={active ? "page" : undefined}
+				aria-label={label}
+			>
+				<Icon size={20} />
+				<Box component="span" visibleFrom={LABELLED_NAV_FROM}>
+					{label}
+				</Box>
+			</Link>
+		</Tooltip>
 	);
 }
 
@@ -140,8 +153,6 @@ function RootLayout() {
 		navigate({ to: "/login" });
 	}
 
-	const desktopNav = role === "admin" ? [...primaryNav, adminNav] : primaryNav;
-
 	return (
 		<div className="flex h-screen flex-col overflow-hidden">
 			{isAuthenticated && (
@@ -170,41 +181,19 @@ function RootLayout() {
 							aria-label={t("nav.menu")}
 							gap={4}
 							visibleFrom="sm"
-							style={{ flexGrow: 1 }}
+							wrap="nowrap"
 						>
-							{desktopNav.map((item) => (
+							{primaryNav.map((item) => (
 								<NavPill key={item.to} item={item} />
 							))}
 						</Group>
-						<Group gap="xs" visibleFrom="sm">
-							<Tooltip label={t("nav.settings")}>
-								<ActionIcon
-									variant="default"
-									size={44}
-									onClick={() => navigate({ to: "/settings" })}
-									aria-label={t("nav.settings")}
-								>
-									<IconSettings size={20} />
-								</ActionIcon>
-							</Tooltip>
-							<Tooltip label={t("nav.logout")}>
-								<ActionIcon
-									variant="default"
-									size={44}
-									onClick={handleLogout}
-									aria-label={t("nav.logout")}
-								>
-									<IconLogout size={20} />
-								</ActionIcon>
-							</Tooltip>
-						</Group>
-						<Box hiddenFrom="sm" ml="auto">
+						<Box ml="auto">
 							<Menu position="bottom-end" width={220}>
 								<Menu.Target>
 									<ActionIcon
 										variant="default"
 										size={44}
-										aria-label={t("nav.menu")}
+										aria-label={t("nav.account")}
 									>
 										<IconUserCircle size={22} />
 									</ActionIcon>
