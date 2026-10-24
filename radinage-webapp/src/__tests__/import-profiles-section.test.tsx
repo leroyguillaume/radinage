@@ -31,6 +31,7 @@ function makeProfile(
 		name: "Crédit Agricole",
 		accountId: "account-1",
 		labelCol: 1,
+		labelFallbackCol: null,
 		amountCol: 3,
 		dateCol: 0,
 		dateFormat: "%d/%m/%Y",
@@ -117,6 +118,7 @@ describe("ImportProfilesSection", () => {
 				name: "Revolut",
 				dateFormat: "%Y-%m-%d %H:%M:%S",
 				skipLines: 3,
+				labelFallbackCol: 2,
 				lastUsedAt: null,
 			}),
 		]);
@@ -131,6 +133,7 @@ describe("ImportProfilesSection", () => {
 		expect(within(first).getByText("Label B")).toBeInTheDocument();
 		expect(within(first).getByText("Amount D")).toBeInTheDocument();
 		expect(within(first).getByText("Date A")).toBeInTheDocument();
+		expect(within(first).queryByText(/Fallback label/)).not.toBeInTheDocument();
 		expect(within(first).getByText("31/12/2026")).toBeInTheDocument();
 		expect(within(first).getByText("Semicolon ( ; )")).toBeInTheDocument();
 		expect(within(first).getByText("1 skipped line")).toBeInTheDocument();
@@ -140,6 +143,7 @@ describe("ImportProfilesSection", () => {
 
 		expect(within(second).getByText("2026-12-31 14:30:00")).toBeInTheDocument();
 		expect(within(second).getByText("3 skipped lines")).toBeInTheDocument();
+		expect(within(second).getByText("Fallback label C")).toBeInTheDocument();
 		expect(within(second).getByText("Never used")).toBeInTheDocument();
 	});
 

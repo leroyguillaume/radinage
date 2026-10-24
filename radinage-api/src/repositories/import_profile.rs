@@ -5,7 +5,7 @@ use crate::{
 use sqlx::{PgPool, Row, postgres::PgRow};
 use uuid::Uuid;
 
-const COLUMNS: &str = "id, user_id, name, account_id, label_col, amount_col, date_col, date_format, skip_lines, \
+const COLUMNS: &str = "id, user_id, name, account_id, label_col, label_fallback_col, amount_col, date_col, date_format, skip_lines, \
      csv_delimiter, last_used_at, created_at";
 
 /// Data access interface for import profiles.
@@ -67,9 +67,21 @@ fn to_db(value: usize) -> AppResult<i32> {
     i32::try_from(value).map_err(|_| AppError::BadRequest(format!("{value} is too large")))
 }
 
-fn from_db(row: &PgRow, column: &str) -> AppResult<usize> {
-    let value: i32 = row.try_get(column)?;
+fn optional_to_db(value: Option<usize>) -> AppResult<Option<i32>> {
+    value.map(to_db).transpose()
+}
+
+fn column_index(column: &str, value: i32) -> AppResult<usize> {
     usize::try_from(value).map_err(|_| AppError::Internal(format!("negative {column}: {value}")))
+}
+
+fn from_db(row: &PgRow, column: &str) -> AppResult<usize> {
+    column_index(column, row.try_get(column)?)
+}
+
+fn optional_from_db(row: &PgRow, column: &str) -> AppResult<Option<usize>> {
+    let value: Option<i32> = row.try_get(column)?;
+    value.map(|v| column_index(column, v)).transpose()
 }
 
 fn row_to_profile(row: &PgRow) -> AppResult<ImportProfile> {
@@ -80,6 +92,7 @@ fn row_to_profile(row: &PgRow) -> AppResult<ImportProfile> {
             name: row.try_get("name")?,
             account_id: row.try_get("account_id")?,
             label_col: from_db(row, "label_col")?,
+            label_fallback_col: optional_from_db(row, "label_fallback_col")?,
             amount_col: from_db(row, "amount_col")?,
             date_col: from_db(row, "date_col")?,
             date_format: row.try_get("date_format")?,
@@ -133,8 +146,8 @@ impl ImportProfileRepository for PgImportProfileRepository {
         let row = sqlx::query(&format!(
             "INSERT INTO import_profiles \
              (user_id, name, label_col, amount_col, date_col, date_format, skip_lines, \
-             csv_delimiter, account_id) \
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING {COLUMNS}"
+             csv_delimiter, account_id, label_fallback_col) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING {COLUMNS}"
         ))
         .bind(user_id)
         .bind(&fields.name)
@@ -145,6 +158,7 @@ impl ImportProfileRepository for PgImportProfileRepository {
         .bind(to_db(fields.skip_lines)?)
         .bind(fields.csv_delimiter.as_str())
         .bind(fields.account_id)
+        .bind(optional_to_db(fields.label_fallback_col)?)
         .fetch_one(&self.pool)
         .await
         .map_err(|e| map_name_conflict(e, &fields.name))?;
@@ -160,7 +174,7 @@ impl ImportProfileRepository for PgImportProfileRepository {
         let row = sqlx::query(&format!(
             "UPDATE import_profiles SET name = $3, label_col = $4, amount_col = $5, \
              date_col = $6, date_format = $7, skip_lines = $8, csv_delimiter = $9, \
-             account_id = $10 \
+             account_id = $10, label_fallback_col = $11 \
              WHERE id = $1 AND user_id = $2 RETURNING {COLUMNS}"
         ))
         .bind(id)
@@ -173,6 +187,7 @@ impl ImportProfileRepository for PgImportProfileRepository {
         .bind(to_db(fields.skip_lines)?)
         .bind(fields.csv_delimiter.as_str())
         .bind(fields.account_id)
+        .bind(optional_to_db(fields.label_fallback_col)?)
         .fetch_optional(&self.pool)
         .await
         .map_err(|e| map_name_conflict(e, &fields.name))?;
@@ -231,6 +246,7 @@ mod tests {
             name: name.to_string(),
             account_id,
             label_col: 1,
+            label_fallback_col: None,
             amount_col: 3,
             date_col: 0,
             date_format: "%d/%m/%Y".to_string(),
@@ -319,6 +335,7 @@ mod tests {
         let repo = PgImportProfileRepository::new(pool);
         let created = repo.create(alice, &fields(alice, "Bank")).await.unwrap();
         let changed = ImportProfileFields {
+            label_fallback_col: Some(2),
             skip_lines: 4,
             csv_delimiter: CsvDelimiter::Semicolon,
             ..fields(alice, "Renamed")

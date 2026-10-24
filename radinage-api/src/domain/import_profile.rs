@@ -60,6 +60,8 @@ pub struct ImportProfileFields {
     /// Account the operations imported with the profile go to.
     pub account_id: Uuid,
     pub label_col: usize,
+    /// Column the label is read from when the label column is blank.
+    pub label_fallback_col: Option<usize>,
     pub amount_col: usize,
     pub date_col: usize,
     pub date_format: String,

@@ -32,14 +32,17 @@ import {
 } from "@/lib/hooks";
 import type { CsvDelimiter, ImportProfileResponse } from "@/lib/types";
 
-export type ColumnRole = "label" | "amount" | "date";
+export type ColumnRole = "label" | "labelFallback" | "amount" | "date";
 
 export type ColumnRoles = Record<ColumnRole, number | null>;
 
-const ROLES: ColumnRole[] = ["label", "amount", "date"];
+const ROLES: ColumnRole[] = ["label", "labelFallback", "amount", "date"];
+
+const OPTIONAL_ROLES: ColumnRole[] = ["labelFallback"];
 
 const ROLE_COLORS: Record<ColumnRole, string> = {
 	label: "forest",
+	labelFallback: "leaf",
 	amount: "tangerine",
 	date: "gold",
 };
@@ -123,6 +126,7 @@ export function ImportProfileForm({
 	);
 	const [roles, setRoles] = useState<ColumnRoles>({
 		label: profile?.labelCol ?? null,
+		labelFallback: profile?.labelFallbackCol ?? null,
 		amount: profile?.amountCol ?? null,
 		date: profile?.dateCol ?? null,
 	});
@@ -154,7 +158,12 @@ export function ImportProfileForm({
 	if (!(dateFormat in DATE_FORMATS)) {
 		dateFormats.push({ value: dateFormat, label: dateFormat });
 	}
-	const { label: labelCol, amount: amountCol, date: dateCol } = roles;
+	const {
+		label: labelCol,
+		labelFallback: labelFallbackCol,
+		amount: amountCol,
+		date: dateCol,
+	} = roles;
 	const receiving = (accounts.data ?? []).filter((a) => a.receivesOperations);
 	const accountId = accountChoice ?? receiving[0]?.id ?? null;
 	const complete =
@@ -197,6 +206,7 @@ export function ImportProfileForm({
 					name: name.trim(),
 					accountId,
 					labelCol,
+					labelFallbackCol,
 					amountCol,
 					dateCol,
 					dateFormat,
@@ -335,11 +345,12 @@ export function ImportProfileForm({
 					</Text>
 				</Stack>
 			) : (
-				<SimpleGrid cols={3} spacing="sm">
+				<SimpleGrid cols={{ base: 2, sm: 4 }} spacing="sm">
 					{ROLES.map((role) => (
 						<Select
 							key={role}
 							label={t(`importProfile.${role}Col`)}
+							placeholder={t("importProfile.noColumn")}
 							data={columnOptions(roles)}
 							value={roles[role] === null ? null : String(roles[role])}
 							onChange={(v) =>
@@ -349,7 +360,8 @@ export function ImportProfileForm({
 										: assignColumn(prev, Number(v), role),
 								)
 							}
-							allowDeselect={false}
+							allowDeselect={OPTIONAL_ROLES.includes(role)}
+							clearable={OPTIONAL_ROLES.includes(role)}
 						/>
 					))}
 				</SimpleGrid>

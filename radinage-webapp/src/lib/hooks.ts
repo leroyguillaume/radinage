@@ -715,6 +715,9 @@ export function useImportOperations() {
 			const body = new FormData();
 			body.append("file", file);
 			body.append("labelCol", String(profile.labelCol));
+			if (profile.labelFallbackCol !== null) {
+				body.append("labelFallbackCol", String(profile.labelFallbackCol));
+			}
 			body.append("amountCol", String(profile.amountCol));
 			body.append("dateCol", String(profile.dateCol));
 			body.append("dateFormat", profile.dateFormat);

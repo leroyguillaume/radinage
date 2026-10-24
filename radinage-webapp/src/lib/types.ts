@@ -435,6 +435,8 @@ export interface ImportProfileResponse {
 	/** Account the profile imports operations on. */
 	accountId: string;
 	labelCol: number;
+	/** Column read when the label column is blank, null for none. */
+	labelFallbackCol: number | null;
 	amountCol: number;
 	dateCol: number;
 	dateFormat: string;

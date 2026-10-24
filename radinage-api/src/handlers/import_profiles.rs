@@ -30,6 +30,7 @@ const MAX_NAME_LEN: usize = 100;
     "name": "Crédit Agricole — CSV",
     "accountId": "0b6f3f8e-2c1a-4d5e-9f00-1a2b3c4d5e6f",
     "labelCol": 1,
+    "labelFallbackCol": 2,
     "amountCol": 3,
     "dateCol": 0,
     "dateFormat": "%d/%m/%Y",
@@ -44,6 +45,10 @@ pub struct ImportProfileRequest {
     pub account_id: Uuid,
     /// Column index of the label (0-based).
     pub label_col: usize,
+    /// Column index the label is read from when the label column is blank (0-based), null
+    /// for none.
+    #[serde(default)]
+    pub label_fallback_col: Option<usize>,
     /// Column index of the amount (0-based).
     pub amount_col: usize,
     /// Column index of the date (0-based).
@@ -65,6 +70,7 @@ pub struct ImportProfileResponse {
     pub name: String,
     pub account_id: Uuid,
     pub label_col: usize,
+    pub label_fallback_col: Option<usize>,
     pub amount_col: usize,
     pub date_col: usize,
     pub date_format: String,
@@ -82,6 +88,7 @@ impl From<ImportProfile> for ImportProfileResponse {
             name: p.fields.name,
             account_id: p.fields.account_id,
             label_col: p.fields.label_col,
+            label_fallback_col: p.fields.label_fallback_col,
             amount_col: p.fields.amount_col,
             date_col: p.fields.date_col,
             date_format: p.fields.date_format,
@@ -103,12 +110,18 @@ impl TryFrom<ImportProfileRequest> for ImportProfileFields {
                 "name must be 1 to {MAX_NAME_LEN} characters"
             )));
         }
-        if body.label_col == body.amount_col
-            || body.label_col == body.date_col
-            || body.amount_col == body.date_col
+        let columns: Vec<usize> = [body.label_col, body.amount_col, body.date_col]
+            .into_iter()
+            .chain(body.label_fallback_col)
+            .collect();
+        if columns
+            .iter()
+            .enumerate()
+            .any(|(i, col)| columns[..i].contains(col))
         {
             return Err(AppError::BadRequest(
-                "labelCol, amountCol and dateCol must be different columns".to_string(),
+                "labelCol, labelFallbackCol, amountCol and dateCol must be different columns"
+                    .to_string(),
             ));
         }
         if body.date_format.trim().is_empty()
@@ -123,6 +136,7 @@ impl TryFrom<ImportProfileRequest> for ImportProfileFields {
             name,
             account_id: body.account_id,
             label_col: body.label_col,
+            label_fallback_col: body.label_fallback_col,
             amount_col: body.amount_col,
             date_col: body.date_col,
             date_format: body.date_format,
@@ -231,6 +245,7 @@ mod tests {
             name: "  Bank  ".to_string(),
             account_id: Uuid::nil(),
             label_col: 1,
+            label_fallback_col: Some(2),
             amount_col: 3,
             date_col: 0,
             date_format: "%d/%m/%Y".to_string(),
@@ -300,14 +315,40 @@ mod tests {
 
     #[test]
     fn shared_column_is_rejected() {
-        let req = ImportProfileRequest {
-            amount_col: 1,
-            ..request()
-        };
-        assert!(matches!(
-            ImportProfileFields::try_from(req),
-            Err(AppError::BadRequest(_))
-        ));
+        for req in [
+            ImportProfileRequest {
+                amount_col: 1,
+                ..request()
+            },
+            ImportProfileRequest {
+                label_fallback_col: Some(1),
+                ..request()
+            },
+            ImportProfileRequest {
+                label_fallback_col: Some(3),
+                ..request()
+            },
+        ] {
+            assert!(matches!(
+                ImportProfileFields::try_from(req),
+                Err(AppError::BadRequest(_))
+            ));
+        }
+    }
+
+    #[test]
+    fn missing_label_fallback_is_none() {
+        let req: ImportProfileRequest = serde_json::from_value(serde_json::json!({
+            "name": "Bank",
+            "accountId": Uuid::nil(),
+            "labelCol": 1,
+            "amountCol": 3,
+            "dateCol": 0,
+            "dateFormat": "%d/%m/%Y",
+            "skipLines": 1
+        }))
+        .unwrap();
+        assert_eq!(req.label_fallback_col, None);
     }
 
     #[test]

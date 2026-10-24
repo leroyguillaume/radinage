@@ -32,6 +32,7 @@ function makeProfile(
 		name: "Crédit Agricole",
 		accountId: "account-1",
 		labelCol: 1,
+		labelFallbackCol: null,
 		amountCol: 3,
 		dateCol: 0,
 		dateFormat: "%d/%m/%Y",
@@ -151,7 +152,12 @@ describe("ImportModal", () => {
 		mockApi(
 			[
 				makeProfile(),
-				makeProfile({ id: "p2", name: "Boursorama", labelCol: 2 }),
+				makeProfile({
+					id: "p2",
+					name: "Boursorama",
+					labelCol: 2,
+					labelFallbackCol: 4,
+				}),
 			],
 			result,
 		);
@@ -173,6 +179,7 @@ describe("ImportModal", () => {
 		expect(body.get("profileId")).toBe("p2");
 		expect(body.get("accountId")).toBe("account-1");
 		expect(body.get("labelCol")).toBe("2");
+		expect(body.get("labelFallbackCol")).toBe("4");
 		expect(body.get("amountCol")).toBe("3");
 		expect(body.get("dateCol")).toBe("0");
 		expect(body.get("dateFormat")).toBe("%d/%m/%Y");

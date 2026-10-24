@@ -68,6 +68,9 @@ pub struct ImportMultipartSchema {
     /// Column index for the label (0-based)
     #[allow(dead_code)]
     label_col: usize,
+    /// Column index the label is read from when the label column is blank (0-based, optional)
+    #[allow(dead_code)]
+    label_fallback_col: Option<usize>,
     /// Column index for the amount (0-based)
     #[allow(dead_code)]
     amount_col: usize,
@@ -142,6 +145,7 @@ pub async fn import_operations<
     let mut file_bytes: Option<Vec<u8>> = None;
     let mut file_name: Option<String> = None;
     let mut label_col: Option<usize> = None;
+    let mut label_fallback_col: Option<usize> = None;
     let mut amount_col: Option<usize> = None;
     let mut date_col: Option<usize> = None;
     let mut date_format: Option<String> = None;
@@ -169,6 +173,14 @@ pub async fn import_operations<
                         .await
                         .map_err(|e| AppError::BadRequest(format!("labelCol read error: {e}")))?,
                     "labelCol",
+                )?);
+            }
+            "labelFallbackCol" => {
+                label_fallback_col = Some(parse_usize_field(
+                    &field.text().await.map_err(|e| {
+                        AppError::BadRequest(format!("labelFallbackCol read error: {e}"))
+                    })?,
+                    "labelFallbackCol",
                 )?);
             }
             "amountCol" => {
@@ -231,6 +243,7 @@ pub async fn import_operations<
     let params = ImportParams {
         label_col: label_col
             .ok_or_else(|| AppError::BadRequest("missing labelCol field".to_string()))?,
+        label_fallback_col,
         amount_col: amount_col
             .ok_or_else(|| AppError::BadRequest("missing amountCol field".to_string()))?,
         date_col: date_col
@@ -532,6 +545,9 @@ mod tests {
 
         // parameter fields
         add_text_field(&mut body, b, "labelCol", &params.label_col.to_string());
+        if let Some(col) = params.label_fallback_col {
+            add_text_field(&mut body, b, "labelFallbackCol", &col.to_string());
+        }
         add_text_field(&mut body, b, "amountCol", &params.amount_col.to_string());
         add_text_field(&mut body, b, "dateCol", &params.date_col.to_string());
         add_text_field(&mut body, b, "dateFormat", &params.date_format);
@@ -586,6 +602,7 @@ mod tests {
     fn default_import_params() -> ImportParams {
         ImportParams {
             label_col: 0,
+            label_fallback_col: None,
             amount_col: 1,
             date_col: 2,
             date_format: "%d/%m/%Y".to_string(),
@@ -665,6 +682,35 @@ mod tests {
         let json: ImportResponse = response_json(resp).await;
         assert_eq!(json.duplicate_rows, [2]);
         assert!(json.errors.is_empty(), "{:?}", json.errors);
+    }
+
+    #[tokio::test]
+    async fn import_csv_reads_the_label_fallback_column() {
+        let mut op_repo = MockOperationRepository::new();
+        op_repo
+            .expect_exists_by_fields()
+            .withf(|_, _, _, _, label| label == "COTIS CARTE VISA")
+            .times(1)
+            .returning(|_, _, _, _, _| Box::pin(async { Ok(true) }));
+        let app = build_test_router(make_test_state(
+            MockUserRepository::new(),
+            op_repo,
+            MockBudgetRepository::new(),
+        ));
+        let params = ImportParams {
+            label_fallback_col: Some(3),
+            ..default_import_params()
+        };
+        let auth = auth_header(Uuid::new_v4(), UserRole::User);
+        let csv = b"label,amount,date,detail\n,-3.50,07/10/2026,COTIS CARTE VISA\n";
+        let resp = app
+            .oneshot(import_request("b", "ops.csv", csv, &params, &auth))
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        let json: ImportResponse = response_json(resp).await;
+        assert_eq!(json.duplicate_rows, [2]);
     }
 
     #[tokio::test]

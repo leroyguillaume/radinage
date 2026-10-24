@@ -304,6 +304,9 @@ pub struct ExportImportProfile {
     #[serde(default)]
     pub account_id: Option<Uuid>,
     pub label_col: usize,
+    /// Absent from exports made before profiles had a label fallback column.
+    #[serde(default)]
+    pub label_fallback_col: Option<usize>,
     pub amount_col: usize,
     pub date_col: usize,
     pub date_format: String,
@@ -319,6 +322,7 @@ impl From<ImportProfile> for ExportImportProfile {
             name: p.fields.name,
             account_id: Some(p.fields.account_id),
             label_col: p.fields.label_col,
+            label_fallback_col: p.fields.label_fallback_col,
             amount_col: p.fields.amount_col,
             date_col: p.fields.date_col,
             date_format: p.fields.date_format,
@@ -336,6 +340,7 @@ impl From<ExportImportProfile> for ImportProfileRequest {
             name: p.name,
             account_id: Uuid::nil(),
             label_col: p.label_col,
+            label_fallback_col: p.label_fallback_col,
             amount_col: p.amount_col,
             date_col: p.date_col,
             date_format: p.date_format,
@@ -2859,6 +2864,7 @@ mod tests {
             name: name.to_string(),
             account_id: Uuid::nil(),
             label_col: 1,
+            label_fallback_col: None,
             amount_col: 3,
             date_col: 0,
             date_format: "%d/%m/%Y".to_string(),
@@ -2882,6 +2888,7 @@ mod tests {
             "name": name,
             "accountId": Uuid::nil(),
             "labelCol": 1,
+            "labelFallbackCol": null,
             "amountCol": 3,
             "dateCol": date_col,
             "dateFormat": "%d/%m/%Y",
@@ -2896,6 +2903,14 @@ mod tests {
         json.as_object_mut().unwrap().remove("csvDelimiter");
         let profile: ExportImportProfile = serde_json::from_value(json).unwrap();
         assert_eq!(profile.csv_delimiter, CsvDelimiter::Comma);
+    }
+
+    #[test]
+    fn exported_profile_without_label_fallback_has_none() {
+        let mut json = profile_json("Bank", 0);
+        json.as_object_mut().unwrap().remove("labelFallbackCol");
+        let profile: ExportImportProfile = serde_json::from_value(json).unwrap();
+        assert_eq!(profile.label_fallback_col, None);
     }
 
     async fn import_profiles_payload(
