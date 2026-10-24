@@ -99,6 +99,24 @@ export interface CategorySummaryResponse {
 	categories: CategoryTotal[];
 }
 
+/** Signed like operations. */
+export interface BudgetSummaryMonth {
+	year: number;
+	month: number;
+	/** Null when the budget expects nothing that month. */
+	expected: string | null;
+	actual: string;
+}
+
+export interface BudgetSummaryEntry {
+	budgetId: string;
+	months: BudgetSummaryMonth[];
+}
+
+export interface BudgetSummaryResponse {
+	budgets: BudgetSummaryEntry[];
+}
+
 export type ForecastMonthStatus = "past" | "current" | "future";
 
 export interface ForecastFlows {

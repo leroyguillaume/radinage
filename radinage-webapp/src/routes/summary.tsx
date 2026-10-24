@@ -1,5 +1,4 @@
 import {
-	ActionIcon,
 	Alert,
 	Badge,
 	Box,
@@ -18,7 +17,6 @@ import {
 import {
 	IconAlertCircle,
 	IconAlertTriangle,
-	IconChevronLeft,
 	IconChevronRight,
 } from "@tabler/icons-react";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
@@ -26,6 +24,7 @@ import { type CSSProperties, type ReactNode, useId, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ForecastMonthDrawer } from "@/components/ForecastMonthDrawer";
 import { PageHeader } from "@/components/PageHeader";
+import { YearStepper } from "@/components/YearStepper";
 import {
 	formatAmount,
 	formatMonthYear,
@@ -147,54 +146,6 @@ const cardTitleProps = {
 	fz: 15,
 	fw: 600,
 } as const;
-
-interface YearStepperProps {
-	year: number;
-	onChange: (delta: number) => void;
-}
-
-function YearStepper({ year, onChange }: YearStepperProps) {
-	const { t } = useTranslation();
-	return (
-		<Group
-			gap={4}
-			p={4}
-			wrap="nowrap"
-			bg={palette.surface}
-			bd={`1px solid ${palette.border}`}
-			style={{ borderRadius: 999 }}
-		>
-			<ActionIcon
-				size={44}
-				radius="xl"
-				variant="subtle"
-				aria-label={t("forecast.previousYear")}
-				onClick={() => onChange(-1)}
-			>
-				<IconChevronLeft size={20} />
-			</ActionIcon>
-			<Text
-				className="tabular-nums"
-				ff={headingFont}
-				fw={700}
-				fz={{ base: 17, sm: 20 }}
-				miw={{ base: 48, sm: 64 }}
-				ta="center"
-			>
-				{year}
-			</Text>
-			<ActionIcon
-				size={44}
-				radius="xl"
-				variant="subtle"
-				aria-label={t("forecast.nextYear")}
-				onClick={() => onChange(1)}
-			>
-				<IconChevronRight size={20} />
-			</ActionIcon>
-		</Group>
-	);
-}
 
 interface ModeSwitchProps {
 	mode: ForecastMode;

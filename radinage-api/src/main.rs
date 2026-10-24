@@ -639,6 +639,15 @@ where
                     .id("getCategorySummary")
             }),
         )
+        .api_route(
+            "/summary/budgets",
+            get_with(handlers::summary::get_budget_summary, |op| {
+                op.tag("Summary")
+                    .summary("Get each budget month by month over a month range")
+                    .description("List every budget of the authenticated user with, for each month of the given range (inclusive, at most 24 months), what the budget expects (`expected`, null when nothing) and the net of the amounts linked to it (`actual`), signed like operations. A split operation counts through its parts, each under its own budget; ignored operations are excluded. Returns 400 when from is after to or the range exceeds 24 months.")
+                    .id("getBudgetSummary")
+            }),
+        )
         // Forecast
         .api_route(
             "/forecast",
@@ -1009,6 +1018,10 @@ pub(crate) mod test_util {
             .route(
                 "/summary/categories",
                 routing::get(handlers::summary::get_category_summary),
+            )
+            .route(
+                "/summary/budgets",
+                routing::get(handlers::summary::get_budget_summary),
             )
             .route("/forecast", routing::get(handlers::forecast::get_forecast))
             .route(

@@ -1,5 +1,7 @@
 {
 	"common": {
+		"previousYear": "Previous year",
+		"nextYear": "Next year",
 		"appName": "Radinage",
 		"loading": "Loading…",
 		"error": "An error occurred",
@@ -230,7 +232,89 @@
 			"noDue": "Nothing due this month"
 		},
 		"noRules": "No matching rule",
-		"deleteConfirmMessage": "The budget “{{label}}” will be permanently deleted."
+		"deleteConfirmMessage": "The budget “{{label}}” will be permanently deleted.",
+		"periodLabel": "Period",
+		"periods": {
+			"month": "Month",
+			"year": "Year"
+		},
+		"yearSubtitle": "{{year}}, up to {{date}}",
+		"yearSubtitlePast": "Year {{year}}",
+		"yearSubtitleFuture": "Year {{year}}, planned",
+		"yearProgress": {
+			"amounts": "{{real}} of {{expected}} expected",
+			"perYear": "/ year",
+			"projection": "At this pace: about {{amount}} by December ({{gap}})",
+			"noDue": "Nothing due this year",
+			"months": "Month by month",
+			"expectedMark": "Expected so far",
+			"states": {
+				"within": "Within budget",
+				"over": "Over budget",
+				"short": "Fell short",
+				"current": "In progress",
+				"future": "Planned",
+				"none": "Nothing due"
+			},
+			"monthTooltip": "{{month}}: {{actual}} of {{expected}}",
+			"monthTooltipNone": "{{month}}: {{actual}}, nothing due"
+		},
+		"overview": {
+			"title": "{{year}} at a glance",
+			"byType": "By budget type",
+			"ofYear": "/ {{amount}} for the year",
+			"deltaNote": "{{gap}} compared with what was expected so far",
+			"monthlyExpenses": "Expenses by month",
+			"monthlyChart": "Expenses month by month, compared with what was planned",
+			"underPlan": "Under plan",
+			"overPlan": "Over plan",
+			"plannedOfMonth": "Planned for the month",
+			"overTitle": "Over budget",
+			"overEmpty": "No expense budget is over so far.",
+			"overMonths": "{{over}} of {{due}} months over",
+			"remainingTitle": "Until December",
+			"remaining": {
+				"expense": "To spend",
+				"income": "To receive",
+				"savings": "To save"
+			}
+		},
+		"detail": {
+			"back": "Back to budgets",
+			"notFound": "This budget does not exist.",
+			"realTitle": {
+				"expense": "Spent in {{year}}",
+				"income": "Received in {{year}}",
+				"savings": "Saved in {{year}}"
+			},
+			"expectedSoFar": "of {{expected}} expected so far · {{planned}} for the year",
+			"monthsTitle": "Month by month",
+			"monthsChart": "{{label}} month by month, compared with what was planned",
+			"average": "Average",
+			"peak": "Peak · {{month}}",
+			"missed": "Months off",
+			"missedValue": "{{missed}} / {{due}}",
+			"cumulativeTitle": "Over the year",
+			"cumulativeChart": "Cumulative total of {{label}} compared with what was planned",
+			"real": "Actual",
+			"planned": "Planned",
+			"projection": "Projection",
+			"projectionAbove": "At this pace, about {{amount}} by December: {{gap}} above the yearly budget.",
+			"projectionBelow": "At this pace, about {{amount}} by December: {{gap}} below the yearly budget.",
+			"projectionOnTarget": "At this pace, about {{amount}} by December, right on the yearly budget.",
+			"left": "{{amount}} still expected by December.",
+			"periodsTitle": "Periods",
+			"since": "Since {{start}}",
+			"range": "{{start}} → {{end}}",
+			"perRecurrence": {
+				"weekly": "{{amount}} / week",
+				"monthly": "{{amount}} / month",
+				"quarterly": "{{amount}} / quarter",
+				"yearly": "{{amount}} / year"
+			},
+			"open": "Open the {{label}} budget for the year",
+			"cumulativeTooltip": "{{month}}: {{real}} so far, {{planned}} planned"
+		}
 	},
 	"categories": {
 		"title": "Categories",
@@ -401,8 +485,6 @@
 		"remainingDays_other": "{{count}} days left",
 		"subtitleInfo": "How it's calculated",
 		"subtitle": "Actuals for past months, actuals plus what your budgets still expect for the current month, then a forecast based on your budgets. Upcoming spending outside budgets follows your average over the last 3 months.",
-		"previousYear": "Previous year",
-		"nextYear": "Next year",
 		"surplusTitle": "{{year}} surplus",
 		"rollingSurplusTitle": "{{count}}-month surplus",
 		"surplusHint": "What's left of your income once expenses are paid, if your budgets hold.",

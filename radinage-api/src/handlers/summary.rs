@@ -1,9 +1,15 @@
 use crate::{
     AppState,
     auth::middleware::AuthUser,
-    domain::{budget::BudgetType, last_day_of_month},
+    domain::{
+        budget::{BudgetType, YearMonth},
+        last_day_of_month,
+    },
     error::{AppError, AppResult},
-    repositories::{CategoryTotal, OperationRepository, SummaryCategory},
+    repositories::{
+        BudgetRepository, CategoryTotal, OperationRepository, SummaryCategory, SummaryRow,
+    },
+    services::forecast::horizon,
 };
 use axum::{
     Json,
@@ -13,7 +19,11 @@ use chrono::NaiveDate;
 use rust_decimal::Decimal;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use uuid::Uuid;
+
+/// Longest range `GET /summary/budgets` accepts, in months.
+pub const MAX_BUDGET_SUMMARY_MONTHS: i64 = 24;
 
 // ── DTOs ─────────────────────────────────────────────────────────────────────
 
@@ -97,6 +107,37 @@ pub struct CategorySummaryResponse {
     pub categories: Vec<CategoryTotalResponse>,
 }
 
+/// What one budget expected and received in one month, signed like operations.
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct BudgetMonthResponse {
+    pub year: i32,
+    /// Month number (1–12).
+    pub month: u32,
+    /// What the budget expects this month, null when it expects nothing.
+    #[schemars(with = "Option<String>")]
+    pub expected: Option<Decimal>,
+    /// Net of the amounts linked to the budget this month.
+    #[schemars(with = "String")]
+    pub actual: Decimal,
+}
+
+/// One budget, month by month over the range.
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct BudgetSummaryEntryResponse {
+    pub budget_id: Uuid,
+    /// Every month of the range, in order.
+    pub months: Vec<BudgetMonthResponse>,
+}
+
+/// Every budget of the user, month by month over a month range.
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct BudgetSummaryResponse {
+    pub budgets: Vec<BudgetSummaryEntryResponse>,
+}
+
 // ── Handlers ─────────────────────────────────────────────────────────────────
 
 /// First and last day of the inclusive month range of `q`.
@@ -125,6 +166,71 @@ pub async fn get_category_summary<U, O: OperationRepository, B, P, C, R>(
     Ok(Json(CategorySummaryResponse {
         categories: totals.into_iter().map(Into::into).collect(),
     }))
+}
+
+/// Net of the budget-linked rows, per budget and accounting month.
+fn actuals_by_budget_and_month(rows: &[SummaryRow]) -> HashMap<(Uuid, YearMonth), Decimal> {
+    let mut actuals = HashMap::new();
+    for row in rows {
+        if let (Some(budget_id), Some(SummaryCategory::Budgeted(_))) =
+            (row.budget_id, row.category())
+        {
+            *actuals
+                .entry((budget_id, YearMonth::of(row.date)))
+                .or_default() += row.amount;
+        }
+    }
+    actuals
+}
+
+pub async fn get_budget_summary<U, O: OperationRepository, B: BudgetRepository, P, C, R>(
+    State(state): State<AppState<U, O, B, P, C, R>>,
+    auth_user: AuthUser,
+    Query(q): Query<SummaryQuery>,
+) -> AppResult<Json<BudgetSummaryResponse>> {
+    let (start, end) = range_bounds(&q)?;
+    let month_count = i64::from(q.to_year - q.from_year) * 12 + i64::from(q.to_month)
+        - i64::from(q.from_month)
+        + 1;
+    if month_count > MAX_BUDGET_SUMMARY_MONTHS {
+        return Err(AppError::BadRequest(format!(
+            "range must not exceed {MAX_BUDGET_SUMMARY_MONTHS} months"
+        )));
+    }
+    let months: Vec<YearMonth> = horizon(
+        YearMonth::of(start),
+        usize::try_from(month_count).unwrap_or(0),
+    )
+    .collect();
+
+    let rows = state
+        .operation_repo
+        .list_for_summary(auth_user.id, start, end)
+        .await?;
+    let budgets = state.budget_repo.list_all_for_user(auth_user.id).await?;
+    let actuals = actuals_by_budget_and_month(&rows);
+
+    let budgets = budgets
+        .into_iter()
+        .map(|budget| BudgetSummaryEntryResponse {
+            budget_id: budget.id,
+            months: months
+                .iter()
+                .map(|&month| BudgetMonthResponse {
+                    year: month.year,
+                    month: month.month,
+                    expected: budget
+                        .kind
+                        .expected_amount_for_month(month.year, month.month),
+                    actual: actuals
+                        .get(&(budget.id, month))
+                        .copied()
+                        .unwrap_or_default(),
+                })
+                .collect(),
+        })
+        .collect();
+    Ok(Json(BudgetSummaryResponse { budgets }))
 }
 
 pub async fn get_summary<U, O: OperationRepository, B, P, C, R>(
@@ -196,7 +302,10 @@ pub async fn get_summary<U, O: OperationRepository, B, P, C, R>(
 mod tests {
     use super::*;
     use crate::{
-        domain::user::UserRole,
+        domain::{
+            budget::{Budget, BudgetKind, CurrentPeriod, Recurrence},
+            user::UserRole,
+        },
         repositories::{
             MockBudgetRepository, MockOperationRepository, MockUserRepository, SummaryRow,
         },
@@ -381,6 +490,145 @@ mod tests {
         assert_eq!(json["categories"][0]["categoryId"], category_id.to_string());
         assert_eq!(json["categories"][0]["expense"], "-70");
         assert_eq!(json["categories"][1]["categoryId"], serde_json::Value::Null);
+    }
+
+    fn budget(kind: BudgetKind) -> Budget {
+        Budget {
+            id: Uuid::new_v4(),
+            user_id: Uuid::new_v4(),
+            label: "Budget".to_string(),
+            budget_type: BudgetType::Expense,
+            kind,
+            rules: vec![],
+            category_id: None,
+            created_at: chrono::Utc::now(),
+        }
+    }
+
+    fn linked(budget_id: Option<Uuid>, link: &str, date: NaiveDate, amount: i64) -> SummaryRow {
+        SummaryRow {
+            amount: Decimal::new(amount, 0),
+            date,
+            budget_link_type: link.to_string(),
+            budget_id,
+            budget_type: budget_id.map(|_| "expense".to_string()),
+        }
+    }
+
+    fn budget_summary_app(or: MockOperationRepository, budgets: Vec<Budget>) -> axum::Router {
+        let mut br = MockBudgetRepository::new();
+        br.expect_list_all_for_user().returning(move |_| {
+            let budgets = budgets.clone();
+            Box::pin(async move { Ok(budgets) })
+        });
+        build_test_router(make_test_state(MockUserRepository::new(), or, br))
+    }
+
+    async fn get_budget_summary(app: axum::Router, query: &str) -> axum::response::Response {
+        let auth = auth_header(Uuid::new_v4(), UserRole::User);
+        let req = json_request(
+            "GET",
+            &format!("/summary/budgets?{query}"),
+            None,
+            Some(&auth),
+        );
+        app.oneshot(req).await.unwrap()
+    }
+
+    #[tokio::test]
+    async fn budget_summary_lists_expected_and_actual_per_budget_and_month() {
+        let monthly = budget(BudgetKind::Recurring {
+            recurrence: Recurrence::Monthly,
+            closed_periods: vec![],
+            current_period: CurrentPeriod {
+                start: YearMonth::new(2024, 1),
+                end: None,
+                amount: Decimal::new(-450, 0),
+            },
+        });
+        let occasional = budget(BudgetKind::Occasional {
+            month: 2,
+            year: 2025,
+            amount: Decimal::new(-1500, 0),
+        });
+        let (monthly_id, occasional_id) = (monthly.id, occasional.id);
+        let day = |y, m, d| NaiveDate::from_ymd_opt(y, m, d).unwrap();
+
+        let mut or = MockOperationRepository::new();
+        or.expect_list_for_summary()
+            .withf(|_, from, to| {
+                *from == NaiveDate::from_ymd_opt(2024, 12, 1).unwrap()
+                    && *to == NaiveDate::from_ymd_opt(2025, 2, 28).unwrap()
+            })
+            .once()
+            .returning(move |_, _, _| {
+                let rows = vec![
+                    linked(Some(monthly_id), "auto", day(2024, 12, 3), -200),
+                    linked(Some(monthly_id), "manual", day(2024, 12, 20), -280),
+                    linked(Some(monthly_id), "auto", day(2025, 2, 1), -100),
+                    linked(Some(occasional_id), "manual", day(2025, 2, 10), -1730),
+                    linked(None, "unlinked", day(2024, 12, 5), -999),
+                ];
+                Box::pin(async move { Ok(rows) })
+            });
+
+        let resp = get_budget_summary(
+            budget_summary_app(or, vec![monthly, occasional]),
+            "fromYear=2024&fromMonth=12&toYear=2025&toMonth=2",
+        )
+        .await;
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        let json: serde_json::Value = response_json(resp).await;
+        assert_eq!(
+            json,
+            serde_json::json!({ "budgets": [
+                { "budgetId": monthly_id, "months": [
+                    { "year": 2024, "month": 12, "expected": "-450", "actual": "-480" },
+                    { "year": 2025, "month": 1, "expected": "-450", "actual": "0" },
+                    { "year": 2025, "month": 2, "expected": "-450", "actual": "-100" },
+                ] },
+                { "budgetId": occasional_id, "months": [
+                    { "year": 2024, "month": 12, "expected": null, "actual": "0" },
+                    { "year": 2025, "month": 1, "expected": null, "actual": "0" },
+                    { "year": 2025, "month": 2, "expected": "-1500", "actual": "-1730" },
+                ] },
+            ] })
+        );
+    }
+
+    #[tokio::test]
+    async fn budget_summary_accepts_24_months_and_rejects_more() {
+        let mut or = MockOperationRepository::new();
+        or.expect_list_for_summary()
+            .once()
+            .returning(|_, _, _| Box::pin(async { Ok(vec![]) }));
+        let app = budget_summary_app(or, vec![]);
+
+        let ok = get_budget_summary(
+            app.clone(),
+            "fromYear=2024&fromMonth=1&toYear=2025&toMonth=12",
+        )
+        .await;
+        let too_long =
+            get_budget_summary(app, "fromYear=2024&fromMonth=1&toYear=2026&toMonth=1").await;
+
+        assert_eq!(ok.status(), StatusCode::OK);
+        assert_eq!(too_long.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn budget_summary_rejects_a_reversed_range() {
+        let mut or = MockOperationRepository::new();
+        or.expect_list_for_summary().never();
+
+        let resp = get_budget_summary(
+            budget_summary_app(or, vec![]),
+            "fromYear=2025&fromMonth=2&toYear=2024&toMonth=11",
+        )
+        .await;
+
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
     }
 
     #[tokio::test]
