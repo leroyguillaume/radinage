@@ -171,6 +171,34 @@ pub struct SetAccountRequest {
     pub account_id: Uuid,
 }
 
+/// Most operations a single request changes at once.
+const MAX_OPERATIONS_AT_ONCE: usize = 1000;
+
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct SetOperationsAccountRequest {
+    /// Between 1 and 1000 of the caller's operations; unknown ones are left out.
+    pub operation_ids: Vec<Uuid>,
+    /// One of the caller's imported checking accounts.
+    pub account_id: Uuid,
+}
+
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct SetOperationsCategoryRequest {
+    /// Between 1 and 1000 of the caller's operations; unknown and split ones are left out.
+    pub operation_ids: Vec<Uuid>,
+    /// One of the caller's categories, or `null` to clear the operations' own category.
+    pub category_id: Option<Uuid>,
+}
+
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct OperationsUpdatedResponse {
+    /// How many of the requested operations changed.
+    pub updated: u64,
+}
+
 /// Full set of parts to split an operation into, replacing any existing split.
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
@@ -569,15 +597,62 @@ pub async fn set_account<U, O: OperationRepository, B, P, C, R, A: AccountReposi
     Json(body): Json<SetAccountRequest>,
 ) -> AppResult<Json<OperationResponse>> {
     account_receiving_operations(&state.account_repo, body.account_id, auth_user.id).await?;
-    if !state
+    if state
         .operation_repo
-        .set_account(id, auth_user.id, body.account_id)
+        .set_accounts(&[id], auth_user.id, body.account_id)
         .await?
+        == 0
     {
         return Err(AppError::NotFound);
     }
     let op = state.operation_repo.find_by_id(id, auth_user.id).await?;
     Ok(Json(op.into()))
+}
+
+pub async fn set_operations_account<U, O: OperationRepository, B, P, C, R, A: AccountRepository>(
+    State(state): State<AppState<U, O, B, P, C, R, A>>,
+    auth_user: AuthUser,
+    Json(body): Json<SetOperationsAccountRequest>,
+) -> AppResult<Json<OperationsUpdatedResponse>> {
+    ensure_operation_count(&body.operation_ids)?;
+    account_receiving_operations(&state.account_repo, body.account_id, auth_user.id).await?;
+    let updated = state
+        .operation_repo
+        .set_accounts(&body.operation_ids, auth_user.id, body.account_id)
+        .await?;
+    Ok(Json(OperationsUpdatedResponse { updated }))
+}
+
+pub async fn set_operations_category<
+    U,
+    O: OperationRepository,
+    B,
+    P,
+    C: CategoryRepository,
+    R,
+    A,
+>(
+    State(state): State<AppState<U, O, B, P, C, R, A>>,
+    auth_user: AuthUser,
+    Json(body): Json<SetOperationsCategoryRequest>,
+) -> AppResult<Json<OperationsUpdatedResponse>> {
+    ensure_operation_count(&body.operation_ids)?;
+    ensure_category_is_users(&state.category_repo, body.category_id, auth_user.id).await?;
+    let updated = state
+        .operation_repo
+        .set_categories(&body.operation_ids, auth_user.id, body.category_id)
+        .await?;
+    Ok(Json(OperationsUpdatedResponse { updated }))
+}
+
+fn ensure_operation_count(ids: &[Uuid]) -> AppResult<()> {
+    if ids.is_empty() || ids.len() > MAX_OPERATIONS_AT_ONCE {
+        return Err(AppError::BadRequest(format!(
+            "between 1 and {MAX_OPERATIONS_AT_ONCE} operations expected, got {}",
+            ids.len()
+        )));
+    }
+    Ok(())
 }
 
 pub async fn clear_category<U, O: OperationRepository, B, P, C, R, A>(
@@ -1961,10 +2036,10 @@ mod tests {
         let joint = Uuid::new_v4();
         let mut op_repo = MockOperationRepository::new();
         op_repo
-            .expect_set_account()
-            .withf(move |id, uid, aid| *id == op_id && *uid == user_id && *aid == joint)
+            .expect_set_accounts()
+            .withf(move |ids, uid, aid| ids == [op_id] && *uid == user_id && *aid == joint)
             .once()
-            .returning(|_, _, _| Box::pin(async { Ok(true) }));
+            .returning(|_, _, _| Box::pin(async { Ok(1) }));
         op_repo.expect_find_by_id().returning(move |_, _| {
             Box::pin(async move {
                 Ok(Operation {
@@ -1988,7 +2063,7 @@ mod tests {
             .expect_find()
             .returning(|_, _| Box::pin(async { Ok(None) }));
         let mut op_repo = MockOperationRepository::new();
-        op_repo.expect_set_account().never();
+        op_repo.expect_set_accounts().never();
 
         let resp = put_account(
             op_repo,
@@ -2006,8 +2081,8 @@ mod tests {
     async fn set_account_of_an_unknown_operation_returns_404() {
         let mut op_repo = MockOperationRepository::new();
         op_repo
-            .expect_set_account()
-            .returning(|_, _, _| Box::pin(async { Ok(false) }));
+            .expect_set_accounts()
+            .returning(|_, _, _| Box::pin(async { Ok(0) }));
 
         let resp = put_account(
             op_repo,
@@ -2019,6 +2094,119 @@ mod tests {
         .await;
 
         assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+    }
+
+    async fn put_bulk(app: Router, user_id: Uuid, path: &str, body: serde_json::Value) -> Response {
+        let auth = auth_header(user_id, UserRole::User);
+        app.oneshot(json_request(
+            "PUT",
+            path,
+            Some(&body.to_string()),
+            Some(&auth),
+        ))
+        .await
+        .unwrap()
+    }
+
+    fn accounts_app(op_repo: MockOperationRepository) -> Router {
+        use crate::test_util::{
+            make_test_state_with_all, no_categories, no_ignore_rules, no_import_profiles,
+        };
+        build_test_router(make_test_state_with_all(
+            MockUserRepository::new(),
+            op_repo,
+            MockBudgetRepository::new(),
+            no_import_profiles(),
+            no_categories(),
+            no_ignore_rules(),
+            main_accounts(),
+        ))
+    }
+
+    #[tokio::test]
+    async fn set_operations_account_moves_them_and_counts_the_moved() {
+        let user_id = Uuid::new_v4();
+        let joint = Uuid::new_v4();
+        let ids = [Uuid::new_v4(), Uuid::new_v4()];
+        let mut op_repo = MockOperationRepository::new();
+        op_repo
+            .expect_set_accounts()
+            .withf(move |got, uid, aid| got == ids && *uid == user_id && *aid == joint)
+            .once()
+            .returning(|_, _, _| Box::pin(async { Ok(2) }));
+
+        let resp = put_bulk(
+            accounts_app(op_repo),
+            user_id,
+            "/operations/account",
+            serde_json::json!({ "operationIds": ids, "accountId": joint }),
+        )
+        .await;
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        let json: OperationsUpdatedResponse = response_json(resp).await;
+        assert_eq!(json.updated, 2);
+    }
+
+    #[tokio::test]
+    async fn set_operations_account_needs_between_1_and_1000_operations() {
+        for count in [0, MAX_OPERATIONS_AT_ONCE + 1] {
+            let mut op_repo = MockOperationRepository::new();
+            op_repo.expect_set_accounts().never();
+            let ids: Vec<Uuid> = (0..count).map(|_| Uuid::new_v4()).collect();
+
+            let resp = put_bulk(
+                accounts_app(op_repo),
+                Uuid::new_v4(),
+                "/operations/account",
+                serde_json::json!({ "operationIds": ids, "accountId": Uuid::new_v4() }),
+            )
+            .await;
+
+            assert_eq!(resp.status(), StatusCode::BAD_REQUEST, "{count} operations");
+        }
+    }
+
+    #[tokio::test]
+    async fn set_operations_category_sets_or_clears_it() {
+        let user_id = Uuid::new_v4();
+        let ids = [Uuid::new_v4(), Uuid::new_v4()];
+        for category_id in [Some(Uuid::new_v4()), None] {
+            let mut op_repo = MockOperationRepository::new();
+            op_repo
+                .expect_set_categories()
+                .withf(move |got, uid, cid| got == ids && *uid == user_id && *cid == category_id)
+                .once()
+                .returning(|_, _, _| Box::pin(async { Ok(1) }));
+
+            let resp = put_bulk(
+                category_app(op_repo, categories_existing(true)),
+                user_id,
+                "/operations/category",
+                serde_json::json!({ "operationIds": ids, "categoryId": category_id }),
+            )
+            .await;
+
+            assert_eq!(resp.status(), StatusCode::OK);
+            let json: OperationsUpdatedResponse = response_json(resp).await;
+            assert_eq!(json.updated, 1);
+        }
+    }
+
+    #[tokio::test]
+    async fn set_operations_category_refuses_an_unknown_category() {
+        let mut op_repo = MockOperationRepository::new();
+        op_repo.expect_set_categories().never();
+
+        let resp = put_bulk(
+            category_app(op_repo, categories_existing(false)),
+            Uuid::new_v4(),
+            "/operations/category",
+            serde_json::json!({ "operationIds": [Uuid::new_v4()], "categoryId": Uuid::new_v4() }),
+        )
+        .await;
+
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
     }
 
     #[tokio::test]

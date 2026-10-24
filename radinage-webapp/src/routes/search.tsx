@@ -26,6 +26,7 @@ import { useDebouncedValue, useDisclosure } from "@mantine/hooks";
 import {
 	IconAdjustmentsHorizontal,
 	IconAlertCircle,
+	IconListCheck,
 	IconRestore,
 	IconSearch,
 	IconSearchOff,
@@ -39,6 +40,7 @@ import { useTranslation } from "react-i18next";
 import { CategoryBadge, CategoryDot } from "@/components/CategoryBadge";
 import { useOperationActions } from "@/components/OperationActions";
 import { OperationRow } from "@/components/OperationRow";
+import { OperationSelectionBar } from "@/components/OperationSelectionBar";
 import { PageHeader } from "@/components/PageHeader";
 import { StatTile } from "@/components/StatTile";
 import {
@@ -602,16 +604,24 @@ function budgetNames(
 	return [...ids].map((id) => budgetById.get(id)?.label ?? "?").join(", ");
 }
 
+/** The ids of the selected operations, or null outside the selection mode. */
+interface ResultSelection {
+	ids: Set<string> | null;
+	onToggle: (op: OperationResponse) => void;
+}
+
 function ResultRow({
 	op,
 	categoryById,
 	budgetById,
 	onOpen,
+	selection,
 }: {
 	op: OperationResponse;
 	categoryById: Map<string, CategoryResponse>;
 	budgetById: Map<string, BudgetResponse>;
 	onOpen: (op: OperationResponse) => void;
+	selection: ResultSelection;
 }) {
 	return (
 		<OperationRow
@@ -621,6 +631,11 @@ function ResultRow({
 			category={<OperationCategories op={op} categoryById={categoryById} />}
 			budget={budgetNames(op, budgetById)}
 			onOpen={onOpen}
+			selection={
+				selection.ids
+					? { selected: selection.ids.has(op.id), onToggle: selection.onToggle }
+					: undefined
+			}
 		/>
 	);
 }
@@ -657,11 +672,13 @@ function ResultGroupCard({
 	categoryById,
 	budgetById,
 	onOpen,
+	selection,
 }: {
 	group: ResultGroup;
 	categoryById: Map<string, CategoryResponse>;
 	budgetById: Map<string, BudgetResponse>;
 	onOpen: (op: OperationResponse) => void;
+	selection: ResultSelection;
 }) {
 	const titleId = useId();
 	return (
@@ -692,6 +709,7 @@ function ResultGroupCard({
 						categoryById={categoryById}
 						budgetById={budgetById}
 						onOpen={onOpen}
+						selection={selection}
 					/>
 				))}
 			</Box>
@@ -795,6 +813,20 @@ function SearchPage() {
 		categories,
 		withMonthLink: true,
 	});
+	const [selectedIds, setSelectedIds] = useState<Set<string> | null>(null);
+	// Only what is on screen can be changed, whatever was picked before the results changed.
+	const selected = selectedIds
+		? operations.filter((op) => selectedIds.has(op.id))
+		: [];
+	const selection: ResultSelection = {
+		ids: selectedIds,
+		onToggle: (op) =>
+			setSelectedIds((ids) => {
+				const next = new Set(ids);
+				if (!next.delete(op.id)) next.add(op.id);
+				return next;
+			}),
+	};
 
 	const controls = (
 		<FilterControls
@@ -918,7 +950,18 @@ function SearchPage() {
 							style={{ opacity: query.isPlaceholderData ? 0.6 : 1 }}
 						>
 							<SearchTotals total={total} totals={firstPage.totals} />
-							<Group justify="flex-end">
+							<Group justify="flex-end" gap="xs">
+								{selectedIds === null && (
+									<Button
+										variant="default"
+										h={44}
+										mr="auto"
+										leftSection={<IconListCheck size={18} />}
+										onClick={() => setSelectedIds(new Set())}
+									>
+										{t("search.selection.start")}
+									</Button>
+								)}
 								<SortControl filters={filters} onChange={update} />
 							</Group>
 							{groupResults(operations, filters.sort ?? "date").map((group) => (
@@ -928,6 +971,7 @@ function SearchPage() {
 									categoryById={categoryById}
 									budgetById={budgetById}
 									onOpen={handlers.onOpen}
+									selection={selection}
 								/>
 							))}
 							<Stack align="center" gap={6}>
@@ -947,6 +991,19 @@ function SearchPage() {
 									</Button>
 								)}
 							</Stack>
+							{selectedIds !== null && (
+								<OperationSelectionBar
+									selected={selected}
+									selectable={operations.length}
+									accounts={accounts}
+									categories={categories}
+									onSelectAll={() =>
+										setSelectedIds(new Set(operations.map((op) => op.id)))
+									}
+									onClear={() => setSelectedIds(new Set())}
+									onDone={() => setSelectedIds(null)}
+								/>
+							)}
 						</Stack>
 					)
 				)}

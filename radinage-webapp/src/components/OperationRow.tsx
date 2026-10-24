@@ -1,4 +1,4 @@
-import { Badge, Box, Text, UnstyledButton } from "@mantine/core";
+import { Badge, Box, Checkbox, Text, UnstyledButton } from "@mantine/core";
 import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { formatIsoDate, formatSignedAmount } from "@/lib/format";
@@ -6,12 +6,19 @@ import { balanceTextColor } from "@/lib/tones";
 import type { OperationResponse } from "@/lib/types";
 import { palette } from "@/theme";
 
+const ROW_CLASS =
+	"grid min-h-[44px] w-full items-center gap-x-3 py-2 text-left sm:gap-x-4 sm:py-1";
+
 /**
  * Fixed column tracks from `sm` up, so every row of a list lines its
  * columns up whatever their content.
  */
-const ROW_CLASS =
-	"grid min-h-[44px] w-full items-center gap-x-3 py-2 text-left [grid-template-areas:'label_amount'_'meta_meta'] grid-cols-[minmax(0,1fr)_auto] sm:gap-x-4 sm:py-1 sm:[grid-template-areas:'date_label_category_budget_amount'] sm:grid-cols-[96px_minmax(0,1fr)_180px_160px_136px]";
+const ROW_TRACKS =
+	"[grid-template-areas:'label_amount'_'meta_meta'] grid-cols-[minmax(0,1fr)_auto] sm:[grid-template-areas:'date_label_category_budget_amount'] sm:grid-cols-[96px_minmax(0,1fr)_180px_160px_136px]";
+
+/** `ROW_TRACKS` behind a leading checkbox column. */
+const SELECTABLE_ROW_TRACKS =
+	"[grid-template-areas:'check_label_amount'_'check_meta_meta'] grid-cols-[auto_minmax(0,1fr)_auto] sm:[grid-template-areas:'check_date_label_category_budget_amount'] sm:grid-cols-[auto_96px_minmax(0,1fr)_180px_160px_136px]";
 
 interface OperationRowProps {
 	op: OperationResponse;
@@ -24,6 +31,8 @@ interface OperationRowProps {
 	/** Shown after the label, before the ignored badge. */
 	badge?: ReactNode;
 	onOpen: (op: OperationResponse) => void;
+	/** Turns the row into a checkbox toggling the operation in a selection. */
+	selection?: { selected: boolean; onToggle: (op: OperationResponse) => void };
 }
 
 /** A list row opening the operation sheet, its columns lined up from `sm` up. */
@@ -35,6 +44,7 @@ export function OperationRow({
 	budget,
 	badge,
 	onOpen,
+	selection,
 }: OperationRowProps) {
 	const { t, i18n } = useTranslation();
 
@@ -43,7 +53,21 @@ export function OperationRow({
 			component="li"
 			style={{ borderBottom: `1px dashed ${palette.border}` }}
 		>
-			<UnstyledButton onClick={() => onOpen(op)} className={ROW_CLASS}>
+			<UnstyledButton
+				onClick={() => (selection ? selection.onToggle(op) : onOpen(op))}
+				role={selection ? "checkbox" : undefined}
+				aria-checked={selection?.selected}
+				className={`${ROW_CLASS} ${selection ? SELECTABLE_ROW_TRACKS : ROW_TRACKS}`}
+			>
+				{selection && (
+					<Checkbox
+						checked={selection.selected}
+						readOnly
+						tabIndex={-1}
+						aria-hidden
+						className="pointer-events-none [grid-area:check]"
+					/>
+				)}
 				<Box className="flex min-w-0 items-center gap-2 [grid-area:label]">
 					<Text
 						fw={500}

@@ -481,6 +481,11 @@ export interface CategoryRule {
 /** Operations a category's rules were applied to. */
 export type ApplyCategoryResponse = ApplyBudgetResponse;
 
+/** How many of the operations a single request named changed. */
+export interface OperationsUpdatedResponse {
+	updated: number;
+}
+
 export type CategoryRequest = Omit<CategoryResponse, "id" | "createdAt">;
 
 /** What a category looks like, independently of its name. */

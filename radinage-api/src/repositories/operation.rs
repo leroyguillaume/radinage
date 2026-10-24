@@ -231,14 +231,23 @@ pub trait OperationRepository: Send + Sync + 'static {
         category_id: Option<Uuid>,
     ) -> impl std::future::Future<Output = AppResult<bool>> + Send;
 
-    /// Move an operation to another account of its owner. Returns `false` if it does not exist
-    /// or belongs to another user.
-    fn set_account(
+    /// Set the own category of the user's operations among `ids`, or clear it. Split operations
+    /// are left untouched: their parts carry their categories. Returns how many changed.
+    fn set_categories(
         &self,
-        id: Uuid,
+        ids: &[Uuid],
+        user_id: Uuid,
+        category_id: Option<Uuid>,
+    ) -> impl std::future::Future<Output = AppResult<u64>> + Send;
+
+    /// Move the user's operations among `ids` to another of their accounts. Returns how many
+    /// moved.
+    fn set_accounts(
+        &self,
+        ids: &[Uuid],
         user_id: Uuid,
         account_id: Uuid,
-    ) -> impl std::future::Future<Output = AppResult<bool>> + Send;
+    ) -> impl std::future::Future<Output = AppResult<u64>> + Send;
 
     /// Set an auto budget link without a user-id check (used internally by the matcher).
     /// Split operations are left untouched.
@@ -653,16 +662,37 @@ impl OperationRepository for PgOperationRepository {
         Ok(affected > 0)
     }
 
-    async fn set_account(&self, id: Uuid, user_id: Uuid, account_id: Uuid) -> AppResult<bool> {
-        let affected =
-            sqlx::query("UPDATE operations SET account_id = $1 WHERE id = $2 AND user_id = $3")
-                .bind(account_id)
-                .bind(id)
-                .bind(user_id)
-                .execute(&self.pool)
-                .await?
-                .rows_affected();
-        Ok(affected > 0)
+    async fn set_categories(
+        &self,
+        ids: &[Uuid],
+        user_id: Uuid,
+        category_id: Option<Uuid>,
+    ) -> AppResult<u64> {
+        let affected = sqlx::query(
+            "UPDATE operations o SET category_id = $1
+             WHERE o.id = ANY($2) AND o.user_id = $3
+               AND NOT EXISTS (SELECT 1 FROM operation_splits s WHERE s.operation_id = o.id)",
+        )
+        .bind(category_id)
+        .bind(ids)
+        .bind(user_id)
+        .execute(&self.pool)
+        .await?
+        .rows_affected();
+        Ok(affected)
+    }
+
+    async fn set_accounts(&self, ids: &[Uuid], user_id: Uuid, account_id: Uuid) -> AppResult<u64> {
+        let affected = sqlx::query(
+            "UPDATE operations SET account_id = $1 WHERE id = ANY($2) AND user_id = $3",
+        )
+        .bind(account_id)
+        .bind(ids)
+        .bind(user_id)
+        .execute(&self.pool)
+        .await?
+        .rows_affected();
+        Ok(affected)
     }
 
     async fn set_auto_link(&self, op_id: Uuid, budget_id: Uuid) -> AppResult<()> {
@@ -1921,7 +1951,7 @@ mod integration_tests {
     }
 
     #[sqlx::test(migrations = "./migrations")]
-    async fn an_operation_moves_to_another_account_of_its_owner_only(pool: PgPool) {
+    async fn operations_move_to_another_account_of_their_owner_only(pool: PgPool) {
         let repo = PgOperationRepository::new(pool.clone());
         let user_id = setup_user(&pool).await;
         let other_user = setup_user(&pool).await;
@@ -1935,14 +1965,39 @@ mod integration_tests {
         .execute(&pool)
         .await
         .unwrap();
-        let op = insert_op(&repo, user_id, dec!(-1)).await;
-
-        assert!(!repo.set_account(op, other_user, joint).await.unwrap());
-        assert!(repo.set_account(op, user_id, other_user).await.is_err());
-        assert!(repo.set_account(op, user_id, joint).await.unwrap());
+        let first = insert_op(&repo, user_id, dec!(-1)).await;
+        let second = insert_op(&repo, user_id, dec!(-2)).await;
+        let others = insert_op(&repo, other_user, dec!(-3)).await;
 
         assert_eq!(
-            repo.find_by_id(op, user_id).await.unwrap().account_id,
+            repo.set_accounts(&[first], other_user, joint)
+                .await
+                .unwrap(),
+            0
+        );
+        assert!(
+            repo.set_accounts(&[first], user_id, other_user)
+                .await
+                .is_err()
+        );
+        assert_eq!(
+            repo.set_accounts(&[first, second, others], user_id, joint)
+                .await
+                .unwrap(),
+            2
+        );
+
+        for op in [first, second] {
+            assert_eq!(
+                repo.find_by_id(op, user_id).await.unwrap().account_id,
+                joint
+            );
+        }
+        assert_ne!(
+            repo.find_by_id(others, other_user)
+                .await
+                .unwrap()
+                .account_id,
             joint
         );
     }
@@ -1983,6 +2038,51 @@ mod integration_tests {
             (vec![on_main], 1)
         );
         assert_eq!(listed_ids(&repo, user_id, by_accounts(vec![])).await.1, 2);
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn set_categories_changes_the_users_unsplit_operations_only(pool: PgPool) {
+        let repo = PgOperationRepository::new(pool.clone());
+        let user_id = setup_user(&pool).await;
+        let other_user = setup_user(&pool).await;
+        let food = setup_category(&pool, user_id, "Food").await;
+        let first = insert_op(&repo, user_id, dec!(-1)).await;
+        let second = insert_op(&repo, user_id, dec!(-2)).await;
+        let others = insert_op(&repo, other_user, dec!(-3)).await;
+        let split = insert_op(&repo, user_id, dec!(-100)).await;
+        let parts = [part(dec!(-60), None), part(dec!(-40), None)];
+        repo.replace_splits(split, user_id, &parts).await.unwrap();
+        let ids = [first, second, others, split];
+
+        assert_eq!(
+            repo.set_categories(&ids, user_id, Some(food))
+                .await
+                .unwrap(),
+            2
+        );
+        for op in [first, second] {
+            assert_eq!(
+                repo.find_by_id(op, user_id).await.unwrap().category_id,
+                Some(food)
+            );
+        }
+        assert_eq!(
+            repo.find_by_id(split, user_id).await.unwrap().category_id,
+            None
+        );
+        assert_eq!(
+            repo.find_by_id(others, other_user)
+                .await
+                .unwrap()
+                .category_id,
+            None
+        );
+
+        assert_eq!(repo.set_categories(&ids, user_id, None).await.unwrap(), 2);
+        assert_eq!(
+            repo.find_by_id(first, user_id).await.unwrap().category_id,
+            None
+        );
     }
 
     #[sqlx::test(migrations = "./migrations")]
