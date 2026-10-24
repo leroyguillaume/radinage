@@ -150,6 +150,7 @@ function HeroCard({
 	return (
 		<Paper
 			component="section"
+			className="@container"
 			aria-labelledby={titleId}
 			bg={filled ? "forest.7" : undefined}
 			c={filled ? "forest.0" : undefined}
@@ -178,12 +179,21 @@ interface BigAmountProps {
 	fz?: number;
 }
 
+// A formatted amount is about 7 em wide; 14cqi keeps it inside its card.
+function fitToCard(px: number): string {
+	return `min(${px}px, 14cqi)`;
+}
+
 function BigAmount({ value, color, fz }: BigAmountProps) {
 	return (
 		<Text
 			className="tabular-nums"
 			ff={headingFont}
-			fz={fz ?? { base: 44, sm: 52 }}
+			fz={
+				fz === undefined
+					? { base: fitToCard(44), sm: fitToCard(52) }
+					: fitToCard(fz)
+			}
 			fw={800}
 			lh={1}
 			lts="-0.03em"
