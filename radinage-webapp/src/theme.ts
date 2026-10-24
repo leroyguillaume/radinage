@@ -86,6 +86,8 @@ export const theme = createTheme({
 		Paper: { defaultProps: { radius: "xl", withBorder: true, p: "lg" } },
 		Card: { defaultProps: { radius: "xl", withBorder: true } },
 		Button: { defaultProps: { size: "md" } },
+		// Inputs stay at md (16px text): iOS Safari zooms into any input
+		// focused with smaller text, and does not zoom back out.
 		TextInput: { defaultProps: { size: "md" } },
 		PasswordInput: { defaultProps: { size: "md" } },
 		NumberInput: { defaultProps: { size: "md" } },
@@ -93,6 +95,10 @@ export const theme = createTheme({
 		Autocomplete: { defaultProps: { size: "md" } },
 		FileInput: { defaultProps: { size: "md" } },
 		MonthPickerInput: { defaultProps: { size: "md" } },
+		MultiSelect: { defaultProps: { size: "md" } },
+		ColorInput: { defaultProps: { size: "md" } },
+		DateInput: { defaultProps: { size: "md" } },
+		DatePickerInput: { defaultProps: { size: "md" } },
 		Modal: { defaultProps: { radius: "xl", centered: true } },
 		// Modal and Drawer render their content as a Paper: without this, the
 		// Paper defaults above pad the scroll area above the sticky header.
