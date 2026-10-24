@@ -412,6 +412,30 @@ mod tests {
     }
 
     #[test]
+    fn parse_csv_date_with_time_keeps_the_day() {
+        for (date_format, value) in [
+            ("%d/%m/%Y %H:%M:%S", "15/03/2024 23:59:59"),
+            ("%d/%m/%Y %H:%M", "15/03/2024 08:05"),
+            ("%Y-%m-%d %H:%M:%S", "2024-03-15 00:00:00"),
+            ("%Y-%m-%d %H:%M", "2024-03-15 12:30"),
+            ("%Y-%m-%dT%H:%M:%S", "2024-03-15T12:30:00"),
+        ] {
+            let params = ImportParams {
+                date_format: date_format.to_string(),
+                ..default_params()
+            };
+            let csv = format!("label,amount,date\nTest,50.00,{value}\n");
+            let result = parse_csv(csv.as_bytes(), &params);
+            assert!(
+                result.errors.is_empty(),
+                "{date_format}: {:?}",
+                result.errors
+            );
+            assert_eq!(result.rows[0].date.to_string(), "2024-03-15");
+        }
+    }
+
+    #[test]
     fn parse_csv_only_header_returns_empty() {
         let csv = b"label,amount,date\n";
         let result = parse_csv(csv, &default_params());
