@@ -74,6 +74,8 @@ pub struct Budget {
     pub rules: Vec<Rule>,
     /// Default category of the operations and split parts linked to this budget.
     pub category_id: Option<Uuid>,
+    /// Savings account a savings budget's money goes to.
+    pub account_id: Option<Uuid>,
     pub created_at: chrono::DateTime<chrono::Utc>,
 }
 
@@ -85,6 +87,7 @@ pub struct BudgetFields {
     pub kind: BudgetKind,
     pub rules: Vec<Rule>,
     pub category_id: Option<Uuid>,
+    pub account_id: Option<Uuid>,
 }
 
 /// Classification of what a budget tracks.

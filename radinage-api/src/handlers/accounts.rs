@@ -88,7 +88,9 @@ pub struct AccountResponse {
     /// from it.
     pub balance: Option<BalanceEntryResponse>,
     /// Balance today: `balance`, plus, on an account receiving operations, every operation
-    /// dated after it, ignored ones included. Null when no balance is read.
+    /// dated after it, ignored ones included; on a savings account, minus every non-ignored
+    /// amount dated after it that is linked to one of its savings budgets, so that 100 put
+    /// aside from the checking account (-100 there) adds 100. Null when no balance is read.
     #[schemars(with = "Option<String>")]
     pub current_balance: Option<Decimal>,
     pub created_at: DateTime<Utc>,
@@ -174,6 +176,26 @@ pub async fn account_receiving_operations(
     }
 }
 
+/// Check that `id`, when given, is one of the user's savings accounts: `BadRequest` otherwise,
+/// so that a budget naming another account fails as invalid input.
+pub async fn ensure_savings_account(
+    repo: &impl AccountRepository,
+    id: Option<Uuid>,
+    user_id: Uuid,
+) -> AppResult<()> {
+    let Some(id) = id else {
+        return Ok(());
+    };
+    match repo.find(id, user_id).await? {
+        Some(account) if account.fields.kind == AccountKind::Savings => Ok(()),
+        Some(account) => Err(AppError::BadRequest(format!(
+            "account '{}' is not a savings account",
+            account.fields.name
+        ))),
+        None => Err(AppError::BadRequest(format!("unknown account {id}"))),
+    }
+}
+
 // ── Handlers ─────────────────────────────────────────────────────────────────
 
 pub async fn list_accounts<U, O, B, P, C, R, A: AccountRepository>(
@@ -209,6 +231,17 @@ pub async fn update_account<U, O, B, P, C, R, A: AccountRepository>(
         return Err(AppError::Conflict(
             "the account holds operations or import profiles, so it must stay an imported \
              checking account"
+                .to_string(),
+        ));
+    }
+    if fields.kind != AccountKind::Savings
+        && state
+            .account_repo
+            .has_savings_budgets(id, auth_user.id)
+            .await?
+    {
+        return Err(AppError::Conflict(
+            "savings budgets send their money to the account, so it must stay a savings account"
                 .to_string(),
         ));
     }
@@ -442,8 +475,43 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn an_account_saved_into_must_stay_a_savings_account() {
+        let user_id = Uuid::new_v4();
+        let id = Uuid::new_v4();
+        let mut repo = MockAccountRepository::new();
+        repo.expect_is_used()
+            .returning(|_, _| Box::pin(async { Ok(false) }));
+        repo.expect_has_savings_budgets()
+            .withf(move |aid, uid| *aid == id && *uid == user_id)
+            .returning(|_, _| Box::pin(async { Ok(true) }));
+        repo.expect_update().returning(move |_, uid, f| {
+            let updated = Account {
+                fields: f.clone(),
+                ..account(uid, AccountKind::Savings, false)
+            };
+            Box::pin(async move { Ok(Some(updated)) })
+        });
+        let app = app(repo);
+        let auth = auth_header(user_id, UserRole::User);
+        let uri = format!("/accounts/{id}");
+        let put = |kind: &str| {
+            let body = serde_json::json!({"name": "Livret", "kind": kind}).to_string();
+            app.clone()
+                .oneshot(json_request("PUT", &uri, Some(&body), Some(&auth)))
+        };
+
+        assert_eq!(
+            put("checking").await.unwrap().status(),
+            StatusCode::CONFLICT
+        );
+        assert_eq!(put("savings").await.unwrap().status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
     async fn update_of_an_unknown_account_is_404() {
         let mut repo = MockAccountRepository::new();
+        repo.expect_has_savings_budgets()
+            .returning(|_, _| Box::pin(async { Ok(false) }));
         repo.expect_update()
             .returning(|_, _, _| Box::pin(async { Ok(None) }));
 
@@ -661,5 +729,30 @@ mod tests {
                 assert!(matches!(result, Err(AppError::BadRequest(_))));
             }
         }
+    }
+
+    #[tokio::test]
+    async fn only_a_savings_account_is_accepted_for_a_budget() {
+        let user_id = Uuid::new_v4();
+        for (found, ok) in [
+            (Some(account(user_id, AccountKind::Savings, false)), true),
+            (Some(account(user_id, AccountKind::Checking, false)), false),
+            (None, false),
+        ] {
+            let mut repo = MockAccountRepository::new();
+            repo.expect_find().returning(move |_, _| {
+                let found = found.clone();
+                Box::pin(async move { Ok(found) })
+            });
+
+            let result = ensure_savings_account(&repo, Some(Uuid::new_v4()), user_id).await;
+
+            assert_eq!(result.is_ok(), ok);
+            if !ok {
+                assert!(matches!(result, Err(AppError::BadRequest(_))));
+            }
+        }
+        let unlinked = ensure_savings_account(&MockAccountRepository::new(), None, user_id).await;
+        assert!(unlinked.is_ok());
     }
 }

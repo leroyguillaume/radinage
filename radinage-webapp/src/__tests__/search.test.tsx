@@ -70,6 +70,7 @@ const budgets: BudgetResponse[] = [
 		kind: { type: "occasional", month: 1, year: 2026, amount: "-800" },
 		rules: [],
 		categoryId: "c-home",
+		accountId: null,
 		createdAt: "",
 	},
 ];

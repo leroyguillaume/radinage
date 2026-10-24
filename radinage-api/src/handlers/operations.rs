@@ -874,6 +874,7 @@ mod tests {
             },
             rules: vec![],
             category_id: None,
+            account_id: None,
             created_at: Utc::now(),
         }
     }

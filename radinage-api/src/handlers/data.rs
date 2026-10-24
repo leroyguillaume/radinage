@@ -26,7 +26,7 @@ use chrono::{DateTime, NaiveDate, Utc};
 use rust_decimal::Decimal;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use uuid::Uuid;
 
 /// Current version of the export payload. Bump when breaking changes are made.
@@ -46,6 +46,10 @@ pub struct ExportBudget {
     /// Absent from exports made before categories existed.
     #[serde(default)]
     pub category_id: Option<Uuid>,
+    /// Payload account a savings budget's money goes to; absent from exports made before
+    /// budgets could have one.
+    #[serde(default)]
+    pub account_id: Option<Uuid>,
     pub created_at: DateTime<Utc>,
 }
 
@@ -58,6 +62,7 @@ impl From<Budget> for ExportBudget {
             kind: b.kind,
             rules: b.rules,
             category_id: b.category_id,
+            account_id: b.account_id,
             created_at: b.created_at,
         }
     }
@@ -569,6 +574,9 @@ pub async fn import_data<
             kind: b.kind.clone(),
             rules: b.rules.clone(),
             category_id: remap_category(b.category_id),
+            account_id: imported
+                .savings_account_for(b.account_id)
+                .filter(|_| b.budget_type == BudgetType::Savings),
         };
         let created = state.budget_repo.create(user_id, &fields).await?;
         budget_id_map.insert(b.id, created.id);
@@ -712,6 +720,8 @@ struct ImportedAccounts {
     ids: HashMap<Uuid, Uuid>,
     /// Account taking what names no payload account; `None` when nothing does.
     default: Option<Uuid>,
+    /// The user's savings accounts among those `ids` maps to.
+    savings: HashSet<Uuid>,
     /// Accounts created, the default one included.
     created: usize,
     /// Payload accounts mapped to an account the user already had.
@@ -725,6 +735,13 @@ impl ImportedAccounts {
         id.and_then(|id| self.ids.get(&id).copied())
             .or(self.default)
             .ok_or_else(|| AppError::Internal("no account resolved for an import".to_string()))
+    }
+
+    /// The user's account a budget naming the payload account `id` sends its money to: none
+    /// when it maps to an account that is not a savings one, the user's by that name deciding.
+    fn savings_account_for(&self, id: Option<Uuid>) -> Option<Uuid> {
+        id.and_then(|id| self.ids.get(&id).copied())
+            .filter(|id| self.savings.contains(id))
     }
 }
 
@@ -816,6 +833,11 @@ async fn import_accounts(
     let mut imported = ImportedAccounts {
         ids: HashMap::new(),
         default: None,
+        savings: existing
+            .iter()
+            .filter(|a| a.fields.kind == AccountKind::Savings)
+            .map(|a| a.id)
+            .collect(),
         created: 0,
         skipped: 0,
         balances: 0,
@@ -831,6 +853,9 @@ async fn import_accounts(
                 for balance in balances {
                     repo.add_balance(created.id, user_id, *balance).await?;
                     imported.balances += 1;
+                }
+                if created.fields.kind == AccountKind::Savings {
+                    imported.savings.insert(created.id);
                 }
                 by_name.insert(created.fields.name, created.id);
                 imported.created += 1;
@@ -1028,6 +1053,7 @@ mod tests {
             },
             rules: vec![],
             category_id: None,
+            account_id: None,
             created_at: Utc::now(),
         }
     }
@@ -1042,6 +1068,7 @@ mod tests {
             kind: fields.kind.clone(),
             rules: fields.rules.clone(),
             category_id: fields.category_id,
+            account_id: None,
             created_at: Utc::now(),
         }
     }
@@ -1872,6 +1899,7 @@ mod tests {
             },
             rules: vec![],
             category_id: None,
+            account_id: None,
             created_at: Utc::now(),
         };
         // Round-trip: serialize the export payload and feed it back as input.
@@ -2155,6 +2183,81 @@ mod tests {
         assert_eq!(json.skipped_accounts, 1);
         assert_eq!(json.imported_balances, 1);
         assert_eq!(json.imported_operations, 2);
+    }
+
+    #[tokio::test]
+    async fn import_sends_savings_budgets_to_the_savings_account_they_map_to() {
+        let user_id = Uuid::new_v4();
+        let account = |name: &str, kind| Account {
+            fields: AccountFields {
+                name: name.to_string(),
+                kind,
+                imported: false,
+            },
+            ..main_account(Uuid::new_v4(), user_id)
+        };
+        let livret = account("Livret", AccountKind::Savings);
+        let livret_id = livret.id;
+        let account_repo = accounts_listing(vec![livret, account("Joint", AccountKind::Checking)]);
+        let mut budget_repo = MockBudgetRepository::new();
+        budget_repo
+            .expect_list_all_for_user()
+            .returning(|_| Box::pin(async { Ok(vec![]) }));
+        budget_repo
+            .expect_create()
+            .withf(move |_, f| {
+                f.account_id
+                    == match f.label.as_str() {
+                        "To livret" => Some(livret_id),
+                        _ => None,
+                    }
+            })
+            .times(3)
+            .returning(|user_id, f| {
+                let created = Budget {
+                    id: Uuid::new_v4(),
+                    user_id,
+                    label: f.label.clone(),
+                    budget_type: f.budget_type,
+                    kind: f.kind.clone(),
+                    rules: vec![],
+                    category_id: None,
+                    account_id: f.account_id,
+                    created_at: Utc::now(),
+                };
+                Box::pin(async move { Ok(created) })
+            });
+        let app = build_test_router(make_test_state_with_all(
+            MockUserRepository::new(),
+            MockOperationRepository::new(),
+            budget_repo,
+            no_import_profiles(),
+            no_categories(),
+            no_ignore_rules(),
+            account_repo,
+        ));
+        let budget = |id: u8, label: &str, budget_type: &str, account: u8| {
+            serde_json::json!({
+                "id": Uuid::from_u128(id.into()), "label": label, "budgetType": budget_type,
+                "kind": {"type": "occasional", "month": 1, "year": 2026, "amount": "-10"},
+                "rules": [], "accountId": Uuid::from_u128(account.into()),
+                "createdAt": "2026-01-01T00:00:00Z"
+            })
+        };
+        let body = serde_json::json!({"version": 1,
+            "accounts": [
+                {"id": Uuid::from_u128(1), "name": "Livret", "kind": "savings", "balances": []},
+                {"id": Uuid::from_u128(2), "name": "Joint", "kind": "savings", "balances": []}],
+            "budgets": [
+                budget(11, "To livret", "savings", 1),
+                // The user's account by that name is not a savings one.
+                budget(12, "To joint", "savings", 2),
+                budget(13, "Expense", "expense", 1)],
+            "operations": []});
+
+        let resp = post_import(app, user_id, &body.to_string()).await;
+
+        assert_eq!(resp.status(), StatusCode::OK);
     }
 
     #[tokio::test]

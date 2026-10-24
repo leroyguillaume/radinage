@@ -218,7 +218,12 @@
 			"categoryHint": "Donnée aux opérations liées à ce budget qui n'ont pas de catégorie.",
 			"categoryEmpty": "Vous n'avez aucune catégorie.",
 			"categoryCreate": "Créer des catégories",
-			"noCategory": "Aucune catégorie"
+			"noCategory": "Aucune catégorie",
+			"account": "Compte épargne",
+			"accountHint": "Ce qui est lié à ce budget s'ajoute au solde de ce compte depuis son dernier solde relevé.",
+			"accountEmpty": "Vous n'avez aucun compte épargne.",
+			"accountCreate": "Ajouter un compte",
+			"noAccount": "Aucun compte"
 		},
 		"addRule": "Ajouter une règle",
 		"addPeriod": "Ajouter une période",
@@ -298,6 +303,7 @@
 			}
 		},
 		"detail": {
+			"account": "Vers {{name}}",
 			"back": "Retour aux budgets",
 			"notFound": "Ce budget n'existe pas.",
 			"realTitle": {
@@ -660,6 +666,9 @@
 		"imported": "J'importe les relevés de ce compte",
 		"importedHint": "Son solde se calcule à partir des opérations importées, et sert de point de départ au résumé.",
 		"notImportedHint": "Il vaut le dernier solde que tu y relèves, et n'entre pas dans le résumé.",
+		"savingsHint": "Il vaut le dernier solde que tu y relèves, plus ce que les budgets d'épargne qui y versent ont épargné depuis, et n'entre pas dans le résumé.",
+		"savedBy": "Alimenté par {{budgets}}",
+		"savedInto": "Des budgets d'épargne versent sur ce compte : il doit rester un compte épargne.",
 		"startingBalance": "Point de départ",
 		"balance": "Solde",
 		"balanceDate": "Au",

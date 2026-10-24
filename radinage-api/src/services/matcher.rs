@@ -125,6 +125,7 @@ mod tests {
             kind,
             rules,
             category_id: None,
+            account_id: None,
             created_at: chrono::Utc::now(),
         }
     }

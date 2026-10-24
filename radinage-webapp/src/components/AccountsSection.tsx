@@ -22,7 +22,7 @@ import { useTranslation } from "react-i18next";
 import { AccountForm } from "@/components/AccountForm";
 import { ApiError } from "@/lib/api";
 import { formatAmount, formatIsoDate } from "@/lib/format";
-import { useAccounts, useDeleteAccount } from "@/lib/hooks";
+import { useAccounts, useBudgets, useDeleteAccount } from "@/lib/hooks";
 import { balanceTextColor } from "@/lib/tones";
 import type { AccountResponse } from "@/lib/types";
 import { palette } from "@/theme";
@@ -38,9 +38,12 @@ function groupOf(account: AccountResponse): AccountGroup {
 
 function AccountRow({
 	account,
+	savedBy,
 	onEdit,
 }: {
 	account: AccountResponse;
+	/** Labels of the savings budgets sending their money to the account. */
+	savedBy: string[];
 	onEdit: () => void;
 }) {
 	const { t, i18n } = useTranslation();
@@ -56,7 +59,9 @@ function AccountRow({
 		date === null
 			? t("accounts.noBalance")
 			: t(
-					account.receivesOperations ? "accounts.computed" : "accounts.readOn",
+					account.receivesOperations || savedBy.length > 0
+						? "accounts.computed"
+						: "accounts.readOn",
 					{
 						date,
 					},
@@ -105,6 +110,11 @@ function AccountRow({
 							<Text size="xs" c="dimmed">
 								{detail}
 							</Text>
+							{savedBy.length > 0 && (
+								<Text size="xs" c="dimmed" className="[overflow-wrap:anywhere]">
+									{t("accounts.savedBy", { budgets: savedBy.join(", ") })}
+								</Text>
+							)}
 						</Box>
 						<Group gap={2} wrap="nowrap">
 							{account.currentBalance !== null && (
@@ -165,6 +175,7 @@ type Editing =
 export function AccountsSection() {
 	const { t } = useTranslation();
 	const accountsQuery = useAccounts();
+	const budgets = useBudgets().data ?? [];
 	const [editing, setEditing] = useState<Editing>({ kind: "none" });
 	const accounts = accountsQuery.data ?? [];
 	const stopEditing = () => setEditing({ kind: "none" });
@@ -234,6 +245,9 @@ export function AccountsSection() {
 												<AccountRow
 													key={account.id}
 													account={account}
+													savedBy={budgets
+														.filter((b) => b.accountId === account.id)
+														.map((b) => b.label)}
 													onEdit={() =>
 														setEditing({ kind: "edit", id: account.id })
 													}

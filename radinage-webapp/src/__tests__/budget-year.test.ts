@@ -30,6 +30,7 @@ function makeBudget(
 		kind,
 		rules: [],
 		categoryId: null,
+		accountId: null,
 		createdAt: "2024-01-01T00:00:00Z",
 	};
 }

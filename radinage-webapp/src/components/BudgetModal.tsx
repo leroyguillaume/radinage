@@ -30,6 +30,7 @@ import {
 } from "@/components/LabelPatternFields";
 import { toDisplayAmount, toRawAmount } from "@/lib/format";
 import {
+	useAccounts,
 	useApplyBudget,
 	useBelowBreakpoint,
 	useCategories,
@@ -107,6 +108,8 @@ interface BudgetForm {
 	occasionalMonth: Date;
 	rules: RuleForm[];
 	categoryId: string | null;
+	/** Kept while the type changes, sent for a savings budget only. */
+	accountId: string | null;
 }
 
 function defaultForm(): BudgetForm {
@@ -121,6 +124,7 @@ function defaultForm(): BudgetForm {
 		occasionalMonth: new Date(),
 		rules: [],
 		categoryId: null,
+		accountId: null,
 	};
 }
 
@@ -145,6 +149,7 @@ function formFromBudget(budget: BudgetResponse, locale: string): BudgetForm {
 			occasionalMonth: new Date(budget.kind.year, budget.kind.month - 1),
 			rules,
 			categoryId: budget.categoryId,
+			accountId: budget.accountId,
 		};
 	}
 
@@ -176,27 +181,31 @@ function formFromBudget(budget: BudgetResponse, locale: string): BudgetForm {
 		occasionalMonth: new Date(),
 		rules,
 		categoryId: budget.categoryId,
+		accountId: budget.accountId,
 	};
 }
 
 function formToPayload(form: BudgetForm) {
-	const rules = form.rules.map((r) => ({
-		labelPattern: { type: r.patternType, value: r.patternValue },
-		matchAmount: r.matchAmount,
-	}));
+	const common = {
+		label: form.label,
+		budgetType: form.budgetType,
+		rules: form.rules.map((r) => ({
+			labelPattern: { type: r.patternType, value: r.patternValue },
+			matchAmount: r.matchAmount,
+		})),
+		categoryId: form.categoryId,
+		accountId: form.budgetType === "savings" ? form.accountId : null,
+	};
 
 	if (form.kindType === "occasional") {
 		return {
-			label: form.label,
-			budgetType: form.budgetType,
+			...common,
 			kind: {
 				type: "occasional" as const,
 				month: form.occasionalMonth.getMonth() + 1,
 				year: form.occasionalMonth.getFullYear(),
 				amount: form.occasionalAmount,
 			},
-			rules,
-			categoryId: form.categoryId,
 		};
 	}
 
@@ -215,16 +224,13 @@ function formToPayload(form: BudgetForm) {
 	};
 
 	return {
-		label: form.label,
-		budgetType: form.budgetType,
+		...common,
 		kind: {
 			type: "recurring" as const,
 			recurrence: form.recurrence,
 			closedPeriods,
 			currentPeriod,
 		},
-		rules,
-		categoryId: form.categoryId,
 	};
 }
 
@@ -388,6 +394,9 @@ export function BudgetModal({
 	const updateBudget = useUpdateBudget();
 	const applyBudget = useApplyBudget();
 	const categories = useCategories().data ?? [];
+	const savingsAccounts = (useAccounts().data ?? []).filter(
+		(a) => a.kind === "savings",
+	);
 	const [form, setForm] = useState<BudgetForm>(defaultForm);
 	const [error, setError] = useState<string | null>(null);
 	const [applyPrompt, setApplyPrompt] = useState<{
@@ -629,6 +638,35 @@ export function BudgetModal({
 						{ value: "savings", label: t("budgets.types.savings") },
 					]}
 				/>
+
+				{form.budgetType === "savings" && (
+					<Select
+						label={t("budgets.fields.account")}
+						description={
+							savingsAccounts.length > 0 ? (
+								t("budgets.fields.accountHint")
+							) : (
+								<>
+									{t("budgets.fields.accountEmpty")}{" "}
+									<Anchor
+										component={Link}
+										to="/settings"
+										onClick={onClose}
+										inherit
+									>
+										{t("budgets.fields.accountCreate")}
+									</Anchor>
+								</>
+							)
+						}
+						placeholder={t("budgets.fields.noAccount")}
+						data={savingsAccounts.map((a) => ({ value: a.id, label: a.name }))}
+						value={form.accountId}
+						onChange={(accountId) => update({ accountId })}
+						disabled={savingsAccounts.length === 0}
+						clearable
+					/>
+				)}
 
 				<CategorySelect
 					label={t("budgets.fields.category")}

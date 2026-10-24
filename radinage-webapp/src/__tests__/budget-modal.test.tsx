@@ -14,7 +14,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { selectMantineOption } from "@/__tests__/mantine";
 import { BudgetModal } from "@/components/BudgetModal";
 import { i18n } from "@/i18n";
-import type { BudgetResponse, CategoryResponse } from "@/lib/types";
+import type {
+	AccountResponse,
+	BudgetResponse,
+	CategoryResponse,
+} from "@/lib/types";
 import { theme } from "@/theme";
 
 vi.mock("@/lib/api", () => ({
@@ -50,12 +54,16 @@ function renderModal(
 	budget: BudgetResponse | null = null,
 	onClose = vi.fn(),
 	categories: CategoryResponse[] = [],
+	accounts: AccountResponse[] = [],
 ) {
-	// Categories come from the cache, so every API call the tests see is a save.
+	// Categories and accounts come from the cache, so every API call the tests see is a save.
 	const queryClient = new QueryClient({
 		defaultOptions: { queries: { retry: false, staleTime: Infinity } },
 	});
 	queryClient.setQueryData(["categories"], categories);
+	queryClient.setQueryData(["accounts"], accounts);
+	// Saving a budget refreshes the accounts, which must not take the next mocked response.
+	queryClient.setQueryDefaults(["accounts"], { enabled: false });
 
 	render(
 		<QueryClientProvider client={queryClient}>
@@ -89,6 +97,7 @@ function makeRecurringBudget(
 		},
 		rules: [],
 		categoryId: null,
+		accountId: null,
 		createdAt: "2024-01-01T00:00:00Z",
 	};
 }
@@ -111,6 +120,7 @@ function makeOccasionalBudget(): BudgetResponse {
 			},
 		],
 		categoryId: null,
+		accountId: null,
 		createdAt: "2024-01-01T00:00:00Z",
 	};
 }
@@ -334,6 +344,7 @@ describe("BudgetModal", () => {
 			},
 			rules: [],
 			categoryId: null,
+			accountId: null,
 			createdAt: "2024-01-01T00:00:00Z",
 		};
 		renderModal(budget);
@@ -396,6 +407,7 @@ describe("BudgetModal", () => {
 			},
 			rules: [],
 			categoryId: null,
+			accountId: null,
 			createdAt: "2024-01-01T00:00:00Z",
 		};
 		apiFetchMock.mockResolvedValueOnce(budget);
@@ -514,6 +526,7 @@ describe("BudgetModal", () => {
 				},
 			],
 			categoryId: null,
+			accountId: null,
 			createdAt: "2024-01-01T00:00:00Z",
 		};
 		apiFetchMock.mockResolvedValueOnce(budgetWithRules);
@@ -574,6 +587,7 @@ describe("BudgetModal", () => {
 			},
 			rules: [],
 			categoryId: null,
+			accountId: null,
 			createdAt: "2024-01-01T00:00:00Z",
 		};
 		renderModal(budget);
@@ -607,6 +621,7 @@ describe("BudgetModal", () => {
 			},
 			rules: [],
 			categoryId: null,
+			accountId: null,
 			createdAt: "2024-01-01T00:00:00Z",
 		};
 		renderModal(budget);
@@ -644,6 +659,7 @@ describe("BudgetModal", () => {
 			},
 			rules: [],
 			categoryId: null,
+			accountId: null,
 			createdAt: "2024-01-01T00:00:00Z",
 		};
 		renderModal(budget);
@@ -686,6 +702,7 @@ describe("BudgetModal", () => {
 				},
 			],
 			categoryId: null,
+			accountId: null,
 			createdAt: "2024-01-01T00:00:00Z",
 		};
 		// First call: create budget
@@ -772,6 +789,100 @@ describe("BudgetModal", () => {
 
 		const link = screen.getByRole("link", { name: "Créer des catégories" });
 		expect(link).toHaveAttribute("href", "/categories");
+		await userEvent.setup().click(link);
+		expect(onClose).toHaveBeenCalled();
+	});
+
+	function account(
+		id: string,
+		name: string,
+		kind: AccountResponse["kind"],
+	): AccountResponse {
+		return {
+			id,
+			name,
+			kind,
+			imported: kind === "checking",
+			receivesOperations: kind === "checking",
+			balance: null,
+			currentBalance: null,
+			createdAt: "2026-01-01T00:00:00Z",
+		};
+	}
+
+	const accounts = [
+		account("a1", "Compte courant", "checking"),
+		account("a2", "Livret A", "savings"),
+	];
+
+	it("offers the savings accounts to a savings budget only", async () => {
+		renderModal(null, vi.fn(), [], accounts);
+
+		expect(
+			screen.queryByRole("combobox", { name: "Compte épargne" }),
+		).not.toBeInTheDocument();
+		await selectMantineOption("Type", "Épargne");
+		await userEvent
+			.setup()
+			.click(screen.getByRole("combobox", { name: "Compte épargne" }));
+
+		expect(
+			await screen.findByRole("option", { name: "Livret A" }),
+		).toBeInTheDocument();
+		expect(
+			screen.queryByRole("option", { name: "Compte courant" }),
+		).not.toBeInTheDocument();
+	});
+
+	it("sends the savings account picked", async () => {
+		apiFetchMock.mockResolvedValueOnce(makeRecurringBudget("monthly"));
+		renderModal(null, vi.fn(), [], accounts);
+		const user = userEvent.setup();
+
+		await user.type(screen.getByLabelText("Libellé *"), "Épargne");
+		await user.type(screen.getByLabelText("Montant *"), "-100");
+		await selectMantineOption("Type", "Épargne");
+		await selectMantineOption("Compte épargne", "Livret A");
+		fireEvent.click(screen.getByRole("button", { name: "Enregistrer" }));
+
+		await waitFor(() => expect(apiFetchMock).toHaveBeenCalled());
+		const callBody = JSON.parse(apiFetchMock.mock.calls[0][1]?.body as string);
+		expect(callBody.accountId).toBe("a2");
+	});
+
+	it("drops the savings account once the budget is no longer a savings one", async () => {
+		apiFetchMock.mockResolvedValueOnce(makeRecurringBudget("monthly"));
+		renderModal(
+			{
+				...makeRecurringBudget("monthly"),
+				budgetType: "savings",
+				accountId: "a2",
+			},
+			vi.fn(),
+			[],
+			accounts,
+		);
+
+		expect(
+			screen.getByRole("combobox", { name: "Compte épargne" }),
+		).toHaveValue("Livret A");
+		await selectMantineOption("Type", "Dépense");
+		fireEvent.click(screen.getByRole("button", { name: "Enregistrer" }));
+
+		await waitFor(() => expect(apiFetchMock).toHaveBeenCalled());
+		const callBody = JSON.parse(apiFetchMock.mock.calls[0][1]?.body as string);
+		expect(callBody.accountId).toBeNull();
+	});
+
+	it("links to the settings while there is no savings account", async () => {
+		const { onClose } = renderModal(null, vi.fn(), [], [accounts[0]]);
+		await selectMantineOption("Type", "Épargne");
+
+		expect(
+			screen.getByRole("combobox", { name: "Compte épargne" }),
+		).toBeDisabled();
+		const link = screen.getByRole("link", { name: "Ajouter un compte" });
+		expect(link).toHaveAttribute("href", "/settings");
 		await userEvent.setup().click(link);
 		expect(onClose).toHaveBeenCalled();
 	});

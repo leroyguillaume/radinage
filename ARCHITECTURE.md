@@ -317,7 +317,16 @@ the horizon with the same rows as its months: by accounting date and without
 ignored operations, so that an operation moved to another month or left out is
 not counted twice or once too many. Summed over the accounts, an ignored
 transfer between two of them cancels out either way. Other accounts hold no
-operations and are worth their most recent balance. Correcting an account's
+operations. A savings account is worth its most recent balance plus what its
+savings budgets saved since: a savings budget may name the savings account its
+money goes to, and every amount linked to it after that balance, by bank date,
+lands there with its sign flipped, since what left the checking account (-100)
+arrived on the savings one (+100). Ignored operations are left out here: they
+count towards no budget, so they saved nothing. The link lives on the budget,
+not on each operation, because a budget already gathers the transfers to one
+savings account, by hand or through its matching rules; the database keeps it
+on savings budgets only, and the API on savings accounts only. Any other
+account is worth its most recent balance. Correcting an account's
 starting point is recording a newer balance; the older ones stay in its
 history.
 
