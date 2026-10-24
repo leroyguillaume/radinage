@@ -399,149 +399,18 @@ describe("MonthlyOperationsPage", () => {
 		).toBeInTheDocument();
 	});
 
-	it("shows unlink button on linked operations", async () => {
+	it("opens the operation sheet from a row, with no inline action", async () => {
 		await renderOperationsPage();
 		const user = userEvent.setup();
 
-		// Expand the Food group (has linked operations)
-		await user.click(await screen.findByRole("button", { name: /Food/ }));
+		const row = await screen.findByRole("button", { name: /Electricity/ });
+		expect(screen.queryByLabelText("Ignorer")).not.toBeInTheDocument();
+		expect(screen.queryByLabelText("Lier à un budget")).not.toBeInTheDocument();
 
-		await waitFor(() => {
-			expect(screen.getByText("Groceries")).toBeInTheDocument();
-		});
-
-		// Linked operations should have unlink buttons
-		const unlinkButtons = screen.getAllByLabelText("Délier du budget");
-		expect(unlinkButtons.length).toBeGreaterThanOrEqual(1);
-	});
-
-	it("calls unlink API when unlink button is clicked", async () => {
-		await renderOperationsPage();
-		const user = userEvent.setup();
-
-		// Expand Food group
-		await user.click(await screen.findByRole("button", { name: /Food/ }));
-
-		await waitFor(() => {
-			expect(screen.getByText("Groceries")).toBeInTheDocument();
-		});
-
-		const unlinkButton = screen.getAllByLabelText("Délier du budget")[0];
-		await user.click(unlinkButton);
-
-		await waitFor(() => {
-			const unlinkCall = apiCalls.find(
-				(c) =>
-					c.path.match(/\/operations\/.*\/budget/) &&
-					c.options?.method === "DELETE",
-			);
-			expect(unlinkCall).toBeDefined();
-		});
-	});
-
-	it("shows ignore button on operations and calls ignore API", async () => {
-		await renderOperationsPage();
-		const user = userEvent.setup();
-
-		// Expand the Food group (has linked operations)
-		await user.click(await screen.findByRole("button", { name: /Food/ }));
-
-		await waitFor(() => {
-			expect(screen.getByText("Groceries")).toBeInTheDocument();
-		});
-
-		// Ignore buttons should be present on every operation row
-		const ignoreButtons = screen.getAllByLabelText("Ignorer");
-		expect(ignoreButtons.length).toBeGreaterThanOrEqual(1);
-
-		// Click the ignore button
-		await user.click(ignoreButtons[0]);
-
-		await waitFor(() => {
-			const ignoreCall = apiCalls.find(
-				(c) =>
-					c.path.match(/\/operations\/.*\/ignore/) &&
-					c.options?.method === "PUT",
-			);
-			expect(ignoreCall).toBeDefined();
-		});
-	});
-
-	it("shows link button on unlinked operations", async () => {
-		await renderOperationsPage();
-
-		// The daily group is expanded by default
-		await screen.findByText("Opérations quotidiennes");
-
-		await waitFor(() => {
-			expect(screen.getByText("Electricity")).toBeInTheDocument();
-		});
-
-		// Unlinked operations should have link buttons
-		const linkButtons = screen.getAllByLabelText("Lier à un budget");
-		expect(linkButtons.length).toBeGreaterThanOrEqual(1);
-	});
-
-	it("link button opens budget menu and calls link API on selection", async () => {
-		await renderOperationsPage();
-		const user = userEvent.setup();
-
-		// The daily group is expanded by default
-		await screen.findByText("Opérations quotidiennes");
-
-		await waitFor(() => {
-			expect(screen.getByText("Electricity")).toBeInTheDocument();
-		});
-
-		// Click the link button — should open Mantine Menu dropdown
-		const linkButton = screen.getAllByLabelText("Lier à un budget")[0];
-		await user.click(linkButton);
-
-		// The menu dropdown should appear with budget names as menu items
-		const foodItem = await screen.findByRole("menuitem", { name: "Food" });
-		expect(foodItem).toBeInTheDocument();
-
-		// Click the menu item to link the operation
-		await user.click(foodItem);
-
-		await waitFor(() => {
-			const linkCall = apiCalls.find(
-				(c) =>
-					c.path.match(/\/operations\/.*\/budget/) &&
-					c.options?.method === "PUT",
-			);
-			expect(linkCall).toBeDefined();
-			const body = JSON.parse(linkCall?.options?.body ?? "{}");
-			expect(body.budgetId).toBe("b1");
-		});
-	});
-
-	it("link menu contains a search input", async () => {
-		await renderOperationsPage();
-		const user = userEvent.setup();
-
-		// The daily group is expanded by default
-		await screen.findByText("Opérations quotidiennes");
-
-		await waitFor(() => {
-			expect(screen.getByText("Electricity")).toBeInTheDocument();
-		});
-
-		// Open the link menu
-		const linkButton = screen.getAllByLabelText("Lier à un budget")[0];
-		await user.click(linkButton);
-
-		// Expense budgets and a search input should be visible (operation is negative)
-		await waitFor(() => {
-			expect(
-				screen.getByRole("menuitem", { name: "Food" }),
-			).toBeInTheDocument();
-			// Income budget should not appear for a negative operation
-			expect(
-				screen.queryByRole("menuitem", { name: "Income" }),
-			).not.toBeInTheDocument();
-			expect(screen.getByPlaceholderText("Rechercher")).toBeInTheDocument();
-		});
+		await user.click(row);
+		const sheet = within(await screen.findByRole("dialog"));
+		expect(sheet.getByText("Electricity")).toBeInTheDocument();
+		expect(sheet.getByRole("combobox", { name: "Budget" })).toBeInTheDocument();
 	});
 
 	it("computes difference as realAmount minus budgetedAmount", async () => {
@@ -879,14 +748,11 @@ describe("MonthlyOperationsPage", () => {
 		const foodRow = await screen.findByText("Food");
 		await user.click(foodRow);
 
-		// Op1 has effectiveDate 2026-04-20 → should display 20/04
 		await waitFor(() => {
-			expect(screen.getByText("20/04")).toBeInTheDocument();
+			expect(screen.getByText("20/04/2026")).toBeInTheDocument();
 		});
-		// Op1's original date 05/04 should NOT appear
-		expect(screen.queryByText("05/04")).not.toBeInTheDocument();
-		// Op2 has no effectiveDate → should display date 10/04
-		expect(screen.getByText("10/04")).toBeInTheDocument();
+		expect(screen.queryByText("05/04/2026")).not.toBeInTheDocument();
+		expect(screen.getByText("10/04/2026")).toBeInTheDocument();
 	});
 
 	it("counts unlinked operations in income and expense stats when no budgets exist", async () => {
@@ -1155,29 +1021,17 @@ describe("MonthlyOperationsPage", () => {
 			expect(expensesText).toMatch(/-170,00/);
 		});
 
-		it("offers to edit the split instead of linking a part", async () => {
-			setupMocks({ operations });
-			await renderOperationsPage();
-			await screen.findByText("part 2/2");
-
-			const part = rowOf("part 2/2");
-			expect(part.getByLabelText("Modifier la division")).toBeInTheDocument();
-			expect(part.queryByLabelText("Lier à un budget")).not.toBeInTheDocument();
-			expect(part.queryByLabelText("Créer un budget")).not.toBeInTheDocument();
-
-			const taxi = rowOf("Taxi");
-			expect(taxi.getByLabelText("Diviser")).toBeInTheDocument();
-			expect(taxi.getByLabelText("Lier à un budget")).toBeInTheDocument();
-		});
-
-		it("opens the split modal pre-filled with the parts", async () => {
+		it("opens the split modal pre-filled with the parts from a part's sheet", async () => {
 			setupMocks({ operations });
 			await renderOperationsPage();
 			const user = userEvent.setup();
-			await screen.findByText("part 2/2");
 
 			await user.click(
-				rowOf("part 2/2").getByLabelText("Modifier la division"),
+				await screen.findByRole("button", { name: /part 2\/2/ }),
+			);
+			const sheet = within(await screen.findByRole("dialog"));
+			await user.click(
+				sheet.getByRole("button", { name: "Modifier la division" }),
 			);
 
 			const dialog = within(await screen.findByRole("dialog"));
@@ -1272,7 +1126,11 @@ describe("MonthlyOperationsPage", () => {
 			const section = within(
 				await screen.findByRole("region", { name: "Opérations ignorées" }),
 			);
-			await user.click(await section.findByLabelText("Ne plus ignorer"));
+			await user.click(
+				await section.findByRole("button", { name: /Internal transfer/ }),
+			);
+			const sheet = within(await screen.findByRole("dialog"));
+			await user.click(sheet.getByRole("button", { name: "Ne plus ignorer" }));
 
 			await waitFor(() => {
 				expect(
@@ -1303,29 +1161,6 @@ describe("MonthlyOperationsPage", () => {
 				op.id === "op1" ? { ...op, effectiveCategoryId: "c1" } : op,
 			),
 		};
-
-		it("puts an operation in a category", async () => {
-			setupMocks({ operations, categories });
-			await renderOperationsPage();
-			const user = userEvent.setup();
-
-			await user.click(
-				await screen.findByRole("button", { name: "Changer la catégorie" }),
-			);
-			await user.click(
-				await screen.findByRole("menuitem", { name: "Courses" }),
-			);
-
-			await waitFor(() => {
-				expect(
-					apiCalls.find(
-						(c) =>
-							c.path === "/operations/op3/category" &&
-							c.options?.method === "PUT",
-					)?.options?.body,
-				).toBe(JSON.stringify({ categoryId: "c1" }));
-			});
-		});
 
 		it("shows only the operations of the category picked", async () => {
 			setupMocks({ operations, categories });
@@ -1387,11 +1222,11 @@ describe("operation sheet", () => {
 		return { user, sheet };
 	}
 
-	it("opens from an operation's label on a wide screen", async () => {
+	it("opens from an operation's row on a wide screen", async () => {
 		setupMocks({ operations, categories });
 		await renderOperationsPage();
 
-		const { sheet } = await openSheet(longLabel);
+		const { sheet } = await openSheet(/KAFFIHUS/);
 
 		expect(sheet.getByText(longLabel)).toBeInTheDocument();
 		expect(sheet.getByRole("combobox", { name: "Budget" })).toBeInTheDocument();
@@ -1409,8 +1244,7 @@ describe("operation sheet", () => {
 			const row = within(
 				await screen.findByRole("button", { name: /KAFFIHUS/ }),
 			);
-			expect(row.getByText("15")).toBeInTheDocument();
-			expect(row.getByText("À classer")).toBeInTheDocument();
+			expect(row.getByText("15/04/2026")).toBeInTheDocument();
 			expect(row.getByText("-100,00 €")).toBeInTheDocument();
 			expect(screen.queryByLabelText("Ignorer")).not.toBeInTheDocument();
 			expect(
