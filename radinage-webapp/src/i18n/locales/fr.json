@@ -546,6 +546,8 @@
 		"unbudgetedRate": "Dépenses hors budget estimées à {{amount}} par jour, la moyenne des 3 derniers mois complets.",
 		"dailyBudgetHint": "Ce que ton année te laisse chaque jour hors budgets sans finir en déficit. Ton solde n'entre pas en compte.",
 		"dailyBudgetNegativeHint": "Négatif : tes budgets seuls finissent déjà l'année en déficit. Il faudrait gagner ou économiser ce montant chaque jour pour revenir à zéro.",
+		"dailyBudgetPace": "Tu dépenses en moyenne {{spent}} par jour hors budget.",
+		"dailyBudgetOverPace": "Tu dépenses en moyenne {{spent}} par jour hors budget : {{over}} de trop chaque jour pour finir l'année à zéro.",
 		"dailyBudgetOver": "Année terminée : plus aucun jour à budgéter.",
 		"balanceAndCumulative": "Balance · cumulé",
 		"noBalanceLink": "Ajouter un solde",
