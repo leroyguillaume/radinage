@@ -1,8 +1,10 @@
+use super::{label_pattern_from_cols, label_pattern_to_cols};
 use crate::{
-    domain::category::{Category, CategoryColor, CategoryFields, CategoryIcon},
+    domain::category::{Category, CategoryColor, CategoryFields, CategoryIcon, CategoryRule},
     error::{AppError, AppResult},
 };
-use sqlx::{PgPool, Row, postgres::PgRow};
+use sqlx::{PgConnection, PgPool, Row, postgres::PgRow};
+use std::collections::HashMap;
 use uuid::Uuid;
 
 const COLUMNS: &str = "id, user_id, name, color, icon, created_at";
@@ -10,7 +12,7 @@ const COLUMNS: &str = "id, user_id, name, color, icon, created_at";
 /// Data access interface for categories.
 #[cfg_attr(test, mockall::automock)]
 pub trait CategoryRepository: Send + Sync + 'static {
-    /// All categories of a user, by name.
+    /// All categories of a user with their rules, by name.
     fn list(
         &self,
         user_id: Uuid,
@@ -26,14 +28,14 @@ pub trait CategoryRepository: Send + Sync + 'static {
         user_id: Uuid,
     ) -> impl std::future::Future<Output = AppResult<bool>> + Send;
 
-    /// Create a category. Returns `AppError::Conflict` if the user already has one by that name.
+    /// Create a category and its rules. Returns `AppError::Conflict` if the user already has one by that name.
     fn create(
         &self,
         user_id: Uuid,
         fields: &CategoryFields,
     ) -> impl std::future::Future<Output = AppResult<Category>> + Send;
 
-    /// Replace a category's fields. Returns `None` if it does not exist or belongs to another
+    /// Replace a category's fields and rules. Returns `None` if it does not exist or belongs to another
     /// user, `AppError::Conflict` if the new name is taken.
     fn update(
         &self,
@@ -63,7 +65,7 @@ impl PgCategoryRepository {
     }
 }
 
-fn row_to_category(row: &PgRow) -> AppResult<Category> {
+fn row_to_category(row: &PgRow, rules: Vec<CategoryRule>) -> AppResult<Category> {
     let color: &str = row.try_get("color")?;
     let icon: Option<&str> = row.try_get("icon")?;
     Ok(Category {
@@ -76,6 +78,7 @@ fn row_to_category(row: &PgRow) -> AppResult<Category> {
                 .map(str::parse::<CategoryIcon>)
                 .transpose()
                 .map_err(AppError::Internal)?,
+            rules,
         },
         created_at: row.try_get("created_at")?,
     })
@@ -90,6 +93,27 @@ fn map_name_conflict(e: sqlx::Error, name: &str) -> AppError {
     }
 }
 
+async fn insert_rules(
+    conn: &mut PgConnection,
+    category_id: Uuid,
+    rules: &[CategoryRule],
+) -> AppResult<()> {
+    for (position, rule) in (0_i32..).zip(rules) {
+        let (pattern_type, pattern_value) = label_pattern_to_cols(&rule.label_pattern);
+        sqlx::query(
+            "INSERT INTO category_rules (category_id, position, pattern_type, pattern_value) \
+             VALUES ($1, $2, $3, $4)",
+        )
+        .bind(category_id)
+        .bind(position)
+        .bind(pattern_type)
+        .bind(pattern_value)
+        .execute(&mut *conn)
+        .await?;
+    }
+    Ok(())
+}
+
 impl CategoryRepository for PgCategoryRepository {
     async fn list(&self, user_id: Uuid) -> AppResult<Vec<Category>> {
         let rows = sqlx::query(&format!(
@@ -98,7 +122,32 @@ impl CategoryRepository for PgCategoryRepository {
         .bind(user_id)
         .fetch_all(&self.pool)
         .await?;
-        rows.iter().map(row_to_category).collect()
+        let rule_rows = sqlx::query(
+            "SELECT r.category_id, r.pattern_type, r.pattern_value FROM category_rules r \
+             JOIN categories c ON c.id = r.category_id \
+             WHERE c.user_id = $1 ORDER BY r.position",
+        )
+        .bind(user_id)
+        .fetch_all(&self.pool)
+        .await?;
+        let mut rules: HashMap<Uuid, Vec<CategoryRule>> = HashMap::new();
+        for row in &rule_rows {
+            rules
+                .entry(row.try_get("category_id")?)
+                .or_default()
+                .push(CategoryRule {
+                    label_pattern: label_pattern_from_cols(
+                        row.try_get("pattern_type")?,
+                        row.try_get("pattern_value")?,
+                    )?,
+                });
+        }
+        rows.iter()
+            .map(|row| {
+                let id: Uuid = row.try_get("id")?;
+                row_to_category(row, rules.remove(&id).unwrap_or_default())
+            })
+            .collect()
     }
 
     async fn count(&self, user_id: Uuid) -> AppResult<i64> {
@@ -121,6 +170,7 @@ impl CategoryRepository for PgCategoryRepository {
     }
 
     async fn create(&self, user_id: Uuid, fields: &CategoryFields) -> AppResult<Category> {
+        let mut tx = self.pool.begin().await?;
         let row = sqlx::query(&format!(
             "INSERT INTO categories (user_id, name, color, icon) VALUES ($1, $2, $3, $4) \
              RETURNING {COLUMNS}"
@@ -129,10 +179,13 @@ impl CategoryRepository for PgCategoryRepository {
         .bind(&fields.name)
         .bind(fields.color.as_str())
         .bind(fields.icon.as_ref().map(CategoryIcon::as_str))
-        .fetch_one(&self.pool)
+        .fetch_one(&mut *tx)
         .await
         .map_err(|e| map_name_conflict(e, &fields.name))?;
-        row_to_category(&row)
+        let category = row_to_category(&row, fields.rules.clone())?;
+        insert_rules(&mut tx, category.id, &fields.rules).await?;
+        tx.commit().await?;
+        Ok(category)
     }
 
     async fn update(
@@ -141,6 +194,7 @@ impl CategoryRepository for PgCategoryRepository {
         user_id: Uuid,
         fields: &CategoryFields,
     ) -> AppResult<Option<Category>> {
+        let mut tx = self.pool.begin().await?;
         let row = sqlx::query(&format!(
             "UPDATE categories SET name = $3, color = $4, icon = $5 \
              WHERE id = $1 AND user_id = $2 RETURNING {COLUMNS}"
@@ -150,10 +204,19 @@ impl CategoryRepository for PgCategoryRepository {
         .bind(&fields.name)
         .bind(fields.color.as_str())
         .bind(fields.icon.as_ref().map(CategoryIcon::as_str))
-        .fetch_optional(&self.pool)
+        .fetch_optional(&mut *tx)
         .await
         .map_err(|e| map_name_conflict(e, &fields.name))?;
-        row.as_ref().map(row_to_category).transpose()
+        let Some(row) = row else {
+            return Ok(None);
+        };
+        sqlx::query("DELETE FROM category_rules WHERE category_id = $1")
+            .bind(id)
+            .execute(&mut *tx)
+            .await?;
+        insert_rules(&mut tx, id, &fields.rules).await?;
+        tx.commit().await?;
+        row_to_category(&row, fields.rules.clone()).map(Some)
     }
 
     async fn delete(&self, id: Uuid, user_id: Uuid) -> AppResult<bool> {
@@ -170,7 +233,7 @@ impl CategoryRepository for PgCategoryRepository {
 mod tests {
     use super::*;
     use crate::{
-        domain::user::UserRole,
+        domain::{budget::LabelPattern, user::UserRole},
         repositories::{PgUserRepository, UserRepository},
     };
 
@@ -188,6 +251,13 @@ mod tests {
             name: name.to_string(),
             color: "#12b886".parse::<CategoryColor>().unwrap(),
             icon: None,
+            rules: Vec::new(),
+        }
+    }
+
+    fn rule(pattern: LabelPattern) -> CategoryRule {
+        CategoryRule {
+            label_pattern: pattern,
         }
     }
 
@@ -231,6 +301,7 @@ mod tests {
             name: "Groceries".to_string(),
             color: "#fd7e14".parse::<CategoryColor>().unwrap(),
             icon: Some(CategoryIcon::Cart),
+            rules: Vec::new(),
         };
 
         assert!(repo.exists(created.id, alice).await.unwrap());
@@ -265,5 +336,52 @@ mod tests {
         assert!(!repo.delete(created.id, bob).await.unwrap());
         assert!(repo.delete(created.id, alice).await.unwrap());
         assert!(!repo.delete(created.id, alice).await.unwrap());
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn rules_are_stored_in_order_and_replaced(pool: PgPool) {
+        let alice = make_user(&pool, "alice").await;
+        let repo = PgCategoryRepository::new(pool);
+        let with_rules = CategoryFields {
+            rules: vec![
+                rule(LabelPattern::Contains("CARREFOUR".to_string())),
+                rule(LabelPattern::StartsWith("CB BIOCOOP".to_string())),
+                rule(LabelPattern::EndsWith("LECLERC".to_string())),
+            ],
+            ..fields("Groceries")
+        };
+
+        let created = repo.create(alice, &with_rules).await.unwrap();
+        repo.create(alice, &fields("Food")).await.unwrap();
+
+        assert_eq!(created.fields, with_rules);
+        let listed = repo.list(alice).await.unwrap();
+        assert_eq!(listed[0].fields.rules, []);
+        assert_eq!(listed[1].fields, with_rules);
+
+        let fewer = CategoryFields {
+            rules: vec![rule(LabelPattern::Contains("LIDL".to_string()))],
+            ..fields("Groceries")
+        };
+        repo.update(created.id, alice, &fewer).await.unwrap();
+        assert_eq!(repo.list(alice).await.unwrap()[1].fields, fewer);
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn failed_create_writes_no_rules(pool: PgPool) {
+        let alice = make_user(&pool, "alice").await;
+        let repo = PgCategoryRepository::new(pool.clone());
+        repo.create(alice, &fields("Food")).await.unwrap();
+        let duplicate = CategoryFields {
+            rules: vec![rule(LabelPattern::Contains("LIDL".to_string()))],
+            ..fields("Food")
+        };
+
+        assert!(repo.create(alice, &duplicate).await.is_err());
+        let row = sqlx::query("SELECT COUNT(*) AS n FROM category_rules")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(row.get::<i64, _>("n"), 0);
     }
 }

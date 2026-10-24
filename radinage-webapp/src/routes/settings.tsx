@@ -18,7 +18,6 @@ import { createFileRoute } from "@tanstack/react-router";
 import { type FormEvent, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { AccountBalanceSection } from "@/components/AccountBalanceSection";
-import { CategoriesSection } from "@/components/CategoriesSection";
 import { PageHeader } from "@/components/PageHeader";
 import { ApiError } from "@/lib/api";
 import { useChangePassword, useExportData, useImportData } from "@/lib/hooks";
@@ -166,8 +165,6 @@ export function SettingsPage() {
 				</Paper>
 
 				<AccountBalanceSection />
-
-				<CategoriesSection />
 
 				<Paper>
 					<Stack>

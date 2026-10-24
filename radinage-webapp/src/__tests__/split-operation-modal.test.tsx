@@ -322,6 +322,7 @@ describe("SplitOperationModal", () => {
 				name: "Courses",
 				color: "#12b886",
 				icon: null,
+				rules: [],
 				createdAt: "2026-01-01T00:00:00Z",
 			},
 			{
@@ -329,6 +330,7 @@ describe("SplitOperationModal", () => {
 				name: "Sorties",
 				color: "#be4bdb",
 				icon: null,
+				rules: [],
 				createdAt: "2026-01-01T00:00:00Z",
 			},
 		];

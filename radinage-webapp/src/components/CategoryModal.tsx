@@ -1,12 +1,10 @@
 import {
 	ActionIcon,
 	Alert,
-	Box,
 	Button,
 	ColorInput,
 	Group,
-	Loader,
-	Paper,
+	Modal,
 	Stack,
 	Text,
 	TextInput,
@@ -16,14 +14,17 @@ import {
 } from "@mantine/core";
 import {
 	IconAlertCircle,
-	IconPencil,
 	IconPlus,
 	IconRefresh,
 	IconTrash,
 } from "@tabler/icons-react";
 import { type FormEvent, type ReactNode, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { CategoryBadge, CategoryDot } from "@/components/CategoryBadge";
+import { CategoryDot } from "@/components/CategoryBadge";
+import {
+	LabelPatternFields,
+	type PatternType,
+} from "@/components/LabelPatternFields";
 import { ApiError } from "@/lib/api";
 import {
 	categoriesCloseTo,
@@ -31,16 +32,17 @@ import {
 	isHexColor,
 } from "@/lib/category-colors";
 import { categoryIcons } from "@/lib/category-icons";
-import { useCategories, useDeleteCategory, useSaveCategory } from "@/lib/hooks";
+import { useBelowBreakpoint, useSaveCategory } from "@/lib/hooks";
 import {
 	CATEGORY_ICONS,
 	type CategoryColor,
 	type CategoryIcon,
 	type CategoryResponse,
+	type CategoryRule,
 } from "@/lib/types";
-import { palette } from "@/theme";
 
 const MAX_NAME_LENGTH = 50;
+const MAX_RULE_LENGTH = 100;
 
 interface Swatch<T> {
 	value: T;
@@ -107,12 +109,12 @@ function ColorPicker({
 }) {
 	const { t } = useTranslation();
 	const close = isHexColor(value) ? categoriesCloseTo(value, others) : [];
-	const generateLabel = t("settings.categories.generateColor");
+	const generateLabel = t("categories.generateColor");
 	return (
 		<Stack gap={4}>
 			<Group gap="xs" align="flex-end" wrap="nowrap">
 				<ColorInput
-					label={t("settings.categories.color")}
+					label={t("categories.color")}
 					value={value}
 					onChange={onChange}
 					format="hex"
@@ -132,7 +134,7 @@ function ColorPicker({
 			</Group>
 			{close.length > 0 && (
 				<Text size="xs" c="dimmed">
-					{t("settings.categories.colorClose", { names: close.join(", ") })}
+					{t("categories.colorClose", { names: close.join(", ") })}
 				</Text>
 			)}
 		</Stack>
@@ -171,27 +173,77 @@ function IconPicker({
 	return (
 		<SwatchGroup
 			id="category-icon-label"
-			label={t("settings.categories.icon")}
+			label={t("categories.icon")}
 			value={value}
 			onChange={onChange}
 			swatches={[
-				swatch(null, t("settings.categories.noIcon")),
+				swatch(null, t("categories.noIcon")),
 				...CATEGORY_ICONS.map((icon) =>
-					swatch(icon, t(`settings.categories.icons.${icon}`)),
+					swatch(icon, t(`categories.icons.${icon}`)),
 				),
 			]}
 		/>
 	);
 }
 
+let ruleIdCounter = 0;
+
+interface RuleForm {
+	id: number;
+	type: PatternType;
+	value: string;
+}
+
+function createRule(type: PatternType = "contains", value = ""): RuleForm {
+	return { id: ++ruleIdCounter, type, value };
+}
+
+function ruleKey(type: PatternType, value: string): string {
+	return `${type}:${value.trim().toLowerCase()}`;
+}
+
+/** The other categories that already have each rule typed, by rule. */
+function rulesTakenElsewhere(
+	rules: RuleForm[],
+	others: CategoryResponse[],
+): Map<number, string[]> {
+	const taken = new Map<number, string[]>();
+	for (const rule of rules) {
+		if (rule.value.trim() === "") continue;
+		const key = ruleKey(rule.type, rule.value);
+		const names = others
+			.filter((c) =>
+				c.rules.some(
+					(r) => ruleKey(r.labelPattern.type, r.labelPattern.value) === key,
+				),
+			)
+			.map((c) => c.name);
+		if (names.length > 0) taken.set(rule.id, names);
+	}
+	return taken;
+}
+
+function sameRules(a: CategoryRule[], b: CategoryRule[]): boolean {
+	return (
+		a.length === b.length &&
+		a.every(
+			(r, i) =>
+				r.labelPattern.type === b[i].labelPattern.type &&
+				r.labelPattern.value === b[i].labelPattern.value,
+		)
+	);
+}
+
 function CategoryForm({
 	category,
 	categories,
-	onDone,
+	onCancel,
+	onSaved,
 }: {
 	category: CategoryResponse | null;
 	categories: CategoryResponse[];
-	onDone: () => void;
+	onCancel: () => void;
+	onSaved: (saved: CategoryResponse, rulesChanged: boolean) => void;
 }) {
 	const { t } = useTranslation();
 	const save = useSaveCategory();
@@ -201,50 +253,76 @@ function CategoryForm({
 		() => category?.color ?? generateColor(others),
 	);
 	const [icon, setIcon] = useState<CategoryIcon | null>(category?.icon ?? null);
+	const [rules, setRules] = useState<RuleForm[]>(() =>
+		(category?.rules ?? []).map((r) =>
+			createRule(r.labelPattern.type, r.labelPattern.value),
+		),
+	);
 	const [error, setError] = useState<string | null>(null);
+	const taken = rulesTakenElsewhere(rules, others);
+
+	function updateRule(id: number, patch: Partial<RuleForm>) {
+		setRules((prev) => prev.map((r) => (r.id === id ? { ...r, ...patch } : r)));
+	}
 
 	async function handleSubmit(e: FormEvent) {
 		e.preventDefault();
 		setError(null);
 		const trimmed = name.trim();
 		if (trimmed === "" || trimmed.length > MAX_NAME_LENGTH) {
-			setError(t("settings.categories.errorName"));
+			setError(t("categories.errorName"));
 			return;
 		}
 		if (categories.some((c) => c.name === trimmed && c.id !== category?.id)) {
-			setError(t("settings.categories.errorNameTaken"));
+			setError(t("categories.errorNameTaken"));
 			return;
 		}
 		if (!isHexColor(color)) {
-			setError(t("settings.categories.errorColor"));
+			setError(t("categories.errorColor"));
 			return;
 		}
+		const ruleValues = rules.map((r) => ({ ...r, value: r.value.trim() }));
+		if (
+			ruleValues.some((r) => r.value === "" || r.value.length > MAX_RULE_LENGTH)
+		) {
+			setError(t("categories.errorRule"));
+			return;
+		}
+		const body = {
+			name: trimmed,
+			color: color.toLowerCase(),
+			icon,
+			rules: ruleValues.map((r) => ({
+				labelPattern: { type: r.type, value: r.value },
+			})),
+		};
 		try {
-			await save.mutateAsync({
+			const saved = await save.mutateAsync({
 				...(category ? { id: category.id } : {}),
-				body: { name: trimmed, color: color.toLowerCase(), icon },
+				body,
 			});
-			onDone();
+			onSaved(saved, !sameRules(category?.rules ?? [], body.rules));
 		} catch (err) {
 			// The name was checked above, so a conflict is the category limit.
 			setError(
 				err instanceof ApiError && err.status === 409
-					? t("settings.categories.errorLimit")
+					? t("categories.errorLimit")
 					: t("common.error"),
 			);
 		}
 	}
 
+	const addRuleLabel = t("categories.addRule");
 	return (
 		<form onSubmit={handleSubmit}>
-			<Stack gap="sm">
+			<Stack gap="md">
 				<TextInput
-					label={t("settings.categories.name")}
+					label={t("categories.name")}
 					value={name}
 					onChange={(e) => setName(e.currentTarget.value)}
 					maxLength={MAX_NAME_LENGTH}
 					required
-					autoFocus
+					data-autofocus
 				/>
 				<ColorPicker value={color} others={others} onChange={setColor} />
 				<IconPicker
@@ -252,17 +330,74 @@ function CategoryForm({
 					color={isHexColor(color) ? color : PLACEHOLDER_COLOR}
 					onChange={setIcon}
 				/>
+
+				<Stack gap={4}>
+					<Group justify="space-between" wrap="nowrap">
+						<Title order={4}>{t("categories.rules")}</Title>
+						<Tooltip label={addRuleLabel}>
+							<ActionIcon
+								variant="light"
+								size="xl"
+								onClick={() => setRules((prev) => [...prev, createRule()])}
+								aria-label={addRuleLabel}
+							>
+								<IconPlus size={20} />
+							</ActionIcon>
+						</Tooltip>
+					</Group>
+					<Text size="xs" c="dimmed">
+						{t("categories.rulesHint")}
+					</Text>
+				</Stack>
+
+				{rules.map((rule) => {
+					const takenBy = taken.get(rule.id);
+					return (
+						<Stack key={rule.id} gap={6}>
+							<Group align="flex-end" wrap="wrap" gap="xs">
+								<LabelPatternFields
+									type={rule.type}
+									value={rule.value}
+									onTypeChange={(type) => updateRule(rule.id, { type })}
+									onValueChange={(value) => updateRule(rule.id, { value })}
+								/>
+								<Tooltip label={t("categories.removeRule")}>
+									<ActionIcon
+										variant="subtle"
+										color="gray"
+										size="xl"
+										onClick={() =>
+											setRules((prev) => prev.filter((r) => r.id !== rule.id))
+										}
+										aria-label={t("categories.removeRule")}
+									>
+										<IconTrash size={18} />
+									</ActionIcon>
+								</Tooltip>
+							</Group>
+							{takenBy && (
+								<Alert color="gold" icon={<IconAlertCircle size={16} />}>
+									{t("categories.ruleTaken", {
+										rule: `${t(`rules.patterns.${rule.type}`).toLowerCase()} ${rule.value.trim()}`,
+										names: takenBy.join(", "),
+									})}
+								</Alert>
+							)}
+						</Stack>
+					);
+				})}
+
 				{error && (
 					<Alert color="tangerine" icon={<IconAlertCircle size={16} />}>
 						{error}
 					</Alert>
 				)}
-				<Group grow>
-					<Button variant="default" onClick={onDone}>
+				<Group justify="flex-end" gap="sm">
+					<Button variant="default" onClick={onCancel}>
 						{t("common.cancel")}
 					</Button>
 					<Button type="submit" loading={save.isPending}>
-						{t("settings.categories.save")}
+						{t("categories.save")}
 					</Button>
 				</Group>
 			</Stack>
@@ -270,158 +405,39 @@ function CategoryForm({
 	);
 }
 
-function CategoryRow({
+/** Creates a category, or edits `category`, in a modal. */
+export function CategoryModal({
+	opened,
 	category,
-	onEdit,
+	categories,
+	onClose,
+	onSaved,
 }: {
-	category: CategoryResponse;
-	onEdit: () => void;
+	opened: boolean;
+	category: CategoryResponse | null;
+	categories: CategoryResponse[];
+	onClose: () => void;
+	/** Called once saved, instead of `onClose`. */
+	onSaved: (saved: CategoryResponse, rulesChanged: boolean) => void;
 }) {
 	const { t } = useTranslation();
-	const remove = useDeleteCategory();
-	const [confirming, setConfirming] = useState(false);
-	const editLabel = t("settings.categories.edit", { name: category.name });
-	const deleteLabel = t("settings.categories.delete", { name: category.name });
-
+	const isMobile = useBelowBreakpoint("xs");
 	return (
-		<Box
-			component="li"
-			py={6}
-			style={{ borderBottom: `1px dashed ${palette.border}` }}
+		<Modal
+			opened={opened}
+			onClose={onClose}
+			title={category ? t("categories.editTitle") : t("categories.createTitle")}
+			size="lg"
+			fullScreen={isMobile}
 		>
-			{confirming ? (
-				<Stack gap="xs">
-					<Text size="sm">
-						{t("settings.categories.confirmDelete", { name: category.name })}
-					</Text>
-					<Group grow>
-						<Button variant="default" onClick={() => setConfirming(false)}>
-							{t("common.cancel")}
-						</Button>
-						<Button
-							color="tangerine"
-							loading={remove.isPending}
-							onClick={() => remove.mutate(category.id)}
-						>
-							{t("common.delete")}
-						</Button>
-					</Group>
-				</Stack>
-			) : (
-				<Group justify="space-between" wrap="nowrap">
-					<CategoryBadge category={category} />
-					<Group gap={2} wrap="nowrap">
-						<Tooltip label={editLabel}>
-							<ActionIcon
-								variant="subtle"
-								color="gray"
-								size={44}
-								onClick={onEdit}
-								aria-label={editLabel}
-							>
-								<IconPencil size={18} />
-							</ActionIcon>
-						</Tooltip>
-						<Tooltip label={deleteLabel}>
-							<ActionIcon
-								variant="subtle"
-								color="gray"
-								size={44}
-								onClick={() => setConfirming(true)}
-								aria-label={deleteLabel}
-							>
-								<IconTrash size={18} />
-							</ActionIcon>
-						</Tooltip>
-					</Group>
-				</Group>
+			{opened && (
+				<CategoryForm
+					category={category}
+					categories={categories}
+					onCancel={onClose}
+					onSaved={onSaved}
+				/>
 			)}
-		</Box>
-	);
-}
-
-/** The category being edited: an existing one, a new one, or none. */
-type Editing =
-	| { kind: "none" }
-	| { kind: "new" }
-	| { kind: "edit"; id: string };
-
-export function CategoriesSection() {
-	const { t } = useTranslation();
-	const categoriesQuery = useCategories();
-	const [editing, setEditing] = useState<Editing>({ kind: "none" });
-	const categories = categoriesQuery.data ?? [];
-	const stopEditing = () => setEditing({ kind: "none" });
-
-	return (
-		<Paper>
-			<Stack>
-				<Title order={3} fz={20}>
-					{t("settings.categories.title")}
-				</Title>
-				<Text size="sm" c="dimmed">
-					{t("settings.categories.description")}
-				</Text>
-
-				{categoriesQuery.isLoading && (
-					<Group justify="center">
-						<Loader size="sm" />
-					</Group>
-				)}
-				{categoriesQuery.isError && (
-					<Alert color="tangerine" icon={<IconAlertCircle size={16} />}>
-						{t("settings.categories.fetchError")}
-					</Alert>
-				)}
-
-				{categoriesQuery.isSuccess && (
-					<>
-						{categories.length === 0 ? (
-							<Text size="sm" c="dimmed">
-								{t("settings.categories.empty")}
-							</Text>
-						) : (
-							<Box component="ul" m={0} p={0} className="list-none">
-								{categories.map((category) =>
-									editing.kind === "edit" && editing.id === category.id ? (
-										<Box component="li" key={category.id} py="xs">
-											<CategoryForm
-												category={category}
-												categories={categories}
-												onDone={stopEditing}
-											/>
-										</Box>
-									) : (
-										<CategoryRow
-											key={category.id}
-											category={category}
-											onEdit={() =>
-												setEditing({ kind: "edit", id: category.id })
-											}
-										/>
-									),
-								)}
-							</Box>
-						)}
-						{editing.kind === "new" ? (
-							<CategoryForm
-								category={null}
-								categories={categories}
-								onDone={stopEditing}
-							/>
-						) : (
-							<Button
-								variant="light"
-								leftSection={<IconPlus size={18} />}
-								onClick={() => setEditing({ kind: "new" })}
-								className="self-start"
-							>
-								{t("settings.categories.add")}
-							</Button>
-						)}
-					</>
-				)}
-			</Stack>
-		</Paper>
+		</Modal>
 	);
 }

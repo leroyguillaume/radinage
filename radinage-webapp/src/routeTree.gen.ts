@@ -13,6 +13,7 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as ActivateRouteImport } from './routes/activate'
 import { Route as AdminRouteImport } from './routes/admin'
 import { Route as BudgetsRouteImport } from './routes/budgets'
+import { Route as CategoriesRouteImport } from './routes/categories'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as OperationsRouteImport } from './routes/operations'
 import { Route as SearchRouteImport } from './routes/search'
@@ -38,6 +39,11 @@ const AdminRoute = AdminRouteImport.update({
 const BudgetsRoute = BudgetsRouteImport.update({
   id: '/budgets',
   path: '/budgets',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const CategoriesRoute = CategoriesRouteImport.update({
+  id: '/categories',
+  path: '/categories',
   getParentRoute: () => rootRouteImport,
 } as any)
 const LoginRoute = LoginRouteImport.update({
@@ -76,6 +82,7 @@ export interface FileRoutesByFullPath {
   '/activate': typeof ActivateRoute
   '/admin': typeof AdminRoute
   '/budgets': typeof BudgetsRoute
+  '/categories': typeof CategoriesRoute
   '/login': typeof LoginRoute
   '/operations': typeof OperationsRoute
   '/search': typeof SearchRoute
@@ -88,6 +95,7 @@ export interface FileRoutesByTo {
   '/activate': typeof ActivateRoute
   '/admin': typeof AdminRoute
   '/budgets': typeof BudgetsRoute
+  '/categories': typeof CategoriesRoute
   '/login': typeof LoginRoute
   '/operations': typeof OperationsRoute
   '/search': typeof SearchRoute
@@ -101,6 +109,7 @@ export interface FileRoutesById {
   '/activate': typeof ActivateRoute
   '/admin': typeof AdminRoute
   '/budgets': typeof BudgetsRoute
+  '/categories': typeof CategoriesRoute
   '/login': typeof LoginRoute
   '/operations': typeof OperationsRoute
   '/search': typeof SearchRoute
@@ -115,6 +124,7 @@ export interface FileRouteTypes {
     | '/activate'
     | '/admin'
     | '/budgets'
+    | '/categories'
     | '/login'
     | '/operations'
     | '/search'
@@ -127,6 +137,7 @@ export interface FileRouteTypes {
     | '/activate'
     | '/admin'
     | '/budgets'
+    | '/categories'
     | '/login'
     | '/operations'
     | '/search'
@@ -139,6 +150,7 @@ export interface FileRouteTypes {
     | '/activate'
     | '/admin'
     | '/budgets'
+    | '/categories'
     | '/login'
     | '/operations'
     | '/search'
@@ -152,6 +164,7 @@ export interface RootRouteChildren {
   ActivateRoute: typeof ActivateRoute
   AdminRoute: typeof AdminRoute
   BudgetsRoute: typeof BudgetsRoute
+  CategoriesRoute: typeof CategoriesRoute
   LoginRoute: typeof LoginRoute
   OperationsRoute: typeof OperationsRoute
   SearchRoute: typeof SearchRoute
@@ -188,6 +201,13 @@ declare module '@tanstack/react-router' {
       path: '/budgets'
       fullPath: '/budgets'
       preLoaderRoute: typeof BudgetsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/categories': {
+      id: '/categories'
+      path: '/categories'
+      fullPath: '/categories'
+      preLoaderRoute: typeof CategoriesRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/login': {
@@ -240,6 +260,7 @@ const rootRouteChildren: RootRouteChildren = {
   ActivateRoute: ActivateRoute,
   AdminRoute: AdminRoute,
   BudgetsRoute: BudgetsRoute,
+  CategoriesRoute: CategoriesRoute,
   LoginRoute: LoginRoute,
   OperationsRoute: OperationsRoute,
   SearchRoute: SearchRoute,

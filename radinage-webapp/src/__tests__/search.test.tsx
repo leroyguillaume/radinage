@@ -47,6 +47,7 @@ const categories: CategoryResponse[] = [
 		name: "Courses",
 		color: "#fd7e14",
 		icon: null,
+		rules: [],
 		createdAt: "",
 	},
 	{
@@ -54,6 +55,7 @@ const categories: CategoryResponse[] = [
 		name: "Logement",
 		color: "#228be6",
 		icon: "home",
+		rules: [],
 		createdAt: "",
 	},
 ];

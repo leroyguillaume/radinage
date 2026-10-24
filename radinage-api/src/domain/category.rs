@@ -1,3 +1,4 @@
+use super::budget::LabelPattern;
 use chrono::{DateTime, Utc};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -167,6 +168,14 @@ string_enum! {
     }
 }
 
+/// A rule putting the operations whose label it matches in its category.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct CategoryRule {
+    /// Pattern matched against the operation label, case-insensitively.
+    pub label_pattern: LabelPattern,
+}
+
 /// What a user chooses for a category.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CategoryFields {
@@ -174,6 +183,8 @@ pub struct CategoryFields {
     pub color: CategoryColor,
     /// Shown inside the colour; without one, the colour alone identifies the category.
     pub icon: Option<CategoryIcon>,
+    /// Give the category to the operations they match that have none of their own.
+    pub rules: Vec<CategoryRule>,
 }
 
 /// A user-defined category operations are sorted into.
@@ -183,6 +194,16 @@ pub struct Category {
     pub user_id: Uuid,
     pub fields: CategoryFields,
     pub created_at: DateTime<Utc>,
+}
+
+impl Category {
+    /// Whether any of the category's rules matches the label.
+    pub fn matches(&self, label: &str) -> bool {
+        self.fields
+            .rules
+            .iter()
+            .any(|rule| rule.label_pattern.matches(label))
+    }
 }
 
 #[cfg(test)]

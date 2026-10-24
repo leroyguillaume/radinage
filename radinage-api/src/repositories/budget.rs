@@ -1,7 +1,8 @@
+use super::{label_pattern_from_cols, label_pattern_to_cols};
 use crate::{
     domain::budget::{
-        Budget, BudgetFields, BudgetKind, BudgetType, ClosedPeriod, CurrentPeriod, LabelPattern,
-        Recurrence, Rule, YearMonth,
+        Budget, BudgetFields, BudgetKind, BudgetType, ClosedPeriod, CurrentPeriod, Recurrence,
+        Rule, YearMonth,
     },
     error::{AppError, AppResult},
     repositories::SortOrder,
@@ -205,19 +206,15 @@ impl PgBudgetRepository {
         let rules = rule_rows
             .iter()
             .map(|r| {
-                let pt: &str = r.try_get("pattern_type").unwrap_or("contains");
-                let pv: String = r.try_get("pattern_value").unwrap_or_default();
-                let label_pattern = match pt {
-                    "starts_with" => LabelPattern::StartsWith(pv),
-                    "ends_with" => LabelPattern::EndsWith(pv),
-                    _ => LabelPattern::Contains(pv),
-                };
-                Rule {
-                    label_pattern,
-                    match_amount: r.try_get("match_amount").unwrap_or(false),
-                }
+                Ok(Rule {
+                    label_pattern: label_pattern_from_cols(
+                        r.try_get("pattern_type")?,
+                        r.try_get("pattern_value")?,
+                    )?,
+                    match_amount: r.try_get("match_amount")?,
+                })
             })
-            .collect();
+            .collect::<AppResult<Vec<_>>>()?;
 
         let budget_type_str: &str = row.try_get("budget_type")?;
         let budget_type: BudgetType = budget_type_str
@@ -326,15 +323,6 @@ fn kind_to_cols(
             Some(*year as i32),
             Some(*amount),
         ),
-    }
-}
-
-/// Extract (pattern_type, pattern_value) from a `LabelPattern`.
-fn label_pattern_to_cols(p: &LabelPattern) -> (&'static str, &str) {
-    match p {
-        LabelPattern::StartsWith(v) => ("starts_with", v.as_str()),
-        LabelPattern::EndsWith(v) => ("ends_with", v.as_str()),
-        LabelPattern::Contains(v) => ("contains", v.as_str()),
     }
 }
 
@@ -509,6 +497,7 @@ impl BudgetRepository for PgBudgetRepository {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::budget::LabelPattern;
     use rust_decimal_macros::dec;
     use sqlx::PgPool;
 
@@ -665,6 +654,7 @@ mod tests {
             name: name.to_string(),
             color: "#12b886".parse().unwrap(),
             icon: None,
+            rules: Vec::new(),
         };
         let food = categories.create(user_id, &category("Food")).await.unwrap();
         let fun = categories.create(user_id, &category("Fun")).await.unwrap();

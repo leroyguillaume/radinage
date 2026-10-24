@@ -1,16 +1,20 @@
 use crate::domain::{
     budget::{Budget, BudgetKind, YearMonth},
+    category::Category,
     operation::Operation,
 };
 use chrono::Datelike;
 use rust_decimal::Decimal;
 use uuid::Uuid;
 
-/// Evaluates budget matching rules against an operation.
-///
-/// Returns the id of the first budget whose rules match the operation, or `None`.
+/// Evaluates budget and category matching rules against an operation.
 pub trait MatcherService {
+    /// The id of the first budget whose rules match the operation, or `None`.
     fn match_operation(&self, op: &Operation, budgets: &[Budget]) -> Option<Uuid>;
+
+    /// The id of the first category, in the order given, whose rules match the operation's
+    /// label, or `None`.
+    fn match_category(&self, op: &Operation, categories: &[Category]) -> Option<Uuid>;
 }
 
 pub struct MatcherServiceImpl;
@@ -35,6 +39,13 @@ impl MatcherService for MatcherServiceImpl {
             }
         }
         None
+    }
+
+    fn match_category(&self, op: &Operation, categories: &[Category]) -> Option<Uuid> {
+        categories
+            .iter()
+            .find(|category| category.matches(&op.label))
+            .map(|category| category.id)
     }
 }
 
@@ -537,5 +548,58 @@ mod tests {
         );
         let matcher = MatcherServiceImpl;
         assert_eq!(matcher.match_operation(&op, &[budget]), None);
+    }
+
+    fn make_category(name: &str, patterns: Vec<LabelPattern>) -> Category {
+        use crate::domain::category::{CategoryFields, CategoryRule};
+        Category {
+            id: Uuid::new_v4(),
+            user_id: Uuid::new_v4(),
+            fields: CategoryFields {
+                name: name.to_string(),
+                color: "#12b886".parse().unwrap(),
+                icon: None,
+                rules: patterns
+                    .into_iter()
+                    .map(|label_pattern| CategoryRule { label_pattern })
+                    .collect(),
+            },
+            created_at: chrono::Utc::now(),
+        }
+    }
+
+    #[test]
+    fn match_category_returns_the_first_category_with_a_matching_rule() {
+        let none = make_category("Food", vec![]);
+        let groceries = make_category(
+            "Groceries",
+            vec![
+                LabelPattern::StartsWith("CB BIOCOOP".to_string()),
+                LabelPattern::Contains("leclerc".to_string()),
+            ],
+        );
+        let transport = make_category(
+            "Transport",
+            vec![LabelPattern::Contains("LECLERC".to_string())],
+        );
+        let categories = [none, groceries.clone(), transport];
+        let op = |label| {
+            make_op(
+                label,
+                Decimal::new(-30, 0),
+                NaiveDate::from_ymd_opt(2024, 1, 1).unwrap(),
+            )
+        };
+
+        let matcher = MatcherServiceImpl;
+        assert_eq!(
+            matcher.match_category(&op("CB LECLERC STATION"), &categories),
+            Some(groceries.id)
+        );
+        assert_eq!(
+            matcher.match_category(&op("CB BIOCOOP LYON"), &categories),
+            Some(groceries.id)
+        );
+        assert_eq!(matcher.match_category(&op("PRLV EDF"), &categories), None);
     }
 }

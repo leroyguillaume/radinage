@@ -391,8 +391,17 @@ export interface CategoryResponse {
 	color: CategoryColor;
 	/** Null shows the colour alone. */
 	icon: CategoryIcon | null;
+	/** Give the category to the new operations they match that have none of their own. */
+	rules: CategoryRule[];
 	createdAt: string;
 }
+
+export interface CategoryRule {
+	labelPattern: LabelPattern;
+}
+
+/** Operations a category's rules were applied to. */
+export type ApplyCategoryResponse = ApplyBudgetResponse;
 
 export type CategoryRequest = Omit<CategoryResponse, "id" | "createdAt">;
 

@@ -113,7 +113,7 @@ describe("RootLayout", () => {
 		const links = within(within(header).getByRole("navigation")).getAllByRole(
 			"link",
 		);
-		expect(links).toHaveLength(5);
+		expect(links).toHaveLength(6);
 		for (const link of links) {
 			expect(link).toHaveAttribute("aria-label");
 		}

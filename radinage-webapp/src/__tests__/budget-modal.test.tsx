@@ -705,6 +705,7 @@ describe("BudgetModal", () => {
 				name: "Alimentation",
 				color: "#12b886",
 				icon: null,
+				rules: [],
 				createdAt: "2026-01-01T00:00:00Z",
 			},
 		]);
@@ -725,7 +726,7 @@ describe("BudgetModal", () => {
 		expect(callBody.categoryId).toBe("c1");
 	});
 
-	it("disables the category field and links to the settings while there are no categories", async () => {
+	it("disables the category field and links to the categories while there are none", async () => {
 		const { onClose } = renderModal();
 
 		expect(
@@ -736,7 +737,7 @@ describe("BudgetModal", () => {
 		).toBeInTheDocument();
 
 		const link = screen.getByRole("link", { name: "Créer des catégories" });
-		expect(link).toHaveAttribute("href", "/settings");
+		expect(link).toHaveAttribute("href", "/categories");
 		await userEvent.setup().click(link);
 		expect(onClose).toHaveBeenCalled();
 	});

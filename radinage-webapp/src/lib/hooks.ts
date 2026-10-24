@@ -15,6 +15,7 @@ import {
 import type {
 	AccountBalance,
 	ApplyBudgetResponse,
+	ApplyCategoryResponse,
 	BudgetResponse,
 	CategoryRequest,
 	CategoryResponse,
@@ -551,6 +552,18 @@ export function useSaveCategory() {
 		onSuccess: () => {
 			queryClient.invalidateQueries({ queryKey: categoriesKey });
 		},
+	});
+}
+
+export function useApplyCategory() {
+	const invalidate = useInvalidateOperationData();
+	return useMutation({
+		mutationFn: ({ id, force }: { id: string; force: boolean }) =>
+			apiFetch<ApplyCategoryResponse>(`/categories/${id}/apply`, {
+				method: "POST",
+				body: JSON.stringify({ force }),
+			}),
+		onSuccess: invalidate,
 	});
 }
 

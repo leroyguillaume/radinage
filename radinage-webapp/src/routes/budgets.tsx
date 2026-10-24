@@ -1,11 +1,9 @@
 import {
-	ActionIcon,
 	Alert,
 	Badge,
 	Button,
 	Group,
 	Loader,
-	Modal,
 	Paper,
 	Progress,
 	SegmentedControl,
@@ -14,7 +12,6 @@ import {
 	Text,
 	TextInput,
 	Title,
-	Tooltip,
 } from "@mantine/core";
 import {
 	IconAlertCircle,
@@ -26,9 +23,11 @@ import {
 	IconTrash,
 } from "@tabler/icons-react";
 import { createFileRoute } from "@tanstack/react-router";
-import { type ReactNode, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { BudgetModal } from "@/components/BudgetModal";
+import { CardAction } from "@/components/CardAction";
+import { ConfirmModal } from "@/components/ConfirmModal";
 import { PageHeader } from "@/components/PageHeader";
 import {
 	type BudgetProgress,
@@ -318,56 +317,6 @@ function BudgetsPage() {
 				)}
 			</Stack>
 		</div>
-	);
-}
-
-function ConfirmModal({
-	opened,
-	onClose,
-	title,
-	message,
-	children,
-}: {
-	opened: boolean;
-	onClose: () => void;
-	title: string;
-	message: string;
-	children: ReactNode;
-}) {
-	return (
-		<Modal opened={opened} onClose={onClose} title={title} size="md">
-			<Stack>
-				<Text>{message}</Text>
-				<Group justify="flex-end" gap="sm">
-					{children}
-				</Group>
-			</Stack>
-		</Modal>
-	);
-}
-
-function CardAction({
-	label,
-	onClick,
-	children,
-}: {
-	label: string;
-	onClick: () => void;
-	children: ReactNode;
-}) {
-	return (
-		<Tooltip label={label}>
-			<ActionIcon
-				variant="subtle"
-				color="gray"
-				size="xl"
-				radius="md"
-				onClick={onClick}
-				aria-label={label}
-			>
-				{children}
-			</ActionIcon>
-		</Tooltip>
 	);
 }
 
