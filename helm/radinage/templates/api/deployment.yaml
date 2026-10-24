@@ -42,6 +42,8 @@ spec:
               value: {{ $app.maxImportProfilesPerUser | quote }}
             - name: MAX_CATEGORIES_PER_USER
               value: {{ $app.maxCategoriesPerUser | quote }}
+            - name: MAX_IGNORE_RULES_PER_USER
+              value: {{ $app.maxIgnoreRulesPerUser | quote }}
             - name: DATABASE_URL
               valueFrom:
                 secretKeyRef:

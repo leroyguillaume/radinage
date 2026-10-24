@@ -52,6 +52,10 @@ pub struct Config {
     #[arg(long, env = "MAX_CATEGORIES_PER_USER", default_value_t = 50)]
     pub max_categories_per_user: u32,
 
+    /// Maximum number of ignore rules a single user can create.
+    #[arg(long, env = "MAX_IGNORE_RULES_PER_USER", default_value_t = 100)]
+    pub max_ignore_rules_per_user: u32,
+
     /// Root path prefix for all API routes (e.g. "api/v1"). Empty by default.
     /// A leading "/" is stripped automatically.
     #[arg(long, env = "ROOT_PATH", default_value = "")]

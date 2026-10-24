@@ -47,8 +47,8 @@ pub struct ActivateResponse {
     pub role: UserRole,
 }
 
-pub async fn activate<U: UserRepository, O, B, P, C>(
-    State(state): State<AppState<U, O, B, P, C>>,
+pub async fn activate<U: UserRepository, O, B, P, C, R>(
+    State(state): State<AppState<U, O, B, P, C, R>>,
     Json(body): Json<ActivateRequest>,
 ) -> AppResult<(StatusCode, Json<ActivateResponse>)> {
     let user_id = state
@@ -70,8 +70,8 @@ pub async fn activate<U: UserRepository, O, B, P, C>(
     ))
 }
 
-pub async fn login<U: UserRepository, O, B, P, C>(
-    State(state): State<AppState<U, O, B, P, C>>,
+pub async fn login<U: UserRepository, O, B, P, C, R>(
+    State(state): State<AppState<U, O, B, P, C, R>>,
     Json(body): Json<LoginRequest>,
 ) -> AppResult<Json<LoginResponse>> {
     let creds = state

@@ -16,6 +16,7 @@ Radinage keeps a record of your bank operations and compares them with the budge
 - **Categories**: sort operations into your own categories, each with a name, a colour and an optional icon, independently of budgets; an operation linked to a budget takes the budget's default category unless given its own, and each part of a split operation has its own. Label rules put new operations in a category automatically, and can be applied to past ones. Filter the operations of a month by category.
 - **Search**: list operations across your whole history by label, or with no label at all, filtered by categories, budgets, amount range, expense or income and dates, with the totals of every match.
 - **Budgets**: recurring (weekly, monthly, quarterly, yearly) or one-off, for expenses, income or savings, with matching rules that categorise operations automatically.
+- **Ignore rules**: leave operations out of every total, budget and forecast automatically, by label (prefix, suffix or substring) and optionally exact amount, as they are created or imported; apply a new rule to your history, or create one from an operation's sheet. Operations can also be ignored by hand.
 - **Forecast**, over a calendar year or the next 12 months: starting from the account balance you record (the balance your bank shows on a given day) or from zero, actuals for past months (operations outside any budget counted as income or expense by their own sign), the current month's actuals plus what its budgets still expect, budgets beyond it, spending outside budgets at your average of the last three months, the daily amount you can still spend outside budgets without ending in the red (negative when the budgets alone already do), and the month the balance would first turn negative. Selecting a month opens its breakdown budget by budget: what each one expects, what is already linked to it and what the forecast counts, then spending outside budgets.
 - **Statistics**: income, expenses, savings and balance over any range of months, and income and expenses by category.
 - **Multi-user**: JWT authentication, an admin account and invitation links.
@@ -64,6 +65,7 @@ The API (`radinage-api`) reads its configuration from environment variables, or 
 | `MAX_BUDGETS_PER_USER` | no | `100` | Maximum number of budgets per user |
 | `MAX_IMPORT_PROFILES_PER_USER` | no | `20` | Maximum number of import profiles per user |
 | `MAX_CATEGORIES_PER_USER` | no | `50` | Maximum number of categories per user |
+| `MAX_IGNORE_RULES_PER_USER` | no | `100` | Maximum number of ignore rules per user |
 | `LOG_FILTER` | no | `info` | `tracing` filter directive |
 | `LOG_JSON` | no | `false` | Emit logs as JSON |
 

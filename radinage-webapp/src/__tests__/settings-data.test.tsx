@@ -23,15 +23,17 @@ const { apiFetch, ApiError } = await import("@/lib/api");
 const apiFetchMock = vi.mocked(apiFetch);
 
 /**
- * Answer data calls with `handler`; the account balance section finds no balance and the
- * categories section no category.
+ * Answer data calls with `handler`; the account balance section finds no balance, the
+ * categories section no category and the ignore rules section no rule.
  */
 function mockApi(handler: (path: string) => Promise<unknown>) {
 	apiFetchMock.mockImplementation((path: string) => {
 		if (path === "/users/me/balance") {
 			return Promise.reject(new ApiError(404, "Not Found"));
 		}
-		return path === "/categories" ? Promise.resolve([]) : handler(path);
+		return path === "/categories" || path === "/ignore-rules"
+			? Promise.resolve([])
+			: handler(path);
 	});
 }
 
@@ -127,6 +129,8 @@ describe("SettingsPage data section", () => {
 				skippedCategories: 1,
 				importedBudgets: 2,
 				skippedBudgets: 1,
+				importedIgnoreRules: 3,
+				skippedIgnoreRules: 0,
 				importedOperations: 5,
 				skippedOperations: 3,
 				importedBalance: false,
@@ -154,7 +158,7 @@ describe("SettingsPage data section", () => {
 		});
 		expect(
 			await screen.findByText(
-				"4 catégorie(s) importée(s) (1 déjà présente(s)), 2 budget(s) importé(s) (1 ignoré(s)), 5 opération(s) importée(s) (3 ignorée(s))",
+				"4 catégorie(s) importée(s) (1 déjà présente(s)), 2 budget(s) importé(s) (1 ignoré(s)), 3 règle(s) d'ignore importée(s) (0 déjà présente(s)), 5 opération(s) importée(s) (3 ignorée(s))",
 			),
 		).toBeInTheDocument();
 	});
@@ -207,6 +211,8 @@ describe("SettingsPage data section", () => {
 				skippedCategories: 0,
 				importedBudgets: 0,
 				skippedBudgets: 0,
+				importedIgnoreRules: 0,
+				skippedIgnoreRules: 0,
 				importedOperations: 0,
 				skippedOperations: 0,
 				importedBalance: true,

@@ -541,7 +541,7 @@
 			"exportError": "Erreur lors de l'export",
 			"import": "Importer des données",
 			"importError": "Fichier invalide ou import refusé",
-			"importSuccess": "{{categories}} catégorie(s) importée(s) ({{skippedCategories}} déjà présente(s)), {{budgets}} budget(s) importé(s) ({{skippedBudgets}} ignoré(s)), {{operations}} opération(s) importée(s) ({{skippedOperations}} ignorée(s))",
+			"importSuccess": "{{categories}} catégorie(s) importée(s) ({{skippedCategories}} déjà présente(s)), {{budgets}} budget(s) importé(s) ({{skippedBudgets}} ignoré(s)), {{ignoreRules}} règle(s) d'ignore importée(s) ({{skippedIgnoreRules}} déjà présente(s)), {{operations}} opération(s) importée(s) ({{skippedOperations}} ignorée(s))",
 			"importedBalance": "Solde du compte importé."
 		}
 	},
@@ -608,5 +608,36 @@
 			"hint": "Essaie un libellé plus court ou moins de filtres."
 		},
 		"fetchError": "Impossible de rechercher les opérations"
+	},
+	"ignoreRules": {
+		"title": "Règles d'ignore",
+		"description": "Une opération dont le libellé, et le montant s'il est précisé, correspond à une règle est ignorée dès sa création ou son import : exclue des totaux, des budgets et des prévisions.",
+		"fetchError": "Impossible de charger les règles d'ignore",
+		"empty": "Aucune règle pour l'instant.",
+		"add": "Ajouter une règle",
+		"createTitle": "Nouvelle règle d'ignore",
+		"create": "Créer la règle",
+		"pattern": "{{type}} « {{value}} »",
+		"amountSummary": "montant {{amount}}",
+		"amount": "Montant exact",
+		"amountHint": "Facultatif. Sans signe : la règle vaut pour les débits comme pour les crédits.",
+		"amountPlaceholder": "Tous les montants",
+		"errorValue": "La valeur est obligatoire",
+		"errorAmount": "Le montant doit être un nombre positif, par exemple 250,00",
+		"errorLimit": "Vous avez atteint le nombre maximal de règles d'ignore",
+		"saveError": "Erreur lors de l'enregistrement de la règle",
+		"edit": "Modifier la règle {{rule}}",
+		"delete": "Supprimer la règle {{rule}}",
+		"confirmDelete": "Supprimer la règle {{rule}} ? Les opérations qu'elle a ignorées seront de nouveau comptées.",
+		"applyTitle": "Appliquer la règle",
+		"applyPrompt": "La règle s'appliquera aux prochaines opérations. Voulez-vous aussi ignorer les opérations existantes qui y correspondent ?",
+		"later": "Plus tard",
+		"apply": "Appliquer",
+		"applyResult": "{{ignored}} opération(s) ignorée(s), {{alreadyIgnored}} l'étai(en)t déjà",
+		"applyError": "Erreur lors de l'application de la règle",
+		"always": "Toujours ignorer…",
+		"sheetIgnoredByRule": "Ignorée automatiquement par la règle {{rule}} : exclue des totaux, des budgets et des prévisions",
+		"seeRule": "Voir la règle",
+		"ignoredByRule": "Ignorée par une règle"
 	}
 }

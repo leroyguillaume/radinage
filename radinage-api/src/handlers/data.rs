@@ -2,17 +2,21 @@ use crate::{
     AppState,
     auth::middleware::AuthUser,
     domain::{
-        budget::{Budget, BudgetFields, BudgetKind, BudgetType, Rule},
+        budget::{Budget, BudgetFields, BudgetKind, BudgetType, LabelPattern, Rule},
         category::{Category, CategoryColor, CategoryFields, CategoryIcon, CategoryRule},
+        ignore_rule::{IgnoreRule, IgnoreRuleFields},
         import_profile::{CsvDelimiter, ImportProfile, ImportProfileFields},
         operation::{BudgetLink, NewOperationSplit, Operation, OperationSplit, validate_splits},
         user::AccountBalance,
     },
     error::{AppError, AppResult},
-    handlers::{categories::CategoryRequest, import_profiles::ImportProfileRequest},
+    handlers::{
+        categories::CategoryRequest, ignore_rules::IgnoreRuleRequest,
+        import_profiles::ImportProfileRequest,
+    },
     repositories::{
-        BudgetRepository, CategoryRepository, ImportProfileRepository, OperationRepository,
-        UserRepository,
+        BudgetRepository, CategoryRepository, IgnoreRuleRepository, ImportProfileRepository,
+        OperationRepository, UserRepository,
     },
 };
 use axum::{Json, extract::State, http::StatusCode};
@@ -84,6 +88,28 @@ impl From<Category> for ExportCategory {
     }
 }
 
+/// An ignore rule inside an export payload (omits `userId`).
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ExportIgnoreRule {
+    /// Identifier the payload's operations refer to it by.
+    pub id: Uuid,
+    pub label_pattern: LabelPattern,
+    #[serde(default)]
+    #[schemars(with = "Option<String>")]
+    pub amount: Option<Decimal>,
+}
+
+impl From<IgnoreRule> for ExportIgnoreRule {
+    fn from(rule: IgnoreRule) -> Self {
+        Self {
+            id: rule.id,
+            label_pattern: rule.fields.label_pattern,
+            amount: rule.fields.amount,
+        }
+    }
+}
+
 /// An operation as stored inside an export payload (omits `userId`).
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
@@ -96,6 +122,10 @@ pub struct ExportOperation {
     pub label: String,
     pub budget_link: BudgetLink,
     pub ignored: bool,
+    /// Ignore rule that ignored the operation; absent from exports made before ignore rules
+    /// existed.
+    #[serde(default)]
+    pub ignore_rule_id: Option<Uuid>,
     /// Absent from exports made before categories existed.
     #[serde(default)]
     pub category_id: Option<Uuid>,
@@ -146,6 +176,7 @@ impl From<Operation> for ExportOperation {
             label: op.label,
             budget_link: op.budget_link,
             ignored: op.ignored,
+            ignore_rule_id: op.ignore_rule_id,
             category_id: op.category_id,
             splits: op
                 .splits
@@ -239,6 +270,7 @@ pub struct ExportResponse {
     pub balance: Option<ExportAccountBalance>,
     pub categories: Vec<ExportCategory>,
     pub budgets: Vec<ExportBudget>,
+    pub ignore_rules: Vec<ExportIgnoreRule>,
     pub operations: Vec<ExportOperation>,
     pub import_profiles: Vec<ExportImportProfile>,
 }
@@ -258,6 +290,9 @@ pub struct ImportDataRequest {
     pub categories: Vec<ExportCategory>,
     #[serde(default)]
     pub budgets: Vec<ExportBudget>,
+    /// Absent from exports made before ignore rules existed.
+    #[serde(default)]
+    pub ignore_rules: Vec<ExportIgnoreRule>,
     #[serde(default)]
     pub operations: Vec<ExportOperation>,
     /// Absent from exports made before import profiles existed.
@@ -275,6 +310,10 @@ pub struct ImportDataResponse {
     pub skipped_categories: usize,
     pub imported_budgets: usize,
     pub skipped_budgets: usize,
+    pub imported_ignore_rules: usize,
+    /// Rules skipped because the account already has one with the same pattern and amount,
+    /// which is used instead.
+    pub skipped_ignore_rules: usize,
     pub imported_operations: usize,
     pub skipped_operations: usize,
     pub imported_import_profiles: usize,
@@ -293,8 +332,9 @@ pub async fn export_data<
     B: BudgetRepository,
     P: ImportProfileRepository,
     C: CategoryRepository,
+    R: IgnoreRuleRepository,
 >(
-    State(state): State<AppState<U, O, B, P, C>>,
+    State(state): State<AppState<U, O, B, P, C, R>>,
     auth_user: AuthUser,
 ) -> AppResult<Json<ExportResponse>> {
     let user_id = auth_user.id;
@@ -303,6 +343,7 @@ pub async fn export_data<
     let budgets = state.budget_repo.list_all_for_user(user_id).await?;
     let operations = state.operation_repo.list_all_for_user(user_id).await?;
     let import_profiles = state.import_profile_repo.list(user_id).await?;
+    let ignore_rules = state.ignore_rule_repo.list(user_id).await?;
 
     Ok(Json(ExportResponse {
         version: EXPORT_VERSION,
@@ -310,6 +351,10 @@ pub async fn export_data<
         balance: balance.map(Into::into),
         categories: categories.into_iter().map(ExportCategory::from).collect(),
         budgets: budgets.into_iter().map(ExportBudget::from).collect(),
+        ignore_rules: ignore_rules
+            .into_iter()
+            .map(ExportIgnoreRule::from)
+            .collect(),
         operations: operations.into_iter().map(ExportOperation::from).collect(),
         import_profiles: import_profiles
             .into_iter()
@@ -324,8 +369,9 @@ pub async fn import_data<
     B: BudgetRepository,
     P: ImportProfileRepository,
     C: CategoryRepository,
+    R: IgnoreRuleRepository,
 >(
-    State(state): State<AppState<U, O, B, P, C>>,
+    State(state): State<AppState<U, O, B, P, C, R>>,
     auth_user: AuthUser,
     Json(body): Json<ImportDataRequest>,
 ) -> AppResult<(StatusCode, Json<ImportDataResponse>)> {
@@ -367,7 +413,29 @@ pub async fn import_data<
         })
         .collect::<AppResult<Vec<_>>>()?;
 
+    let ignore_rules = body
+        .ignore_rules
+        .iter()
+        .map(|r| {
+            let request = IgnoreRuleRequest {
+                label_pattern: r.label_pattern.clone(),
+                amount: r.amount,
+            };
+            IgnoreRuleFields::try_from(request)
+                .map(|fields| (r.id, fields))
+                .map_err(|e| AppError::BadRequest(format!("ignore rule {}: {e}", r.id)))
+        })
+        .collect::<AppResult<Vec<_>>>()?;
+
     let user_id = auth_user.id;
+
+    let (ignore_rule_id_map, imported_ignore_rules) = import_ignore_rules(
+        &state.ignore_rule_repo,
+        user_id,
+        &ignore_rules,
+        state.config.max_ignore_rules_per_user,
+    )
+    .await?;
 
     let (category_id_map, imported_categories) = import_categories(
         &state.category_repo,
@@ -480,10 +548,18 @@ pub async fn import_data<
         }
 
         if op.ignored {
-            state
-                .operation_repo
-                .set_ignored(new_id, user_id, true)
-                .await?;
+            match op
+                .ignore_rule_id
+                .and_then(|id| ignore_rule_id_map.get(&id).copied())
+            {
+                Some(rule_id) => state.operation_repo.ignore_by_rule(new_id, rule_id).await?,
+                None => {
+                    state
+                        .operation_repo
+                        .set_ignored(new_id, user_id, true)
+                        .await?;
+                }
+            }
         }
 
         imported_operations += 1;
@@ -507,6 +583,8 @@ pub async fn import_data<
             skipped_categories: categories.len() - imported_categories,
             imported_budgets,
             skipped_budgets,
+            imported_ignore_rules,
+            skipped_ignore_rules: ignore_rules.len() - imported_ignore_rules,
             imported_operations,
             skipped_operations,
             imported_import_profiles,
@@ -565,6 +643,54 @@ async fn import_categories(
     Ok((id_map, imported))
 }
 
+/// Create the payload's ignore rules the account has no rule with the same fields for, and map
+/// each payload id to the account's rule with those fields; returns the map and how many were
+/// created. Fails with `Conflict`, creating none, when they would exceed `max` rules.
+async fn import_ignore_rules(
+    repo: &impl IgnoreRuleRepository,
+    user_id: Uuid,
+    incoming: &[(Uuid, IgnoreRuleFields)],
+    max: u32,
+) -> AppResult<(HashMap<Uuid, Uuid>, usize)> {
+    let mut id_map = HashMap::new();
+    if incoming.is_empty() {
+        return Ok((id_map, 0));
+    }
+    let mut existing: Vec<(IgnoreRuleFields, Uuid)> = repo
+        .list(user_id)
+        .await?
+        .into_iter()
+        .map(|r| (r.fields, r.id))
+        .collect();
+    let mut new_fields: Vec<&IgnoreRuleFields> = Vec::new();
+    for (_, fields) in incoming {
+        if !existing.iter().any(|(f, _)| f == fields) && !new_fields.contains(&fields) {
+            new_fields.push(fields);
+        }
+    }
+    if existing.len() + new_fields.len() > max as usize {
+        return Err(AppError::Conflict(format!(
+            "importing {} new ignore rules would exceed the ignore rule limit ({max})",
+            new_fields.len()
+        )));
+    }
+
+    let mut imported = 0usize;
+    for (incoming_id, fields) in incoming {
+        let id = match existing.iter().find(|(f, _)| f == fields) {
+            Some((_, id)) => *id,
+            None => {
+                let created = repo.create(user_id, fields).await?;
+                existing.push((created.fields, created.id));
+                imported += 1;
+                created.id
+            }
+        };
+        id_map.insert(*incoming_id, id);
+    }
+    Ok((id_map, imported))
+}
+
 /// Create the payload's profiles the account has no profile by that name for; returns how many
 /// were imported and skipped.
 async fn import_profiles(
@@ -602,14 +728,16 @@ mod tests {
             user::UserRole,
         },
         repositories::{
-            MockBudgetRepository, MockCategoryRepository, MockImportProfileRepository,
-            MockOperationRepository, MockUserRepository,
+            MockBudgetRepository, MockCategoryRepository, MockIgnoreRuleRepository,
+            MockImportProfileRepository, MockOperationRepository, MockUserRepository,
         },
         test_util::{
             auth_header, build_test_router, json_request, make_test_state,
-            make_test_state_with_categories, make_test_state_with_profiles, response_json,
+            make_test_state_with_categories, make_test_state_with_ignore_rules,
+            make_test_state_with_profiles, response_json,
         },
     };
+    use axum::Router;
     use chrono::NaiveDate;
     use rust_decimal::Decimal;
     use tower::ServiceExt;
@@ -655,6 +783,7 @@ mod tests {
             label: label.to_string(),
             budget_link,
             ignored: false,
+            ignore_rule_id: None,
             category_id: None,
             budget_category_id: None,
             splits: vec![],
@@ -985,6 +1114,185 @@ mod tests {
         assert_eq!(json.skipped_operations, 1);
     }
 
+    fn contains_rule(user_id: Uuid, value: &str) -> IgnoreRule {
+        IgnoreRule {
+            id: Uuid::new_v4(),
+            user_id,
+            fields: IgnoreRuleFields {
+                label_pattern: LabelPattern::Contains(value.to_string()),
+                amount: None,
+            },
+            created_at: Utc::now(),
+        }
+    }
+
+    fn rules_app(op_repo: MockOperationRepository, rule_repo: MockIgnoreRuleRepository) -> Router {
+        let mut budget_repo = MockBudgetRepository::new();
+        budget_repo
+            .expect_list_all_for_user()
+            .returning(|_| Box::pin(async { Ok(vec![]) }));
+        let mut user_repo = MockUserRepository::new();
+        user_repo
+            .expect_find_balance()
+            .returning(|_| Box::pin(async { Ok(None) }));
+        build_test_router(make_test_state_with_ignore_rules(
+            user_repo,
+            op_repo,
+            budget_repo,
+            rule_repo,
+        ))
+    }
+
+    #[tokio::test]
+    async fn export_includes_ignore_rules_and_the_rule_of_each_operation() {
+        let user_id = Uuid::new_v4();
+        let rule = contains_rule(user_id, "VIR INTERNE");
+        let rule_id = rule.id;
+        let mut rule_repo = MockIgnoreRuleRepository::new();
+        rule_repo.expect_list().returning(move |_| {
+            let rule = rule.clone();
+            Box::pin(async move { Ok(vec![rule]) })
+        });
+        let mut op_repo = MockOperationRepository::new();
+        op_repo.expect_list_all_for_user().returning(move |_| {
+            let op = Operation {
+                ignored: true,
+                ignore_rule_id: Some(rule_id),
+                ..make_operation(user_id, "VIR INTERNE", BudgetLink::Unlinked)
+            };
+            Box::pin(async move { Ok(vec![op]) })
+        });
+
+        let auth = auth_header(user_id, UserRole::User);
+        let resp = rules_app(op_repo, rule_repo)
+            .oneshot(json_request("GET", "/data/export", None, Some(&auth)))
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        let json: serde_json::Value = response_json(resp).await;
+        assert_eq!(json["ignoreRules"][0]["id"], rule_id.to_string());
+        assert_eq!(
+            json["ignoreRules"][0]["labelPattern"]["value"],
+            "VIR INTERNE"
+        );
+        assert_eq!(json["operations"][0]["ignoreRuleId"], rule_id.to_string());
+    }
+
+    #[tokio::test]
+    async fn import_reuses_identical_rules_creates_others_and_remaps_operations() {
+        let user_id = Uuid::new_v4();
+        let existing = contains_rule(user_id, "VIR INTERNE");
+        let existing_id = existing.id;
+        let created_id = Uuid::new_v4();
+        let mut rule_repo = MockIgnoreRuleRepository::new();
+        rule_repo.expect_list().returning(move |_| {
+            let existing = existing.clone();
+            Box::pin(async move { Ok(vec![existing]) })
+        });
+        rule_repo
+            .expect_create()
+            .withf(|_, fields| fields.label_pattern == LabelPattern::EndsWith("LIVRET".to_string()))
+            .once()
+            .returning(move |user_id, fields| {
+                let created = IgnoreRule {
+                    id: created_id,
+                    user_id,
+                    fields: fields.clone(),
+                    created_at: Utc::now(),
+                };
+                Box::pin(async move { Ok(created) })
+            });
+        let mut op_repo = MockOperationRepository::new();
+        op_repo
+            .expect_exists_by_fields()
+            .returning(|_, _, _, _| Box::pin(async { Ok(false) }));
+        op_repo
+            .expect_insert()
+            .returning(|_, _, _, _, _, _| Box::pin(async { Ok(()) }));
+        op_repo
+            .expect_ignore_by_rule()
+            .withf(move |_, rule_id| *rule_id == existing_id || *rule_id == created_id)
+            .times(2)
+            .returning(|_, _| Box::pin(async { Ok(()) }));
+        op_repo
+            .expect_set_ignored()
+            .withf(|_, _, ignored| *ignored)
+            .once()
+            .returning(|_, _, _| Box::pin(async { Ok(true) }));
+
+        let op = |id: &str, label: &str, rule: &str| {
+            format!(
+                r#"{{"id":"{id}","amount":"-5","date":"2024-01-01","effectiveDate":null,
+                "label":"{label}","budgetLink":{{"type":"unlinked"}},"ignored":true,
+                "ignoreRuleId":{rule}}}"#
+            )
+        };
+        let body = format!(
+            r#"{{"version":1,
+            "ignoreRules":[
+                {{"id":"aaaaaaaa-0000-0000-0000-000000000001","labelPattern":{{"type":"contains","value":"VIR INTERNE"}}}},
+                {{"id":"aaaaaaaa-0000-0000-0000-000000000002","labelPattern":{{"type":"endsWith","value":"LIVRET"}},"amount":null}}
+            ],
+            "operations":[{},{},{}]}}"#,
+            op(
+                "11111111-1111-1111-1111-111111111111",
+                "VIR INTERNE",
+                r#""aaaaaaaa-0000-0000-0000-000000000001""#
+            ),
+            op(
+                "22222222-2222-2222-2222-222222222222",
+                "VERS LIVRET",
+                r#""aaaaaaaa-0000-0000-0000-000000000002""#
+            ),
+            op("33333333-3333-3333-3333-333333333333", "CB", "null"),
+        );
+
+        let auth = auth_header(user_id, UserRole::User);
+        let resp = rules_app(op_repo, rule_repo)
+            .oneshot(json_request(
+                "POST",
+                "/data/import",
+                Some(&body),
+                Some(&auth),
+            ))
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        let json: ImportDataResponse = response_json(resp).await;
+        assert_eq!(json.imported_ignore_rules, 1);
+        assert_eq!(json.skipped_ignore_rules, 1);
+        assert_eq!(json.imported_operations, 3);
+    }
+
+    #[tokio::test]
+    async fn import_beyond_the_ignore_rule_limit_is_a_conflict() {
+        let user_id = Uuid::new_v4();
+        let mut rule_repo = MockIgnoreRuleRepository::new();
+        rule_repo.expect_list().returning(move |_| {
+            let full: Vec<_> = (0..100)
+                .map(|i| contains_rule(user_id, &format!("RULE {i}")))
+                .collect();
+            Box::pin(async move { Ok(full) })
+        });
+        rule_repo.expect_create().never();
+        let body = r#"{"version":1,"ignoreRules":[{"id":"aaaaaaaa-0000-0000-0000-000000000001","labelPattern":{"type":"contains","value":"NEW"}}]}"#;
+
+        let auth = auth_header(user_id, UserRole::User);
+        let resp = rules_app(MockOperationRepository::new(), rule_repo)
+            .oneshot(json_request(
+                "POST",
+                "/data/import",
+                Some(body),
+                Some(&auth),
+            ))
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::CONFLICT);
+    }
+
     #[tokio::test]
     async fn import_unlinks_operation_when_referenced_budget_missing() {
         let user_id = Uuid::new_v4();
@@ -1297,6 +1605,7 @@ mod tests {
             balance: None,
             categories: vec![],
             budgets: vec![ExportBudget::from(budget)],
+            ignore_rules: vec![],
             operations: vec![],
             import_profiles: vec![],
         };

@@ -6,9 +6,10 @@ use crate::{
         operation::{BudgetLink, Operation},
     },
     error::{AppError, AppResult},
-    handlers::operations::auto_match_operation,
+    handlers::{ignore_rules::auto_ignore_operation, operations::auto_match_operation},
     repositories::{
-        BudgetRepository, CategoryRepository, ImportProfileRepository, OperationRepository,
+        BudgetRepository, CategoryRepository, IgnoreRuleRepository, ImportProfileRepository,
+        OperationRepository,
     },
     services::importer::{
         ImportParams, ParsedRow, RowError, is_spreadsheet, parse_csv, parse_xlsx, preview_rows,
@@ -124,8 +125,9 @@ pub async fn import_operations<
     B: BudgetRepository,
     P: ImportProfileRepository,
     C: CategoryRepository,
+    R: IgnoreRuleRepository,
 >(
-    State(state): State<AppState<U, O, B, P, C>>,
+    State(state): State<AppState<U, O, B, P, C, R>>,
     auth_user: AuthUser,
     MultipartBody(mut multipart, _): MultipartBody,
 ) -> AppResult<(StatusCode, Json<ImportResponse>)> {
@@ -268,6 +270,13 @@ pub async fn import_operations<
     // Phase 2 — batch insert. All duplicate checks have already completed
     // against the unchanged database state, so identical in-file rows are
     // all preserved here.
+    let ignore_rules = match state.ignore_rule_repo.list(user_id).await {
+        Ok(rules) => rules,
+        Err(e) => {
+            tracing::warn!(error = %e, "could not list ignore rules, importing without them");
+            Vec::new()
+        }
+    };
     let mut imported = 0usize;
     for parsed_row in to_insert {
         let id = Uuid::new_v4();
@@ -294,6 +303,7 @@ pub async fn import_operations<
                     label: parsed_row.label,
                     budget_link: BudgetLink::Unlinked,
                     ignored: false,
+                    ignore_rule_id: None,
                     category_id: None,
                     budget_category_id: None,
                     splits: Vec::new(),
@@ -306,6 +316,11 @@ pub async fn import_operations<
                     &op,
                 )
                 .await;
+                if let Err(e) =
+                    auto_ignore_operation(&state.operation_repo, &ignore_rules, &op).await
+                {
+                    tracing::warn!(error = %e, operation_id = %op.id, "could not ignore operation");
+                }
             }
             Err(e) => {
                 errors.push(RowError {

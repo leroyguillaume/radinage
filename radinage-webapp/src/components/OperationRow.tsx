@@ -58,7 +58,9 @@ export function OperationRow({
 					{badge}
 					{op.ignored && (
 						<Badge size="sm" color="gray" tt="none" flex="none">
-							{t("search.ignored")}
+							{op.ignoreRuleId === null
+								? t("search.ignored")
+								: t("ignoreRules.ignoredByRule")}
 						</Badge>
 					)}
 				</Box>

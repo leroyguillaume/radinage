@@ -541,7 +541,7 @@
 			"exportError": "Export failed",
 			"import": "Import data",
 			"importError": "Invalid file or import rejected",
-			"importSuccess": "{{categories}} category(ies) imported ({{skippedCategories}} already present), {{budgets}} budget(s) imported ({{skippedBudgets}} skipped), {{operations}} operation(s) imported ({{skippedOperations}} skipped)",
+			"importSuccess": "{{categories}} category(ies) imported ({{skippedCategories}} already present), {{budgets}} budget(s) imported ({{skippedBudgets}} skipped), {{ignoreRules}} ignore rule(s) imported ({{skippedIgnoreRules}} already present), {{operations}} operation(s) imported ({{skippedOperations}} skipped)",
 			"importedBalance": "Account balance imported."
 		}
 	},
@@ -608,5 +608,36 @@
 			"hint": "Try a shorter label or fewer filters."
 		},
 		"fetchError": "Failed to search operations"
+	},
+	"ignoreRules": {
+		"title": "Ignore rules",
+		"description": "An operation whose label, and amount when given, matches a rule is ignored as soon as it is created or imported: left out of totals, budgets and forecasts.",
+		"fetchError": "Could not load the ignore rules",
+		"empty": "No rules yet.",
+		"add": "Add a rule",
+		"createTitle": "New ignore rule",
+		"create": "Create the rule",
+		"pattern": "{{type}} “{{value}}”",
+		"amountSummary": "amount {{amount}}",
+		"amount": "Exact amount",
+		"amountHint": "Optional. Without a sign: the rule covers debits and credits alike.",
+		"amountPlaceholder": "Any amount",
+		"errorValue": "The value is required",
+		"errorAmount": "The amount must be a positive number, e.g. 250.00",
+		"errorLimit": "You have reached the maximum number of ignore rules",
+		"saveError": "Error while saving the rule",
+		"edit": "Edit the rule {{rule}}",
+		"delete": "Delete the rule {{rule}}",
+		"confirmDelete": "Delete the rule {{rule}}? The operations it ignored will count again.",
+		"applyTitle": "Apply the rule",
+		"applyPrompt": "The rule will apply to upcoming operations. Do you also want to ignore the existing operations it matches?",
+		"later": "Later",
+		"apply": "Apply",
+		"applyResult": "{{ignored}} operation(s) ignored, {{alreadyIgnored}} already were",
+		"applyError": "Error while applying the rule",
+		"always": "Always ignore…",
+		"sheetIgnoredByRule": "Ignored automatically by the rule {{rule}}: left out of totals, budgets and forecasts",
+		"seeRule": "See the rule",
+		"ignoredByRule": "Ignored by a rule"
 	}
 }

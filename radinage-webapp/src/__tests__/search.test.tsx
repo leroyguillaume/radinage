@@ -21,6 +21,7 @@ import { i18n } from "@/i18n";
 import type {
 	BudgetResponse,
 	CategoryResponse,
+	IgnoreRuleResponse,
 	OperationResponse,
 	OperationSearchResponse,
 } from "@/lib/types";
@@ -81,6 +82,7 @@ function operation(overrides: Partial<OperationResponse>): OperationResponse {
 		label: "Operation",
 		budgetLink: { type: "unlinked" },
 		ignored: false,
+		ignoreRuleId: null,
 		categoryId: null,
 		effectiveCategoryId: null,
 		splits: [],
@@ -134,6 +136,13 @@ function page(
 	};
 }
 
+const refundRule: IgnoreRuleResponse = {
+	id: "r1",
+	labelPattern: { type: "contains", value: "REMB" },
+	amount: null,
+	createdAt: "2026-01-01T00:00:00Z",
+};
+
 function setupMocks(
 	search: (params: URLSearchParams) => OperationSearchResponse = () =>
 		page([rent, groceries, salary]),
@@ -141,6 +150,7 @@ function setupMocks(
 	apiFetchMock.mockReset();
 	apiFetchMock.mockImplementation((path: string) => {
 		if (path === "/categories") return Promise.resolve(categories);
+		if (path === "/ignore-rules") return Promise.resolve([refundRule]);
 		if (path.startsWith("/budgets")) return Promise.resolve(budgets);
 		if (/^\/operations\/[^/?]+\/category$/.test(path)) {
 			return Promise.resolve(salary);
@@ -400,6 +410,37 @@ describe("SearchPage", () => {
 			textDecoration: "line-through",
 		});
 		expect(screen.getByText("Ignorée")).toBeInTheDocument();
+	});
+
+	it("names the rule that ignored an operation in its sheet", async () => {
+		setupMocks(() =>
+			page([
+				operation({
+					label: "REMBOURSEMENT",
+					ignored: true,
+					ignoreRuleId: "r1",
+				}),
+			]),
+		);
+		await renderSearchPage("/search?includeIgnored=true");
+
+		fireEvent.click(
+			await screen.findByRole("button", { name: /REMBOURSEMENT/ }),
+		);
+
+		const sheet = within(await screen.findByRole("dialog"));
+		expect(
+			await sheet.findByText(
+				/Ignorée automatiquement par la règle Contient « REMB »/,
+			),
+		).toBeInTheDocument();
+		expect(sheet.getByRole("link", { name: "Voir la règle" })).toHaveAttribute(
+			"href",
+			"/settings",
+		);
+		expect(
+			sheet.queryByRole("button", { name: "Toujours ignorer…" }),
+		).not.toBeInTheDocument();
 	});
 
 	it("says so when nothing matches", async () => {

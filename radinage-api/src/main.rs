@@ -19,8 +19,8 @@ use axum::{Extension, Json, Router, response::Html, routing::get};
 use clap::Parser;
 use config::Config;
 use repositories::{
-    PgBudgetRepository, PgCategoryRepository, PgImportProfileRepository, PgOperationRepository,
-    PgUserRepository, UserRepository,
+    PgBudgetRepository, PgCategoryRepository, PgIgnoreRuleRepository, PgImportProfileRepository,
+    PgOperationRepository, PgUserRepository, UserRepository,
 };
 use std::sync::Arc;
 use tower_http::cors::{AllowOrigin, Any, CorsLayer};
@@ -28,12 +28,13 @@ use tower_http::trace::TraceLayer;
 use tracing_subscriber::{EnvFilter, fmt, prelude::*};
 
 /// Inner application state holding repositories and configuration.
-pub struct AppStateInner<U, O, B, P, C> {
+pub struct AppStateInner<U, O, B, P, C, R> {
     pub user_repo: U,
     pub operation_repo: O,
     pub budget_repo: B,
     pub import_profile_repo: P,
     pub category_repo: C,
+    pub ignore_rule_repo: R,
     pub config: Config,
 }
 
@@ -41,11 +42,11 @@ pub struct AppStateInner<U, O, B, P, C> {
 ///
 /// Wrapped in [`Arc`] so that it is cheaply cloneable (required by Axum)
 /// without requiring `Clone` on the repository implementations.
-pub struct AppState<U, O, B, P, C> {
-    inner: Arc<AppStateInner<U, O, B, P, C>>,
+pub struct AppState<U, O, B, P, C, R> {
+    inner: Arc<AppStateInner<U, O, B, P, C, R>>,
 }
 
-impl<U, O, B, P, C> Clone for AppState<U, O, B, P, C> {
+impl<U, O, B, P, C, R> Clone for AppState<U, O, B, P, C, R> {
     fn clone(&self) -> Self {
         Self {
             inner: Arc::clone(&self.inner),
@@ -53,20 +54,21 @@ impl<U, O, B, P, C> Clone for AppState<U, O, B, P, C> {
     }
 }
 
-impl<U, O, B, P, C> std::ops::Deref for AppState<U, O, B, P, C> {
-    type Target = AppStateInner<U, O, B, P, C>;
+impl<U, O, B, P, C, R> std::ops::Deref for AppState<U, O, B, P, C, R> {
+    type Target = AppStateInner<U, O, B, P, C, R>;
     fn deref(&self) -> &Self::Target {
         &self.inner
     }
 }
 
-impl<U, O, B, P, C> AppState<U, O, B, P, C> {
+impl<U, O, B, P, C, R> AppState<U, O, B, P, C, R> {
     pub fn new(
         user_repo: U,
         operation_repo: O,
         budget_repo: B,
         import_profile_repo: P,
         category_repo: C,
+        ignore_rule_repo: R,
         config: Config,
     ) -> Self {
         Self {
@@ -76,14 +78,15 @@ impl<U, O, B, P, C> AppState<U, O, B, P, C> {
                 budget_repo,
                 import_profile_repo,
                 category_repo,
+                ignore_rule_repo,
                 config,
             }),
         }
     }
 }
 
-impl<U, O, B, P, C> axum::extract::FromRef<AppState<U, O, B, P, C>> for Config {
-    fn from_ref(state: &AppState<U, O, B, P, C>) -> Config {
+impl<U, O, B, P, C, R> axum::extract::FromRef<AppState<U, O, B, P, C, R>> for Config {
+    fn from_ref(state: &AppState<U, O, B, P, C, R>) -> Config {
         state.config.clone()
     }
 }
@@ -95,6 +98,7 @@ pub type ProdAppState = AppState<
     PgBudgetRepository,
     PgImportProfileRepository,
     PgCategoryRepository,
+    PgIgnoreRuleRepository,
 >;
 
 #[tokio::main]
@@ -130,7 +134,8 @@ async fn main() -> anyhow::Result<()> {
         PgOperationRepository::new(pool.clone()),
         PgBudgetRepository::new(pool.clone()),
         PgImportProfileRepository::new(pool.clone()),
-        PgCategoryRepository::new(pool),
+        PgCategoryRepository::new(pool.clone()),
+        PgIgnoreRuleRepository::new(pool),
         config.clone(),
     );
 
@@ -159,13 +164,14 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-pub(crate) fn build_router<U, O, B, P, C>(state: AppState<U, O, B, P, C>) -> Router
+pub(crate) fn build_router<U, O, B, P, C, R>(state: AppState<U, O, B, P, C, R>) -> Router
 where
     U: repositories::UserRepository + 'static,
     O: repositories::OperationRepository + 'static,
     B: repositories::BudgetRepository + 'static,
     P: repositories::ImportProfileRepository + 'static,
     C: repositories::CategoryRepository + 'static,
+    R: repositories::IgnoreRuleRepository + 'static,
 {
     aide::generate::on_error(|error| {
         tracing::warn!("aide schema generation error: {error}");
@@ -215,6 +221,11 @@ where
                 ..Tag::default()
             },
             Tag {
+                name: "Ignore rules".to_string(),
+                description: Some("Manage the rules that ignore operations automatically. A rule matches an operation's label by prefix, suffix or substring, case-insensitively, and optionally its amount whatever the sign. An operation created by hand or by a statement import is ignored by the first of the user's rules, oldest first, that matches it; applying a rule ignores the existing operations it matches.".to_string()),
+                ..Tag::default()
+            },
+            Tag {
                 name: "Import profiles".to_string(),
                 description: Some("Manage the named file layouts a user imports bank statements with: which columns hold the label, the amount and the date, the date format, and how many leading rows to skip. Profiles are listed most recently used first.".to_string()),
                 ..Tag::default()
@@ -231,7 +242,7 @@ where
             },
             Tag {
                 name: "Data".to_string(),
-                description: Some("Export and re-import a user's full data (account balance, categories, budgets, operations and import profiles) as JSON. Intended for backup and account migration.".to_string()),
+                description: Some("Export and re-import a user's full data (account balance, categories, budgets, ignore rules, operations and import profiles) as JSON. Intended for backup and account migration.".to_string()),
                 ..Tag::default()
             },
         ],
@@ -336,7 +347,7 @@ where
             .post_with(handlers::operations::create_operation, |op| {
                 op.tag("Operations")
                     .summary("Create an operation")
-                    .description("Record a new bank operation (debit or credit) for the authenticated user. The amount should be negative for expenses and positive for income.")
+                    .description("Record a new bank operation (debit or credit) for the authenticated user. The amount should be negative for expenses and positive for income. The first of the user's ignore rules that matches it ignores it.")
                     .id("createOperation")
             }),
         )
@@ -345,7 +356,7 @@ where
             post_with(handlers::import::import_operations, |op| {
                 op.tag("Operations")
                     .summary("Import operations from a file (CSV/XLSX)")
-                    .description("Bulk-import bank operations from a CSV or XLSX file uploaded as multipart form data. Duplicate operations (same date, amount, and label) are automatically skipped. Returns the number of imported and skipped operations. When `profileId` names one of the user's import profiles, the import is recorded as its last use; the columns, date format and skipped lines still come from the request.")
+                    .description("Bulk-import bank operations from a CSV or XLSX file uploaded as multipart form data. Duplicate operations (same date, amount, and label) are automatically skipped. Returns the number of imported and skipped operations. Each imported operation is ignored by the first of the user's ignore rules that matches it. When `profileId` names one of the user's import profiles, the import is recorded as its last use; the columns, date format and skipped lines still come from the request.")
                     .id("importOperations")
             }),
         )
@@ -429,13 +440,13 @@ where
             put_with(handlers::operations::ignore_operation, |op| {
                 op.tag("Operations")
                     .summary("Ignore an operation")
-                    .description("Mark a bank operation as ignored. Ignored operations are excluded from summaries and budget calculations.")
+                    .description("Mark a bank operation as ignored, by hand. Ignored operations are excluded from summaries and budget calculations. An operation an ignore rule ignored no longer records that rule.")
                     .id("ignoreOperation")
             })
             .delete_with(handlers::operations::unignore_operation, |op| {
                 op.tag("Operations")
                     .summary("Unignore an operation")
-                    .description("Remove the ignored flag from a bank operation, restoring it to normal status.")
+                    .description("Remove the ignored flag from a bank operation, restoring it to normal status, whether it was ignored by hand or by an ignore rule.")
                     .id("unignoreOperation")
             }),
         )
@@ -524,6 +535,47 @@ where
                     .summary("Apply category rules to operations")
                     .description("Run the rules of a category against all operations of the authenticated user and put the matching ones in it, giving them their own category, which takes precedence over their budget's default. Matching operations in another category of their own are skipped unless `force` is true; split operations are never touched. Returns 404 if the category does not exist or belongs to another user.")
                     .id("applyCategory")
+            }),
+        )
+        // Ignore rules
+        .api_route(
+            "/ignore-rules",
+            get_with(handlers::ignore_rules::list_ignore_rules, |op| {
+                op.tag("Ignore rules")
+                    .summary("List ignore rules")
+                    .description("Retrieve all ignore rules of the authenticated user, oldest first: the order they are tried in. A user has at most MAX_IGNORE_RULES_PER_USER rules.")
+                    .id("listIgnoreRules")
+            })
+            .post_with(handlers::ignore_rules::create_ignore_rule, |op| {
+                op.tag("Ignore rules")
+                    .summary("Create an ignore rule")
+                    .description("Create a rule that ignores the operations created from now on whose label, and amount when given, it matches. The pattern value is trimmed and 1 to 200 characters long, the amount positive (400 otherwise). Existing operations are left as they are until the rule is applied. Returns 409 once the user has MAX_IGNORE_RULES_PER_USER rules.")
+                    .id("createIgnoreRule")
+                    .response::<201, Json<handlers::ignore_rules::IgnoreRuleResponse>>()
+            }),
+        )
+        .api_route(
+            "/ignore-rules/{id}",
+            put_with(handlers::ignore_rules::update_ignore_rule, |op| {
+                op.tag("Ignore rules")
+                    .summary("Update an ignore rule")
+                    .description("Replace the pattern and amount of a rule, with the same rules as creation. The operations it already ignored stay ignored. Returns 404 if the rule does not exist or belongs to another user.")
+                    .id("updateIgnoreRule")
+            })
+            .delete_with(handlers::ignore_rules::delete_ignore_rule, |op| {
+                op.tag("Ignore rules")
+                    .summary("Delete an ignore rule")
+                    .description("Permanently delete a rule and stop ignoring the operations it ignored; those ignored by hand stay ignored. Returns 404 if the rule does not exist or belongs to another user.")
+                    .id("deleteIgnoreRule")
+            }),
+        )
+        .api_route(
+            "/ignore-rules/{id}/apply",
+            post_with(handlers::ignore_rules::apply_ignore_rule, |op| {
+                op.tag("Ignore rules")
+                    .summary("Apply an ignore rule to existing operations")
+                    .description("Ignore every operation of the authenticated user that the rule matches and that is not ignored yet, split ones included. Returns how many it ignored and how many were already ignored. Returns 404 if the rule does not exist or belongs to another user.")
+                    .id("applyIgnoreRule")
             }),
         )
         // Import profiles
@@ -621,7 +673,7 @@ where
             post_with(handlers::data::import_data, |op| {
                 op.tag("Data")
                     .summary("Import budgets and operations from a prior export")
-                    .description("Merge budgets and operations from a JSON payload previously obtained via /data/export into the authenticated user's account. Categories are deduplicated by name, budgets by label, operations by (date, amount, label). Category and budget references are remapped to existing or newly-created ones. Returns 409, importing nothing, when the new categories would exceed MAX_CATEGORIES_PER_USER. The payload's account balance, optional, is recorded only when the account has none.")
+                    .description("Merge budgets and operations from a JSON payload previously obtained via /data/export into the authenticated user's account. Categories are deduplicated by name, budgets by label, ignore rules by pattern and amount, operations by (date, amount, label). Category, budget and ignore rule references are remapped to existing or newly-created ones. Returns 409, importing nothing, when the new categories would exceed MAX_CATEGORIES_PER_USER or the new ignore rules MAX_IGNORE_RULES_PER_USER. The payload's account balance, optional, is recorded only when the account has none.")
                     .id("importData")
             }),
         )
@@ -683,8 +735,8 @@ pub(crate) mod test_util {
         domain::user::UserRole,
         handlers,
         repositories::{
-            MockBudgetRepository, MockCategoryRepository, MockImportProfileRepository,
-            MockOperationRepository, MockUserRepository,
+            MockBudgetRepository, MockCategoryRepository, MockIgnoreRuleRepository,
+            MockImportProfileRepository, MockOperationRepository, MockUserRepository,
         },
     };
     use axum::{Router, routing};
@@ -699,6 +751,7 @@ pub(crate) mod test_util {
         MockBudgetRepository,
         MockImportProfileRepository,
         MockCategoryRepository,
+        MockIgnoreRuleRepository,
     >;
 
     pub fn make_test_config() -> Config {
@@ -715,6 +768,7 @@ pub(crate) mod test_util {
             max_budgets_per_user: 100,
             max_import_profiles_per_user: 20,
             max_categories_per_user: 50,
+            max_ignore_rules_per_user: 100,
             root_path: String::new(),
             webapp_url: "http://localhost:5173".to_string(),
         }
@@ -758,6 +812,7 @@ pub(crate) mod test_util {
             budget_repo,
             profile_repo,
             no_categories(),
+            no_ignore_rules(),
         )
     }
 
@@ -774,6 +829,32 @@ pub(crate) mod test_util {
             budget_repo,
             no_import_profiles(),
             category_repo,
+            no_ignore_rules(),
+        )
+    }
+
+    /// An ignore rule repository holding none, for tests that only read rules in passing.
+    pub fn no_ignore_rules() -> MockIgnoreRuleRepository {
+        let mut repo = MockIgnoreRuleRepository::new();
+        repo.expect_list()
+            .returning(|_| Box::pin(async { Ok(Vec::new()) }));
+        repo
+    }
+
+    /// Build a test state from mock repositories, ignore rules included.
+    pub fn make_test_state_with_ignore_rules(
+        user_repo: MockUserRepository,
+        op_repo: MockOperationRepository,
+        budget_repo: MockBudgetRepository,
+        ignore_rule_repo: MockIgnoreRuleRepository,
+    ) -> TestState {
+        make_test_state_with_all(
+            user_repo,
+            op_repo,
+            budget_repo,
+            no_import_profiles(),
+            no_categories(),
+            ignore_rule_repo,
         )
     }
 
@@ -784,6 +865,7 @@ pub(crate) mod test_util {
         budget_repo: MockBudgetRepository,
         profile_repo: MockImportProfileRepository,
         category_repo: MockCategoryRepository,
+        ignore_rule_repo: MockIgnoreRuleRepository,
     ) -> TestState {
         AppState::new(
             user_repo,
@@ -791,6 +873,7 @@ pub(crate) mod test_util {
             budget_repo,
             profile_repo,
             category_repo,
+            ignore_rule_repo,
             make_test_config(),
         )
     }
@@ -849,6 +932,20 @@ pub(crate) mod test_util {
             .route(
                 "/categories/{id}/apply",
                 routing::post(handlers::categories::apply_category),
+            )
+            .route(
+                "/ignore-rules",
+                routing::get(handlers::ignore_rules::list_ignore_rules)
+                    .post(handlers::ignore_rules::create_ignore_rule),
+            )
+            .route(
+                "/ignore-rules/{id}",
+                routing::put(handlers::ignore_rules::update_ignore_rule)
+                    .delete(handlers::ignore_rules::delete_ignore_rule),
+            )
+            .route(
+                "/ignore-rules/{id}/apply",
+                routing::post(handlers::ignore_rules::apply_ignore_rule),
             )
             .route(
                 "/import-profiles",
