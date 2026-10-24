@@ -1293,6 +1293,7 @@ describe("MonthlyOperationsPage", () => {
 				name: "Courses",
 				color: "#12b886",
 				icon: null,
+				rules: [],
 				createdAt: "2026-01-01T00:00:00Z",
 			},
 		];
@@ -1367,6 +1368,7 @@ describe("operation sheet", () => {
 			name: "Courses",
 			color: "teal",
 			icon: null,
+			rules: [],
 			createdAt: "2026-01-01T00:00:00Z",
 		},
 	];

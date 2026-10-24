@@ -7,7 +7,9 @@ use crate::{
     },
     error::{AppError, AppResult},
     handlers::operations::auto_match_operation,
-    repositories::{BudgetRepository, ImportProfileRepository, OperationRepository},
+    repositories::{
+        BudgetRepository, CategoryRepository, ImportProfileRepository, OperationRepository,
+    },
     services::importer::{
         ImportParams, ParsedRow, RowError, is_spreadsheet, parse_csv, parse_xlsx, preview_rows,
     },
@@ -121,7 +123,7 @@ pub async fn import_operations<
     O: OperationRepository,
     B: BudgetRepository,
     P: ImportProfileRepository,
-    C,
+    C: CategoryRepository,
 >(
     State(state): State<AppState<U, O, B, P, C>>,
     auth_user: AuthUser,
@@ -297,7 +299,13 @@ pub async fn import_operations<
                     splits: Vec::new(),
                 };
                 // Best-effort auto-match; don't fail the import on match errors.
-                let _ = auto_match_operation(&state.operation_repo, &state.budget_repo, &op).await;
+                let _ = auto_match_operation(
+                    &state.operation_repo,
+                    &state.budget_repo,
+                    &state.category_repo,
+                    &op,
+                )
+                .await;
             }
             Err(e) => {
                 errors.push(RowError {

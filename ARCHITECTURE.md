@@ -121,6 +121,8 @@ sequenceDiagram
         H->>R: insert
         H->>M: match_operation(op, all user budgets)
         H->>R: set_auto_link (when a budget matches)
+        H->>M: match_category(op, all user categories)
+        H->>R: set_category (when a category matches)
     end
     opt profileId sent
         H->>P: mark_used(profile, user)
@@ -137,6 +139,15 @@ if set, otherwise its date) and whose rule matches the label by prefix, suffix
 or substring, optionally also requiring the amount to equal the period's
 amount. Applying a budget's rules later (`POST /budgets/{id}/apply`) runs the
 same matcher over all of the user's operations.
+
+Categories carry label rules of the same three shapes, without the amount. An
+operation created or imported with no category of its own gets the first
+category, by name, one of whose rules matches its label;
+`POST /categories/{id}/apply` puts the existing operations matching one
+category's rules in it, leaving those already in another category unless asked
+to replace them. A rule writes the operation's own category, so it takes
+precedence over the default category of the budget the operation is linked to,
+and nothing records whether a hand or a rule set it.
 
 The column mapping travels with every import request, even when the web app
 took it from an import profile: the profile only fills the form and, through
@@ -157,7 +168,7 @@ manual, or auto. An operation can instead be split: `operation_splits` holds
 its ordered parts, each with an amount and an optional budget that becomes
 null when that budget is deleted. A split operation's own link stays unlinked,
 and every aggregation counts its parts instead of its amount. Users also own
-categories; an operation, each split part and each budget has an optional
+categories, which own their ordered label rules; an operation, each split part and each budget has an optional
 category that becomes null when that category is deleted. The schema is
 defined by
 [radinage-api/migrations/](radinage-api/migrations/).
@@ -302,8 +313,9 @@ that defines flags, environment variables and defaults together.
 - Multi-statement writes are not transactional: a budget with its periods and
   rules, an import, and a data import each run as independent statements, so a
   failure midway leaves the rows already written.
-- Imports run one duplicate-check query per row and one budget listing per
-  inserted row; large statements are slow rather than failing.
+- Imports run one duplicate-check query per row and one budget and one
+  category listing per inserted row; large statements are slow rather than
+  failing.
 - Duplicate detection is exact on (date, amount, label); two genuinely
   distinct operations sharing all three are treated as one.
 - Tokens cannot be revoked before expiry.

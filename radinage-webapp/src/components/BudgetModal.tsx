@@ -24,6 +24,10 @@ import { Link } from "@tanstack/react-router";
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { CategorySelect } from "@/components/CategoryBadge";
+import {
+	LabelPatternFields,
+	type PatternType,
+} from "@/components/LabelPatternFields";
 import { toDisplayAmount, toRawAmount } from "@/lib/format";
 import {
 	useApplyBudget,
@@ -54,7 +58,7 @@ let periodIdCounter = 0;
 
 interface RuleForm {
 	id: number;
-	patternType: "startsWith" | "endsWith" | "contains";
+	patternType: PatternType;
 	patternValue: string;
 	matchAmount: boolean;
 }
@@ -354,7 +358,7 @@ export interface BudgetInitialValues {
 	amount?: string;
 	label?: string;
 	rules?: {
-		patternType: "startsWith" | "endsWith" | "contains";
+		patternType: PatternType;
 		patternValue: string;
 	}[];
 }
@@ -612,7 +616,7 @@ export function BudgetModal({
 								{t("budgets.fields.categoryEmpty")}{" "}
 								<Anchor
 									component={Link}
-									to="/settings"
+									to="/categories"
 									onClick={onClose}
 									inherit
 								>
@@ -767,40 +771,13 @@ export function BudgetModal({
 
 				{form.rules.map((rule, index) => (
 					<Group key={rule.id} align="flex-end" wrap="wrap" gap="xs">
-						<Select
-							label={t("budgets.fields.patternType")}
-							value={rule.patternType}
-							onChange={(v) =>
-								updateRule(index, {
-									patternType:
-										(v as "startsWith" | "endsWith" | "contains") ?? "contains",
-								})
-							}
-							data={[
-								{
-									value: "contains",
-									label: t("budgets.patterns.contains"),
-								},
-								{
-									value: "startsWith",
-									label: t("budgets.patterns.startsWith"),
-								},
-								{
-									value: "endsWith",
-									label: t("budgets.patterns.endsWith"),
-								},
-							]}
-							style={{ flex: 1 }}
-						/>
-						<TextInput
-							label={t("budgets.fields.patternValue")}
+						<LabelPatternFields
+							type={rule.patternType}
 							value={rule.patternValue}
-							onChange={(e) =>
-								updateRule(index, {
-									patternValue: e.currentTarget.value,
-								})
+							onTypeChange={(patternType) => updateRule(index, { patternType })}
+							onValueChange={(patternValue) =>
+								updateRule(index, { patternValue })
 							}
-							style={{ flex: 2 }}
 						/>
 						<Tooltip label={t("budgets.fields.matchAmountTooltip")}>
 							<ActionIcon

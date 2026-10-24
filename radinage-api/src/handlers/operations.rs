@@ -362,7 +362,13 @@ pub async fn get_operation<U, O: OperationRepository, B, P, C>(
     Ok(Json(op.into()))
 }
 
-pub async fn create_operation<U, O: OperationRepository, B: BudgetRepository, P, C>(
+pub async fn create_operation<
+    U,
+    O: OperationRepository,
+    B: BudgetRepository,
+    P,
+    C: CategoryRepository,
+>(
     State(state): State<AppState<U, O, B, P, C>>,
     auth_user: AuthUser,
     Json(body): Json<CreateOperationRequest>,
@@ -394,7 +400,13 @@ pub async fn create_operation<U, O: OperationRepository, B: BudgetRepository, P,
         budget_category_id: None,
         splits: Vec::new(),
     };
-    auto_match_operation(&state.operation_repo, &state.budget_repo, &op).await?;
+    auto_match_operation(
+        &state.operation_repo,
+        &state.budget_repo,
+        &state.category_repo,
+        &op,
+    )
+    .await?;
 
     let updated = state.operation_repo.find_by_id(id, user_id).await?;
     Ok((StatusCode::CREATED, Json(updated.into())))
@@ -637,24 +649,35 @@ async fn ensure_not_split(
 
 // ── Auto-matching helper ──────────────────────────────────────────────────────
 
-/// Run automatic budget matching for a single operation.
-/// Operations with a Manual link or with splits are never auto-matched.
-pub async fn auto_match_operation<OR, BR>(
+/// Run automatic budget and category matching for a single operation.
+/// A split operation is never matched; a manual budget link and an own category are kept.
+pub async fn auto_match_operation<OR, BR, CR>(
     op_repo: &OR,
     budget_repo: &BR,
+    category_repo: &CR,
     op: &Operation,
 ) -> AppResult<()>
 where
     OR: OperationRepository,
     BR: BudgetRepository,
+    CR: CategoryRepository,
 {
-    if op.budget_link.is_manual() || op.is_split() {
+    if op.is_split() {
         return Ok(());
     }
-
-    let budgets = budget_repo.list_all_for_user(op.user_id).await?;
-    if let Some(budget_id) = MatcherServiceImpl.match_operation(op, &budgets) {
-        op_repo.set_auto_link(op.id, budget_id).await?;
+    if !op.budget_link.is_manual() {
+        let budgets = budget_repo.list_all_for_user(op.user_id).await?;
+        if let Some(budget_id) = MatcherServiceImpl.match_operation(op, &budgets) {
+            op_repo.set_auto_link(op.id, budget_id).await?;
+        }
+    }
+    if op.category_id.is_none() {
+        let categories = category_repo.list(op.user_id).await?;
+        if let Some(category_id) = MatcherServiceImpl.match_category(op, &categories) {
+            op_repo
+                .set_category(op.id, op.user_id, Some(category_id))
+                .await?;
+        }
     }
     Ok(())
 }
@@ -674,7 +697,7 @@ mod tests {
         },
         test_util::{
             auth_header, build_test_router, json_request, make_test_state,
-            make_test_state_with_categories, response_json,
+            make_test_state_with_categories, no_categories, response_json,
         },
     };
     use axum::{Router, http::StatusCode, response::Response};
@@ -1368,7 +1391,7 @@ mod tests {
         let budget_repo = MockBudgetRepository::new();
         let op = split_op(Uuid::new_v4(), Uuid::new_v4());
 
-        auto_match_operation(&op_repo, &budget_repo, &op)
+        auto_match_operation(&op_repo, &budget_repo, &no_categories(), &op)
             .await
             .unwrap();
     }
@@ -1384,7 +1407,7 @@ mod tests {
             ..make_op(Uuid::new_v4(), Uuid::new_v4())
         };
 
-        auto_match_operation(&op_repo, &budget_repo, &op)
+        auto_match_operation(&op_repo, &budget_repo, &no_categories(), &op)
             .await
             .unwrap();
     }
@@ -1422,9 +1445,84 @@ mod tests {
             ..make_op(op_id, user_id)
         };
 
-        auto_match_operation(&op_repo, &budget_repo, &op)
+        auto_match_operation(&op_repo, &budget_repo, &no_categories(), &op)
             .await
             .unwrap();
+    }
+
+    fn categories_with_rule(category_id: Uuid, pattern: &str) -> MockCategoryRepository {
+        use crate::domain::category::{Category, CategoryFields, CategoryRule};
+        let category = Category {
+            id: category_id,
+            user_id: Uuid::new_v4(),
+            fields: CategoryFields {
+                name: "Energy".to_string(),
+                color: "#12b886".parse().unwrap(),
+                icon: None,
+                rules: vec![CategoryRule {
+                    label_pattern: LabelPattern::Contains(pattern.to_string()),
+                }],
+            },
+            created_at: Utc::now(),
+        };
+        let mut repo = MockCategoryRepository::new();
+        repo.expect_list().returning(move |_| {
+            let category = category.clone();
+            Box::pin(async move { Ok(vec![category]) })
+        });
+        repo
+    }
+
+    fn budgets_matching_none() -> MockBudgetRepository {
+        let mut repo = MockBudgetRepository::new();
+        repo.expect_list_all_for_user()
+            .returning(|_| Box::pin(async { Ok(Vec::new()) }));
+        repo
+    }
+
+    #[tokio::test]
+    async fn auto_match_sets_category_when_rule_matches() {
+        let user_id = Uuid::new_v4();
+        let op_id = Uuid::new_v4();
+        let category_id = Uuid::new_v4();
+        let mut op_repo = MockOperationRepository::new();
+        op_repo
+            .expect_set_category()
+            .withf(move |id, uid, cid| *id == op_id && *uid == user_id && *cid == Some(category_id))
+            .once()
+            .returning(|_, _, _| Box::pin(async { Ok(true) }));
+        let op = Operation {
+            label: "PRLV EDF ELECTRICITE".to_string(),
+            ..make_op(op_id, user_id)
+        };
+
+        auto_match_operation(
+            &op_repo,
+            &budgets_matching_none(),
+            &categories_with_rule(category_id, "edf"),
+            &op,
+        )
+        .await
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn auto_match_keeps_own_category_and_ignores_unmatched_labels() {
+        let mut op_repo = MockOperationRepository::new();
+        op_repo.expect_set_category().never();
+        let categories = categories_with_rule(Uuid::new_v4(), "EDF");
+        let own = Operation {
+            label: "PRLV EDF".to_string(),
+            category_id: Some(Uuid::new_v4()),
+            ..make_op(Uuid::new_v4(), Uuid::new_v4())
+        };
+        let unmatched = make_op(Uuid::new_v4(), Uuid::new_v4());
+
+        for op in [own, unmatched] {
+            auto_match_operation(&op_repo, &budgets_matching_none(), &categories, &op)
+                .await
+                .unwrap();
+        }
     }
 
     fn category_app(

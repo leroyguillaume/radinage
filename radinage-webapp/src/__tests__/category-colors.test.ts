@@ -13,6 +13,7 @@ function category(name: string, color: CategoryColor): CategoryResponse {
 		name,
 		color,
 		icon: null,
+		rules: [],
 		createdAt: "2026-01-01T00:00:00Z",
 	};
 }

@@ -3,7 +3,7 @@ use crate::{
     auth::middleware::AuthUser,
     domain::{
         budget::{Budget, BudgetFields, BudgetKind, BudgetType, Rule},
-        category::{Category, CategoryColor, CategoryFields, CategoryIcon},
+        category::{Category, CategoryColor, CategoryFields, CategoryIcon, CategoryRule},
         import_profile::{CsvDelimiter, ImportProfile, ImportProfileFields},
         operation::{BudgetLink, NewOperationSplit, Operation, OperationSplit, validate_splits},
         user::AccountBalance,
@@ -67,6 +67,9 @@ pub struct ExportCategory {
     pub color: CategoryColor,
     #[serde(default)]
     pub icon: Option<CategoryIcon>,
+    /// Absent from exports made before categories had rules.
+    #[serde(default)]
+    pub rules: Vec<CategoryRule>,
 }
 
 impl From<Category> for ExportCategory {
@@ -76,6 +79,7 @@ impl From<Category> for ExportCategory {
             name: c.fields.name,
             color: c.fields.color,
             icon: c.fields.icon,
+            rules: c.fields.rules,
         }
     }
 }
@@ -355,6 +359,7 @@ pub async fn import_data<
                 name: c.name.clone(),
                 color: c.color.clone(),
                 icon: c.icon,
+                rules: c.rules.clone(),
             };
             CategoryFields::try_from(request)
                 .map(|fields| (c.id, fields))
@@ -1570,6 +1575,7 @@ mod tests {
                 name: name.to_string(),
                 color: "#12b886".parse::<CategoryColor>().unwrap(),
                 icon: None,
+                rules: Vec::new(),
             },
             created_at: Utc::now(),
         }

@@ -314,6 +314,7 @@ describe("StatsPage", () => {
 					name: "Courses",
 					color: "#12b886",
 					icon: null,
+					rules: [],
 					createdAt: "2026-01-01T00:00:00Z",
 				},
 			],
@@ -348,6 +349,7 @@ describe("StatsPage", () => {
 					name: "Salaire",
 					color: "#12b886",
 					icon: null,
+					rules: [],
 					createdAt: "2026-01-01T00:00:00Z",
 				},
 				{
@@ -355,6 +357,7 @@ describe("StatsPage", () => {
 					name: "Courses",
 					color: "#fd7e14",
 					icon: null,
+					rules: [],
 					createdAt: "2026-01-01T00:00:00Z",
 				},
 			],
@@ -388,6 +391,7 @@ describe("StatsPage", () => {
 					name: "Courses",
 					color: "#12b886",
 					icon: null,
+					rules: [],
 					createdAt: "2026-01-01T00:00:00Z",
 				},
 			],
@@ -410,6 +414,7 @@ describe("StatsPage", () => {
 			name: `Cat ${i}`,
 			color: "#12b886",
 			icon: null,
+			rules: [],
 			createdAt: "2026-01-01T00:00:00Z",
 		}));
 		setupMocks(mockSummaryResponse, categories, {

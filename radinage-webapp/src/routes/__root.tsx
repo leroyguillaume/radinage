@@ -15,6 +15,7 @@ import {
 	IconSearch,
 	IconSettings,
 	IconShieldLock,
+	IconTags,
 	IconWallet,
 } from "@tabler/icons-react";
 import {
@@ -71,11 +72,17 @@ const primaryNav: NavItem[] = [
 		labelKey: "nav.budgets",
 		icon: IconWallet,
 	},
+	{
+		to: "/categories",
+		activePrefix: "/categories",
+		labelKey: "nav.categories",
+		icon: IconTags,
+	},
 ];
 
 /**
  * Below this breakpoint the header nav pills show their icon only: with labels,
- * the pills, logo and account menu need roughly 950px and would wrap.
+ * the pills, logo and account menu need roughly 1100px and would wrap.
  */
 const LABELLED_NAV_FROM = "lg";
 

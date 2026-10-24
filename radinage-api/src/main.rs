@@ -211,7 +211,7 @@ where
             },
             Tag {
                 name: "Categories".to_string(),
-                description: Some("Manage the categories a user sorts operations into, each with a name and a colour. An operation, or each part of a split one, counts towards its own category, else towards the default category of the budget it is linked to. Categories are independent of budget types and listed by name.".to_string()),
+                description: Some("Manage the categories a user sorts operations into, each with a name, a colour and optional label rules that categorize operations automatically. An operation, or each part of a split one, counts towards its own category, else towards the default category of the budget it is linked to. Categories are independent of budget types and listed by name.".to_string()),
                 ..Tag::default()
             },
             Tag {
@@ -497,7 +497,7 @@ where
             .post_with(handlers::categories::create_category, |op| {
                 op.tag("Categories")
                     .summary("Create a category")
-                    .description("Create a named category. The name is trimmed, 1 to 50 characters long (400 otherwise) and unique for the user (409 otherwise). Returns 409 once the user has MAX_CATEGORIES_PER_USER categories.")
+                    .description("Create a named category. The name is trimmed, 1 to 50 characters long (400 otherwise) and unique for the user (409 otherwise). Up to 20 rules, each matching the operation label by prefix, suffix or substring, case-insensitively, give the category to the operations created or imported afterwards that have none of their own; when several categories match, the first by name wins. Returns 409 once the user has MAX_CATEGORIES_PER_USER categories.")
                     .id("createCategory")
                     .response::<201, Json<handlers::categories::CategoryResponse>>()
             }),
@@ -507,7 +507,7 @@ where
             put_with(handlers::categories::update_category, |op| {
                 op.tag("Categories")
                     .summary("Update a category")
-                    .description("Replace the name and colour of a category, with the same rules as creation. Returns 404 if the category does not exist or belongs to another user.")
+                    .description("Replace the name, colour, icon and rules of a category, with the same constraints as creation. Returns 404 if the category does not exist or belongs to another user.")
                     .id("updateCategory")
             })
             .delete_with(handlers::categories::delete_category, |op| {
@@ -515,6 +515,15 @@ where
                     .summary("Delete a category")
                     .description("Permanently delete a category. The operations, split parts and budgets in it are kept, without a category. Returns 404 if the category does not exist or belongs to another user.")
                     .id("deleteCategory")
+            }),
+        )
+        .api_route(
+            "/categories/{id}/apply",
+            post_with(handlers::categories::apply_category, |op| {
+                op.tag("Categories")
+                    .summary("Apply category rules to operations")
+                    .description("Run the rules of a category against all operations of the authenticated user and put the matching ones in it, giving them their own category, which takes precedence over their budget's default. Matching operations in another category of their own are skipped unless `force` is true; split operations are never touched. Returns 404 if the category does not exist or belongs to another user.")
+                    .id("applyCategory")
             }),
         )
         // Import profiles
@@ -836,6 +845,10 @@ pub(crate) mod test_util {
                 "/categories/{id}",
                 routing::put(handlers::categories::update_category)
                     .delete(handlers::categories::delete_category),
+            )
+            .route(
+                "/categories/{id}/apply",
+                routing::post(handlers::categories::apply_category),
             )
             .route(
                 "/import-profiles",
