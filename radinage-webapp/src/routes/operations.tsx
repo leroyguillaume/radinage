@@ -1001,6 +1001,12 @@ function BudgetGroupRow({
 const DESKTOP_ACTION_SIZE = 36;
 const TOUCH_ACTION_SIZE = 44;
 
+/** Fixed columns so amounts and actions line up whatever each row holds. */
+const OPERATION_ROW_CLASS =
+	"grid grid-cols-[56px_minmax(0,1fr)_120px_auto] items-center gap-x-4 py-2";
+const OPERATION_ACTIONS_CLASS =
+	"grid grid-cols-[180px_36px_88px_36px_36px_36px] items-center gap-x-0.5";
+
 function OperationList({
 	entries,
 	locale,
@@ -1183,6 +1189,7 @@ function LinkBudgetMenu({
 					h={height}
 					radius="md"
 					c="forest.8"
+					fullWidth
 					leftSection={<IconLink size={16} />}
 					aria-label={t("operations.linkBudget")}
 				>
@@ -1250,7 +1257,8 @@ function CategoryMenu({
 						size="xs"
 						h={height}
 						radius="md"
-						maw={180}
+						fullWidth
+						justify="flex-start"
 						leftSection={current ? undefined : <IconTag size={16} />}
 						aria-label={
 							current
@@ -1326,7 +1334,7 @@ function OperationRow({ entry, locale, handlers }: OperationRowProps) {
 	return (
 		<Box
 			component="li"
-			className="grid grid-cols-[56px_minmax(0,1fr)_auto_auto] items-center gap-x-4 py-2"
+			className={OPERATION_ROW_CLASS}
 			style={{ borderBottom: `1px dashed ${palette.border}` }}
 		>
 			<Text size="sm" c="dimmed" className="tabular-nums">
@@ -1344,23 +1352,27 @@ function OperationRow({ entry, locale, handlers }: OperationRowProps) {
 					</Text>
 				</UnstyledButton>
 				<LinkBadges entry={entry} />
-				{partCategory && (
-					<CategoryBadge
-						category={partCategory}
-						inherited={entry.categoryFromBudget}
-					/>
-				)}
 			</Group>
 			<Text
 				fw={700}
-				className="tabular-nums"
+				className="text-right tabular-nums"
 				c={amount > 0 ? budgetTypeTones.income.text : undefined}
 				style={{ whiteSpace: "nowrap" }}
 			>
 				{formatSignedAmount(amount)}
 			</Text>
-			<Group gap={2} wrap="nowrap" justify="flex-end">
-				{!split && (
+			<Box className={OPERATION_ACTIONS_CLASS}>
+				{split ? (
+					// 14px button padding + 1px border: lines the dot up with the category buttons'.
+					<Box pl={15} miw={0}>
+						{partCategory && (
+							<CategoryBadge
+								category={partCategory}
+								inherited={entry.categoryFromBudget}
+							/>
+						)}
+					</Box>
+				) : (
 					<CategoryMenu
 						categories={handlers.categories}
 						entry={entry}
@@ -1399,7 +1411,12 @@ function OperationRow({ entry, locale, handlers }: OperationRowProps) {
 						/>
 					</Popover.Dropdown>
 				</Popover>
-				{split ? null : op.budgetLink.type === "unlinked" ? (
+				{split ? (
+					<>
+						<span />
+						<span />
+					</>
+				) : op.budgetLink.type === "unlinked" ? (
 					<>
 						<LinkBudgetMenu
 							budgets={handlers.budgets.filter((b) =>
@@ -1416,12 +1433,15 @@ function OperationRow({ entry, locale, handlers }: OperationRowProps) {
 						/>
 					</>
 				) : (
-					<OperationAction
-						label={t("operations.unlinkBudget")}
-						icon={<IconLinkOff size={18} />}
-						size={actionSize}
-						onClick={() => handlers.onUnlink(op.id)}
-					/>
+					<>
+						<OperationAction
+							label={t("operations.unlinkBudget")}
+							icon={<IconLinkOff size={18} />}
+							size={actionSize}
+							onClick={() => handlers.onUnlink(op.id)}
+						/>
+						<span />
+					</>
 				)}
 				<OperationAction
 					label={
@@ -1439,7 +1459,7 @@ function OperationRow({ entry, locale, handlers }: OperationRowProps) {
 					size={actionSize}
 					onClick={() => handlers.onSetIgnored(op.id, true)}
 				/>
-			</Group>
+			</Box>
 		</Box>
 	);
 }
