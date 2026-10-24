@@ -44,7 +44,7 @@ const ROLE_COLORS: Record<ColumnRole, string> = {
 };
 
 /** Formats offered by default, each shown as how it writes 31 December 2026 (at 14:30 when it has a time). */
-const DATE_FORMATS: Record<string, string> = {
+export const DATE_FORMATS: Record<string, string> = {
 	"%d/%m/%Y": "31/12/2026",
 	"%Y-%m-%d": "2026-12-31",
 	"%d-%m-%Y": "31-12-2026",

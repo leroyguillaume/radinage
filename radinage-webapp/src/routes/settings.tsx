@@ -19,6 +19,7 @@ import { type FormEvent, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { AccountBalanceSection } from "@/components/AccountBalanceSection";
 import { IgnoreRulesSection } from "@/components/IgnoreRulesSection";
+import { ImportProfilesSection } from "@/components/ImportProfilesSection";
 import { PageHeader } from "@/components/PageHeader";
 import { ApiError } from "@/lib/api";
 import { useChangePassword, useExportData, useImportData } from "@/lib/hooks";
@@ -168,6 +169,8 @@ export function SettingsPage() {
 				<AccountBalanceSection />
 
 				<IgnoreRulesSection />
+
+				<ImportProfilesSection />
 
 				<Paper>
 					<Stack>
