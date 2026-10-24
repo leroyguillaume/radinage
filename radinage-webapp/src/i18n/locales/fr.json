@@ -159,6 +159,20 @@
 		"deleteConfirm": "Confirmer la suppression",
 		"deleteError": "Erreur lors de la suppression du profil"
 	},
+	"importProfiles": {
+		"title": "Profils d'import",
+		"description": "Chaque profil décrit le relevé d'une banque : les colonnes du libellé, du montant et de la date, et comment lire le fichier.",
+		"fetchError": "Impossible de charger les profils d'import",
+		"empty": "Aucun profil pour l'instant. Créez-en un ici ou lors de votre premier import.",
+		"add": "Nouveau profil",
+		"edit": "Modifier le profil {{name}}",
+		"delete": "Supprimer le profil {{name}}",
+		"confirmDelete": "Supprimer le profil « {{name}} » ? Les opérations déjà importées sont conservées.",
+		"skippedLines_one": "{{count}} ligne ignorée",
+		"skippedLines_other": "{{count}} lignes ignorées",
+		"lastUsed": "Dernier import le {{date}}",
+		"neverUsed": "Jamais utilisé"
+	},
 	"budgets": {
 		"title": "Budgets",
 		"create": "Nouveau budget",

@@ -24,14 +24,15 @@ const apiFetchMock = vi.mocked(apiFetch);
 
 /**
  * Answer data calls with `handler`; the account balance section finds no balance, the
- * categories section no category and the ignore rules section no rule.
+ * categories section no category, the ignore rules section no rule and the import
+ * profiles section no profile.
  */
 function mockApi(handler: (path: string) => Promise<unknown>) {
 	apiFetchMock.mockImplementation((path: string) => {
 		if (path === "/users/me/balance") {
 			return Promise.reject(new ApiError(404, "Not Found"));
 		}
-		return path === "/categories" || path === "/ignore-rules"
+		return ["/categories", "/ignore-rules", "/import-profiles"].includes(path)
 			? Promise.resolve([])
 			: handler(path);
 	});

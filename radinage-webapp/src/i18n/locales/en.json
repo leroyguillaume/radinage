@@ -159,6 +159,20 @@
 		"deleteConfirm": "Confirm deletion",
 		"deleteError": "Could not delete the profile"
 	},
+	"importProfiles": {
+		"title": "Import profiles",
+		"description": "Each profile describes a bank's statement: the label, amount and date columns, and how to read the file.",
+		"fetchError": "Could not load the import profiles",
+		"empty": "No profile yet. Create one here or during your first import.",
+		"add": "New profile",
+		"edit": "Edit profile {{name}}",
+		"delete": "Delete profile {{name}}",
+		"confirmDelete": "Delete the profile “{{name}}”? Operations already imported are kept.",
+		"skippedLines_one": "{{count}} skipped line",
+		"skippedLines_other": "{{count}} skipped lines",
+		"lastUsed": "Last import on {{date}}",
+		"neverUsed": "Never used"
+	},
 	"budgets": {
 		"title": "Budgets",
 		"create": "New budget",
