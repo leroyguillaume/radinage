@@ -35,6 +35,7 @@ const account = (
 	receivesOperations: kind === "checking",
 	balance: { id: `b-${id}`, amount: "0", date: "2026-01-01" },
 	currentBalance: "0",
+	transferredInto: false,
 	createdAt: "2026-01-01T10:00:00Z",
 });
 
@@ -44,6 +45,7 @@ const never: AccountResponse = {
 	...account("never", "Jamais relevé", "savings"),
 	balance: null,
 	currentBalance: null,
+	transferredInto: false,
 };
 
 const toLivret: BudgetResponse = {

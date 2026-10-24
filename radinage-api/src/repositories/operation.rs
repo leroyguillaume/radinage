@@ -1,7 +1,9 @@
 use crate::{
     domain::{
+        account::AccountKind,
         budget::BudgetType,
         operation::{BudgetLink, NewOperation, NewOperationSplit, Operation, OperationSplit},
+        transfer::{Transfer, TransferFlow},
     },
     error::{AppError, AppResult},
     repositories::SortOrder,
@@ -63,6 +65,8 @@ pub struct ListOperationsParams {
     pub budget_ids: Vec<Uuid>,
     /// When not empty, keeps the operations of one of these accounts.
     pub account_ids: Vec<Uuid>,
+    /// When not empty, keeps the transfers with one of these accounts.
+    pub transfer_account_ids: Vec<Uuid>,
 }
 
 /// Which operations a listing keeps by their ignored flag.
@@ -143,6 +147,8 @@ pub struct SummaryRow {
     /// Budget the operation (or split part) counts towards, if any.
     pub budget_id: Option<Uuid>,
     pub budget_type: Option<String>,
+    /// Kind of the other account when the operation is a transfer.
+    pub transfer_account_kind: Option<String>,
 }
 
 /// Where a summary row's amount is accounted.
@@ -152,11 +158,26 @@ pub enum SummaryCategory {
     Unbudgeted,
     /// Linked to a budget of the given type.
     Budgeted(BudgetType),
+    /// A transfer with another account, not linked to a budget.
+    Transfer(TransferFlow),
 }
 
 impl SummaryRow {
-    /// Category of this row, `None` for a link type the summary does not count.
+    /// Category of this row, `None` for a link type the summary does not count. A transfer
+    /// counts as one, unless it puts money on a savings account under a savings budget.
     pub fn category(&self) -> Option<SummaryCategory> {
+        if let Some(kind) = self
+            .transfer_account_kind
+            .as_deref()
+            .and_then(|k| k.parse::<AccountKind>().ok())
+        {
+            let flow = TransferFlow::of(kind, self.amount);
+            let saved_by_budget = flow == TransferFlow::ToSavings
+                && self.budget_type.as_deref() == Some(BudgetType::Savings.as_str());
+            if !saved_by_budget {
+                return Some(SummaryCategory::Transfer(flow));
+            }
+        }
         match self.budget_link_type.as_str() {
             "unlinked" => Some(SummaryCategory::Unbudgeted),
             "manual" | "auto" => Some(
@@ -308,6 +329,48 @@ pub trait OperationRepository: Send + Sync + 'static {
         user_id: Uuid,
     ) -> impl std::future::Future<Output = AppResult<bool>> + Send;
 
+    /// Make an unsplit operation of the user a transfer with `account_id`, made by `rule_id`
+    /// when given. Its category is cleared and its budget link kept only when the operation
+    /// still accepts that budget; the operation it was paired with, if any, stops being a
+    /// transfer. Returns `false` if not found.
+    fn set_transfer(
+        &self,
+        id: Uuid,
+        user_id: Uuid,
+        account_id: Uuid,
+        rule_id: Option<Uuid>,
+    ) -> impl std::future::Future<Output = AppResult<bool>> + Send;
+
+    /// Stop an operation of the user, and the operation it is paired with, being transfers.
+    /// Returns `false` if not found.
+    fn clear_transfer(
+        &self,
+        id: Uuid,
+        user_id: Uuid,
+    ) -> impl std::future::Future<Output = AppResult<bool>> + Send;
+
+    /// Pair a transfer of the user with the operation on the other side, when the other
+    /// account receives operations: `counterpart_id` when given, else the closest by date
+    /// among the operations of the other account of opposite amount within
+    /// [`TRANSFER_PAIRING_DAYS`] days, not split, not paired, and not a transfer with any
+    /// other account. Both become each other's transfer, without category nor budget link,
+    /// and a previous pairing is undone. Returns the counterpart, `None` when there is none.
+    fn pair_transfer(
+        &self,
+        id: Uuid,
+        user_id: Uuid,
+        counterpart_id: Option<Uuid>,
+    ) -> impl std::future::Future<Output = AppResult<Option<Uuid>>> + Send;
+
+    /// Make an operation that is not a transfer the other side of a transfer waiting for it:
+    /// the closest by date, on another account, of opposite amount within
+    /// [`TRANSFER_PAIRING_DAYS`] days, that is a transfer with the operation's account and
+    /// not paired yet. Returns the transfer paired with, `None` when none waits.
+    fn pair_with_waiting_transfer(
+        &self,
+        id: Uuid,
+    ) -> impl std::future::Future<Output = AppResult<Option<Uuid>>> + Send;
+
     /// Fetch the non-ignored amounts whose accounting date falls in `[month_start, month_end]`,
     /// joining budget type from the budgets table. A split operation yields one row per split
     /// instead of a row for itself. Backs both the summary and the forecast.
@@ -319,8 +382,8 @@ pub trait OperationRepository: Send + Sync + 'static {
     ) -> impl std::future::Future<Output = AppResult<Vec<SummaryRow>>> + Send;
 
     /// Totals per effective category of the non-ignored amounts whose accounting date falls in
-    /// `[from, to]`, a split operation counting through its parts. Amounts linked to a savings
-    /// budget are left out: they are neither income nor expenses.
+    /// `[from, to]`, a split operation counting through its parts. Transfers and amounts linked
+    /// to a savings budget are left out: they are neither income nor expenses.
     fn category_totals(
         &self,
         user_id: Uuid,
@@ -328,6 +391,9 @@ pub trait OperationRepository: Send + Sync + 'static {
         to: NaiveDate,
     ) -> impl std::future::Future<Output = AppResult<Vec<CategoryTotal>>> + Send;
 }
+
+/// Days between the two sides of a transfer for them to be paired automatically.
+pub const TRANSFER_PAIRING_DAYS: i32 = 5;
 
 /// PostgreSQL-backed operation repository.
 #[derive(Clone)]
@@ -344,7 +410,9 @@ impl PgOperationRepository {
 /// Columns read into an [`Operation`], from `operations o`.
 const OPERATION_COLUMNS: &str = "o.id, o.user_id, o.account_id, o.amount, o.date, o.effective_date, o.label, \
      o.budget_link_type, o.budget_link_id, o.ignored, o.ignore_rule_id, o.category_id, \
-     (SELECT b.category_id FROM budgets b WHERE b.id = o.budget_link_id) AS budget_category_id";
+     (SELECT b.category_id FROM budgets b WHERE b.id = o.budget_link_id) AS budget_category_id, \
+     o.transfer_account_id, o.transfer_rule_id, o.transfer_operation_id, \
+     (SELECT ta.kind FROM accounts ta WHERE ta.id = o.transfer_account_id) AS transfer_account_kind";
 
 /// Accounting date of an operation `o`.
 const OPERATION_DATE: &str = "COALESCE(o.effective_date, o.date)";
@@ -360,6 +428,19 @@ const OPERATION_CATEGORY: &str = "COALESCE(o.category_id, \
 const SPLIT_CATEGORY: &str =
     "COALESCE(s.category_id, (SELECT b.category_id FROM budgets b WHERE b.id = s.budget_id))";
 
+/// Whether the transfer `o` puts money on a savings account, the only one with a budget link.
+const TO_SAVINGS: &str = "o.amount < 0 \
+     AND (SELECT ta.kind FROM accounts ta WHERE ta.id = o.transfer_account_id) = 'savings'";
+
+/// Whether budget `b` is a savings budget the transfer `o` may count towards: one sending its
+/// money to the transfer's account, or to no account in particular.
+const SAVINGS_BUDGET_OF_TRANSFER: &str = "b.budget_type = 'savings' \
+     AND (b.account_id IS NULL OR b.account_id = o.transfer_account_id)";
+
+/// Makes the operations `o` its `WHERE` clause appended to it selects stop being transfers.
+const CLEAR_TRANSFERS: &str = "UPDATE operations o \
+     SET transfer_account_id = NULL, transfer_rule_id = NULL, transfer_operation_id = NULL";
+
 /// `AND` clause keeping an unsplit operation `o` whose `operation_test` holds, and a split one
 /// with a part `s` whose `split_test` holds.
 fn whole_or_any_part(operation_test: &str, split_test: &str) -> String {
@@ -372,7 +453,7 @@ fn whole_or_any_part(operation_test: &str, split_test: &str) -> String {
     )
 }
 
-/// Filters shared by the listing and its totals, binding `$1` to `$10` as [`bind_list_filters`]
+/// Filters shared by the listing and its totals, binding `$1` to `$11` as [`bind_list_filters`]
 /// does.
 fn list_filters_sql(params: &ListOperationsParams) -> String {
     let ignored = match params.ignored {
@@ -415,6 +496,7 @@ fn list_filters_sql(params: &ListOperationsParams) -> String {
            AND ($8::numeric IS NULL OR ABS(o.amount) >= $8)
            AND ($9::numeric IS NULL OR ABS(o.amount) <= $9)
            AND (cardinality($10::uuid[]) = 0 OR o.account_id = ANY($10))
+           AND (cardinality($11::uuid[]) = 0 OR o.transfer_account_id = ANY($11))
            {ignored}
            {direction}
            {category}
@@ -438,6 +520,7 @@ fn bind_list_filters<'q>(
         .bind(params.amount_min)
         .bind(params.amount_max)
         .bind(&params.account_ids)
+        .bind(&params.transfer_account_ids)
 }
 
 /// Build a `BudgetLink` from the raw database columns.
@@ -470,8 +553,24 @@ fn row_to_operation(row: &sqlx::postgres::PgRow) -> AppResult<Operation> {
         ignore_rule_id: row.try_get("ignore_rule_id")?,
         category_id: row.try_get("category_id")?,
         budget_category_id: row.try_get("budget_category_id")?,
+        transfer: transfer_from_row(row)?,
         splits: Vec::new(),
     })
+}
+
+/// The transfer read from the `transfer_*` columns of [`OPERATION_COLUMNS`].
+fn transfer_from_row(row: &sqlx::postgres::PgRow) -> AppResult<Option<Transfer>> {
+    let account_id: Option<Uuid> = row.try_get("transfer_account_id")?;
+    let kind: Option<&str> = row.try_get("transfer_account_kind")?;
+    let (Some(account_id), Some(kind)) = (account_id, kind) else {
+        return Ok(None);
+    };
+    Ok(Some(Transfer {
+        account_id,
+        account_kind: kind.parse().map_err(AppError::Internal)?,
+        rule_id: row.try_get("transfer_rule_id")?,
+        operation_id: row.try_get("transfer_operation_id")?,
+    }))
 }
 
 /// Fill in the splits of the given operations with a single query.
@@ -512,6 +611,32 @@ async fn attach_splits(pool: &PgPool, ops: &mut [Operation]) -> AppResult<()> {
     Ok(())
 }
 
+/// Make the operations `a` and `b` each other's transfer, without category nor budget link,
+/// undoing the pairings either had before.
+async fn link_halves(conn: &mut sqlx::PgConnection, a: Uuid, b: Uuid) -> AppResult<()> {
+    sqlx::query(&format!(
+        "{CLEAR_TRANSFERS} WHERE o.transfer_operation_id IN ($1, $2) AND o.id NOT IN ($1, $2)"
+    ))
+    .bind(a)
+    .bind(b)
+    .execute(&mut *conn)
+    .await?;
+    sqlx::query(
+        "UPDATE operations o
+         SET transfer_account_id = other.account_id, transfer_operation_id = other.id,
+             transfer_rule_id = CASE WHEN o.transfer_account_id = other.account_id
+                                     THEN o.transfer_rule_id END,
+             category_id = NULL, budget_link_type = 'unlinked', budget_link_id = NULL
+         FROM operations other
+         WHERE (o.id = $1 AND other.id = $2) OR (o.id = $2 AND other.id = $1)",
+    )
+    .bind(a)
+    .bind(b)
+    .execute(&mut *conn)
+    .await?;
+    Ok(())
+}
+
 impl OperationRepository for PgOperationRepository {
     async fn find_by_id(&self, id: Uuid, user_id: Uuid) -> AppResult<Operation> {
         let row = sqlx::query(&format!(
@@ -539,7 +664,7 @@ impl OperationRepository for PgOperationRepository {
             "SELECT {OPERATION_COLUMNS} FROM operations o
              {filters}
              ORDER BY {sort_col} {sort_dir}, o.id DESC
-             LIMIT $11 OFFSET $12",
+             LIMIT $12 OFFSET $13",
             sort_col = params.sort.as_sql(),
             sort_dir = params.order.as_sql(),
         );
@@ -670,7 +795,7 @@ impl OperationRepository for PgOperationRepository {
     ) -> AppResult<u64> {
         let affected = sqlx::query(
             "UPDATE operations o SET category_id = $1
-             WHERE o.id = ANY($2) AND o.user_id = $3
+             WHERE o.id = ANY($2) AND o.user_id = $3 AND o.transfer_account_id IS NULL
                AND NOT EXISTS (SELECT 1 FROM operation_splits s WHERE s.operation_id = o.id)",
         )
         .bind(category_id)
@@ -683,24 +808,39 @@ impl OperationRepository for PgOperationRepository {
     }
 
     async fn set_accounts(&self, ids: &[Uuid], user_id: Uuid, account_id: Uuid) -> AppResult<u64> {
+        let mut tx = self.pool.begin().await?;
+        // A transfer moved to another account no longer says where the money went.
+        sqlx::query(&format!(
+            "{CLEAR_TRANSFERS} WHERE o.user_id = $2
+               AND (o.id = ANY($1) OR o.transfer_operation_id = ANY($1))"
+        ))
+        .bind(ids)
+        .bind(user_id)
+        .execute(&mut *tx)
+        .await?;
         let affected = sqlx::query(
             "UPDATE operations SET account_id = $1 WHERE id = ANY($2) AND user_id = $3",
         )
         .bind(account_id)
         .bind(ids)
         .bind(user_id)
-        .execute(&self.pool)
+        .execute(&mut *tx)
         .await?
         .rows_affected();
+        tx.commit().await?;
         Ok(affected)
     }
 
     async fn set_auto_link(&self, op_id: Uuid, budget_id: Uuid) -> AppResult<()> {
-        sqlx::query(
-            "UPDATE operations SET budget_link_type = 'auto', budget_link_id = $1
-             WHERE id = $2
-               AND NOT EXISTS (SELECT 1 FROM operation_splits WHERE operation_id = $2)",
-        )
+        sqlx::query(&format!(
+            "UPDATE operations o SET budget_link_type = 'auto', budget_link_id = $1
+             WHERE o.id = $2
+               AND NOT EXISTS (SELECT 1 FROM operation_splits WHERE operation_id = $2)
+               AND (o.transfer_account_id IS NULL
+                    OR EXISTS (SELECT 1 FROM budgets b
+                               WHERE b.id = $1 AND {SAVINGS_BUDGET_OF_TRANSFER})
+                       AND {TO_SAVINGS})"
+        ))
         .bind(budget_id)
         .bind(op_id)
         .execute(&self.pool)
@@ -834,6 +974,129 @@ impl OperationRepository for PgOperationRepository {
         Ok(row.try_get("found")?)
     }
 
+    async fn set_transfer(
+        &self,
+        id: Uuid,
+        user_id: Uuid,
+        account_id: Uuid,
+        rule_id: Option<Uuid>,
+    ) -> AppResult<bool> {
+        // Only money put on a savings account keeps its link, and to a savings budget only.
+        let keeps_budget = "o.amount < 0
+             AND (SELECT a.kind FROM accounts a WHERE a.id = $3) = 'savings'
+             AND EXISTS (SELECT 1 FROM budgets b WHERE b.id = o.budget_link_id
+                         AND b.budget_type = 'savings'
+                         AND (b.account_id IS NULL OR b.account_id = $3))";
+        let mut tx = self.pool.begin().await?;
+        sqlx::query(&format!(
+            "{CLEAR_TRANSFERS} WHERE o.transfer_operation_id = $1 AND o.user_id = $2"
+        ))
+        .bind(id)
+        .bind(user_id)
+        .execute(&mut *tx)
+        .await?;
+        let found = sqlx::query(&format!(
+            "UPDATE operations o
+             SET transfer_account_id = $3, transfer_rule_id = $4, transfer_operation_id = NULL,
+                 category_id = NULL,
+                 budget_link_type = CASE WHEN {keeps_budget} THEN o.budget_link_type
+                                         ELSE 'unlinked' END,
+                 budget_link_id = CASE WHEN {keeps_budget} THEN o.budget_link_id END
+             WHERE o.id = $1 AND o.user_id = $2
+               AND NOT EXISTS (SELECT 1 FROM operation_splits s WHERE s.operation_id = o.id)"
+        ))
+        .bind(id)
+        .bind(user_id)
+        .bind(account_id)
+        .bind(rule_id)
+        .execute(&mut *tx)
+        .await?
+        .rows_affected()
+            > 0;
+        tx.commit().await?;
+        Ok(found)
+    }
+
+    async fn clear_transfer(&self, id: Uuid, user_id: Uuid) -> AppResult<bool> {
+        let row = sqlx::query(&format!(
+            "WITH owned AS (SELECT id FROM operations WHERE id = $1 AND user_id = $2),
+                  cleared AS (
+                      {CLEAR_TRANSFERS}
+                      WHERE o.id IN (SELECT id FROM owned)
+                         OR o.transfer_operation_id IN (SELECT id FROM owned)
+                  )
+             SELECT EXISTS(SELECT 1 FROM owned) AS found"
+        ))
+        .bind(id)
+        .bind(user_id)
+        .fetch_one(&self.pool)
+        .await?;
+        Ok(row.try_get("found")?)
+    }
+
+    async fn pair_transfer(
+        &self,
+        id: Uuid,
+        user_id: Uuid,
+        counterpart_id: Option<Uuid>,
+    ) -> AppResult<Option<Uuid>> {
+        let mut tx = self.pool.begin().await?;
+        let row = sqlx::query(
+            "SELECT c.id FROM operations o
+             JOIN accounts ta ON ta.id = o.transfer_account_id
+                             AND ta.kind = 'checking' AND ta.imported
+             JOIN operations c ON c.account_id = ta.id AND c.user_id = o.user_id
+                              AND c.amount = -o.amount
+             WHERE o.id = $1 AND o.user_id = $2
+               AND ($3::uuid IS NULL OR c.id = $3)
+               AND ($3::uuid IS NOT NULL OR ABS(c.date - o.date) <= $4)
+               AND (c.transfer_account_id IS NULL OR c.transfer_account_id = o.account_id)
+               AND ($3::uuid IS NOT NULL OR c.transfer_operation_id IS NULL
+                    OR c.transfer_operation_id = o.id)
+               AND NOT EXISTS (SELECT 1 FROM operation_splits s WHERE s.operation_id = c.id)
+             ORDER BY ABS(c.date - o.date), c.transfer_account_id IS NULL, c.id
+             LIMIT 1",
+        )
+        .bind(id)
+        .bind(user_id)
+        .bind(counterpart_id)
+        .bind(TRANSFER_PAIRING_DAYS)
+        .fetch_optional(&mut *tx)
+        .await?;
+        let Some(row) = row else {
+            return Ok(None);
+        };
+        let counterpart: Uuid = row.try_get("id")?;
+        link_halves(&mut tx, id, counterpart).await?;
+        tx.commit().await?;
+        Ok(Some(counterpart))
+    }
+
+    async fn pair_with_waiting_transfer(&self, id: Uuid) -> AppResult<Option<Uuid>> {
+        let mut tx = self.pool.begin().await?;
+        let row = sqlx::query(
+            "SELECT p.id FROM operations o
+             JOIN operations p ON p.user_id = o.user_id AND p.transfer_account_id = o.account_id
+                              AND p.transfer_operation_id IS NULL AND p.amount = -o.amount
+                              AND ABS(p.date - o.date) <= $2
+             WHERE o.id = $1 AND o.transfer_account_id IS NULL
+               AND NOT EXISTS (SELECT 1 FROM operation_splits s WHERE s.operation_id = o.id)
+             ORDER BY ABS(p.date - o.date), p.id
+             LIMIT 1",
+        )
+        .bind(id)
+        .bind(TRANSFER_PAIRING_DAYS)
+        .fetch_optional(&mut *tx)
+        .await?;
+        let Some(row) = row else {
+            return Ok(None);
+        };
+        let waiting: Uuid = row.try_get("id")?;
+        link_halves(&mut tx, id, waiting).await?;
+        tx.commit().await?;
+        Ok(Some(waiting))
+    }
+
     async fn list_for_summary(
         &self,
         user_id: Uuid,
@@ -842,9 +1105,11 @@ impl OperationRepository for PgOperationRepository {
     ) -> AppResult<Vec<SummaryRow>> {
         let rows = sqlx::query(&format!(
             "SELECT o.account_id, o.amount, {OPERATION_DATE} AS accounting_date,
-                    o.budget_link_type, o.budget_link_id AS budget_id, b.budget_type
+                    o.budget_link_type, o.budget_link_id AS budget_id, b.budget_type,
+                    ta.kind AS transfer_account_kind
              FROM operations o
              LEFT JOIN budgets b ON b.id = o.budget_link_id
+             LEFT JOIN accounts ta ON ta.id = o.transfer_account_id
              WHERE o.user_id = $1
                AND {OPERATION_DATE} BETWEEN $2 AND $3
                AND o.ignored = FALSE
@@ -852,7 +1117,7 @@ impl OperationRepository for PgOperationRepository {
              UNION ALL
              SELECT o.account_id, s.amount, {SPLIT_DATE},
                     CASE WHEN s.budget_id IS NULL THEN 'unlinked' ELSE 'manual' END,
-                    s.budget_id, b.budget_type
+                    s.budget_id, b.budget_type, NULL
              FROM operation_splits s
              JOIN operations o ON o.id = s.operation_id
              LEFT JOIN budgets b ON b.id = s.budget_id
@@ -876,6 +1141,7 @@ impl OperationRepository for PgOperationRepository {
                     budget_link_type: r.try_get("budget_link_type")?,
                     budget_id: r.try_get("budget_id")?,
                     budget_type: r.try_get("budget_type")?,
+                    transfer_account_kind: r.try_get("transfer_account_kind")?,
                 })
             })
             .collect::<Result<_, sqlx::Error>>()?)
@@ -896,6 +1162,7 @@ impl OperationRepository for PgOperationRepository {
                    AND {OPERATION_DATE} BETWEEN $2 AND $3
                    AND o.ignored = FALSE
                    AND b.budget_type IS DISTINCT FROM 'savings'
+                   AND o.transfer_account_id IS NULL
                    AND NOT EXISTS (SELECT 1 FROM operation_splits s WHERE s.operation_id = o.id)
                  UNION ALL
                  SELECT s.amount, {SPLIT_CATEGORY}
@@ -1623,6 +1890,7 @@ mod integration_tests {
                     budget_link_type: "manual".to_string(),
                     budget_id: Some(expense_id),
                     budget_type: Some("expense".to_string()),
+                    transfer_account_kind: None,
                 },
                 SummaryRow {
                     account_id: user_id,
@@ -1631,6 +1899,7 @@ mod integration_tests {
                     budget_link_type: "unlinked".to_string(),
                     budget_id: None,
                     budget_type: None,
+                    transfer_account_kind: None,
                 },
                 SummaryRow {
                     account_id: user_id,
@@ -1639,6 +1908,7 @@ mod integration_tests {
                     budget_link_type: "auto".to_string(),
                     budget_id: Some(expense_id),
                     budget_type: Some("expense".to_string()),
+                    transfer_account_kind: None,
                 },
             ]
         );
@@ -1653,6 +1923,7 @@ mod integration_tests {
             budget_link_type: link.to_string(),
             budget_id: None,
             budget_type: budget_type.map(str::to_string),
+            transfer_account_kind: None,
         };
         let cases = [
             (row("unlinked", None), Some(SummaryCategory::Unbudgeted)),
@@ -2289,3 +2560,6 @@ mod integration_tests {
         );
     }
 }
+
+#[cfg(test)]
+mod transfer_tests;

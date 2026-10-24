@@ -63,7 +63,8 @@
 			"expenses": "Dépenses",
 			"income": "Revenus",
 			"savings": "Épargne",
-			"balance": "Balance"
+			"balance": "Balance",
+			"transfers": "Virements"
 		},
 		"split": {
 			"title": "Diviser l'opération",
@@ -567,7 +568,11 @@
 			"monthTotals": "Totaux du mois",
 			"noBudgets": "Aucun budget ce mois-ci.",
 			"fetchError": "Impossible de charger le détail du mois"
-		}
+		},
+		"netSavings": "Épargne nette",
+		"savingsDetail": "{{saved}} versés, {{withdrawn}} repris",
+		"withdrawn": "dont {{amount}} repris",
+		"negativeSavings": "Plus repris que versé"
 	},
 	"nav": {
 		"operations": "Opérations",
@@ -671,7 +676,7 @@
 		"imported": "J'importe les relevés de ce compte",
 		"importedHint": "Son solde se calcule à partir des opérations importées, et sert de point de départ au résumé.",
 		"notImportedHint": "Il vaut le dernier solde que tu y relèves, et n'entre pas dans le résumé.",
-		"savingsHint": "Il vaut le dernier solde que tu y relèves, plus ce que les budgets d'épargne qui y versent ont épargné depuis, et n'entre pas dans le résumé.",
+		"savingsHint": "Il vaut le dernier solde que tu y relèves, plus ce que les virements et les budgets d'épargne y ont versé depuis, moins ce qui en a été repris, et n'entre pas dans le résumé.",
 		"savedBy": "Alimenté par {{budgets}}",
 		"savedInto": "Des budgets d'épargne versent sur ce compte : il doit rester un compte épargne.",
 		"startingBalance": "Point de départ",
@@ -713,14 +718,15 @@
 			"history": "Historique des soldes",
 			"noBalance": "Aucun solde relevé : relève le solde affiché par ta banque pour suivre ce compte.",
 			"today": "Aujourd'hui",
-			"todayEstimated": "Estimé : dernier relevé + versements",
+			"todayEstimated": "Estimé : dernier relevé + versements et virements",
 			"todayComputed": "Calculé : dernier relevé + opérations",
 			"estimation": "Estimation : {{amount}}",
 			"firstReading": "Premier relevé",
 			"gapHint": "L'écart compare chaque relevé à l'estimation de ce jour-là : intérêts, variations boursières, frais ou opérations manquantes.",
 			"correct": "Corriger le solde du {{date}}",
 			"deleteReading": "Supprimer le solde du {{date}}",
-			"confirmDelete": "Supprimer le solde du {{date}} ?"
+			"confirmDelete": "Supprimer le solde du {{date}} ?",
+			"takenSince": "− {{amount}} repris depuis"
 		},
 		"balanceModal": {
 			"title": "Relever un solde · {{name}}",
@@ -730,7 +736,8 @@
 			"gap": "Écart : intérêts, variations, frais",
 			"replaces": "Ce solde remplace l'estimation : les mouvements suivants s'y ajouteront. Les soldes précédents restent dans l'historique.",
 			"dateTaken": "Un solde est déjà relevé à cette date."
-		}
+		},
+		"transfersInto": "Des virements arrivent sur ce compte : il doit garder son type."
 	},
 	"activate": {
 		"title": "Activer votre compte",
@@ -855,5 +862,70 @@
 		"sheetIgnoredByRule": "Ignorée automatiquement par la règle {{rule}} : exclue des totaux, des budgets et des prévisions",
 		"seeRule": "Voir la règle",
 		"ignoredByRule": "Ignorée par une règle"
+	},
+	"transfers": {
+		"nature": "Nature",
+		"natures": {
+			"operation": "Opération",
+			"transfer": "Virement"
+		},
+		"toAccount": "Vers le compte",
+		"fromAccount": "Depuis le compte",
+		"toHint": "L'opération est débitée : l'argent part vers ce compte.",
+		"fromHint": "L'opération est créditée : l'argent vient de ce compte.",
+		"accountPlaceholder": "Choisir le compte",
+		"flows": {
+			"toSavings": "Compté dans l'épargne : {{amount}} mis de côté sur {{account}}.",
+			"fromSavings": "Repris de l'épargne : {{amount}} retirés de {{account}}, déduits de l'épargne nette. Ce n'est pas un revenu.",
+			"internal": "Virement interne : ni revenu, ni dépense. Il fait toujours bouger le solde des deux comptes."
+		},
+		"savingsBudget": "Budget d'épargne",
+		"savingsBudgetHint": "Facultatif. Seuls les budgets d'épargne qui versent sur ce compte sont proposés.",
+		"counterpart": "Contrepartie sur {{account}}",
+		"linked": "Liée",
+		"waiting": "Pas encore de contrepartie : elle sera liée à l'import du relevé de {{account}}.",
+		"badgeTo": "Vers {{account}}",
+		"badgeFrom": "Depuis {{account}}",
+		"always": "Toujours pour ce libellé",
+		"byRule": "Fait par la règle {{rule}}",
+		"seeRules": "Voir les règles du compte",
+		"section": "Virements",
+		"internalStat": "Virements internes",
+		"fedBy": "{{accounts}} (virements)",
+		"rules": {
+			"title": "Règles de virement",
+			"description": "Une opération importée sur ce compte dont le libellé correspond devient un virement avec l'autre compte.",
+			"incomingTitle": "Règles qui virent ici",
+			"on": "sur {{account}}",
+			"with": "Virement avec {{account}}",
+			"otherAccount": "Autre compte",
+			"empty": "Aucune règle pour ce compte.",
+			"add": "Ajouter une règle",
+			"createTitle": "Nouvelle règle de virement",
+			"create": "Créer la règle",
+			"hint": "Débit : virement vers l'autre compte. Crédit : virement depuis l'autre compte.",
+			"errorValue": "La valeur est obligatoire",
+			"errorAccount": "Choisis l'autre compte",
+			"errorLimit": "Tu as atteint le nombre maximal de règles de virement",
+			"saveError": "Erreur lors de l'enregistrement de la règle",
+			"fetchError": "Impossible de charger les règles de virement",
+			"edit": "Modifier la règle {{rule}}",
+			"delete": "Supprimer la règle {{rule}}",
+			"confirmDelete": "Supprimer la règle {{rule}} ? Les virements qu'elle a faits redeviennent des opérations ordinaires.",
+			"applyTitle": "Appliquer la règle",
+			"applyPrompt": "La règle s'appliquera aux prochains imports. Veux-tu aussi marquer comme virements les opérations existantes qui y correspondent ?",
+			"applyResult": "{{transferred}} opération(s) marquée(s) comme virement, {{skipped}} laissée(s) telle(s) quelle(s)",
+			"applyError": "Erreur lors de l'application de la règle",
+			"later": "Plus tard",
+			"apply": "Appliquer"
+		},
+		"account": {
+			"title": "Virements",
+			"empty": "Aucun virement avec ce compte.",
+			"total_one": "{{count}} virement au total",
+			"total_other": "{{count}} virements au total",
+			"from": "depuis {{account}}",
+			"to": "vers {{account}}"
+		}
 	}
 }

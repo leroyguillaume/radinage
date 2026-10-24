@@ -23,9 +23,11 @@ import {
 import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
+import { AccountTransfersCard } from "@/components/AccountTransfersCard";
 import { AnchorLink } from "@/components/AnchorLink";
 import { BalanceHistoryChart } from "@/components/BalanceHistoryChart";
 import { BalanceModal } from "@/components/BalanceModal";
+import { TransferRulesCard } from "@/components/TransferRulesCard";
 import {
 	type HistoryPeriod,
 	periodStart,
@@ -38,8 +40,10 @@ import {
 	useBalanceHistory,
 	useBudgets,
 	useDeleteAccountBalance,
+	useTransferRules,
 } from "@/lib/hooks";
 import { balanceTextColor } from "@/lib/tones";
+import { feederNames, feedersOf } from "@/lib/transfers";
 import type { AccountResponse, BalanceReading } from "@/lib/types";
 import { headingFont, palette } from "@/theme";
 
@@ -172,6 +176,7 @@ function AccountPage() {
 
 	const accountsQuery = useAccounts();
 	const budgets = useBudgets().data ?? [];
+	const transferRules = useTransferRules().data ?? [];
 	const balancesQuery = useAccountBalances(accountId);
 	const historyQuery = useBalanceHistory(accountId, periodStart(period, today));
 	const account = accountsQuery.data?.find((a) => a.id === accountId);
@@ -200,10 +205,13 @@ function AccountPage() {
 		);
 	}
 
-	const savedBy = budgets
-		.filter((b) => b.accountId === account.id)
-		.map((b) => b.label);
-	const estimated = savedBy.length > 0;
+	const savedBy = feederNames(
+		feedersOf(account.id, budgets, transferRules, accountsQuery.data ?? []),
+		(accounts) => t("transfers.fedBy", { accounts }),
+	);
+	const estimated =
+		!account.receivesOperations &&
+		(savedBy.length > 0 || account.transferredInto);
 	const readings = balancesQuery.data ?? [];
 	const latest = account.balance;
 	const current = account.currentBalance;
@@ -252,6 +260,7 @@ function AccountPage() {
 					<Text size="sm" c="dimmed">
 						{t(`accounts.kinds.${account.kind}`)}
 						{estimated &&
+							savedBy.length > 0 &&
 							` · ${t("accounts.savedBy", { budgets: savedBy.join(", ") })}`}
 					</Text>
 					{current !== null && (
@@ -280,8 +289,10 @@ function AccountPage() {
 								` ${t(
 									account.receivesOperations
 										? "accounts.detail.operationsSince"
-										: "accounts.detail.movedSince",
-									{ amount: formatAmount(movedSince) },
+										: movedSince < 0
+											? "accounts.detail.takenSince"
+											: "accounts.detail.movedSince",
+									{ amount: formatAmount(Math.abs(movedSince)) },
 								)}`}
 						</Text>
 					)}
@@ -339,6 +350,15 @@ function AccountPage() {
 						{t("accounts.detail.estimateNote", { budgets: savedBy.join(", ") })}
 					</Alert>
 				)}
+
+				<AccountTransfersCard
+					account={account}
+					accounts={accountsQuery.data ?? []}
+				/>
+				<TransferRulesCard
+					account={account}
+					accounts={accountsQuery.data ?? []}
+				/>
 
 				<Button
 					size="md"

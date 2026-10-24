@@ -20,7 +20,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-const MAX_VALUE_LEN: usize = 200;
+pub(super) const MAX_VALUE_LEN: usize = 200;
 
 // ── DTOs ─────────────────────────────────────────────────────────────────────
 
@@ -73,20 +73,7 @@ impl TryFrom<IgnoreRuleRequest> for IgnoreRuleFields {
     type Error = AppError;
 
     fn try_from(body: IgnoreRuleRequest) -> AppResult<Self> {
-        let trimmed = |v: String| -> AppResult<String> {
-            let v = v.trim().to_string();
-            if v.is_empty() || v.chars().count() > MAX_VALUE_LEN {
-                return Err(AppError::BadRequest(format!(
-                    "pattern value must be 1 to {MAX_VALUE_LEN} characters"
-                )));
-            }
-            Ok(v)
-        };
-        let label_pattern = match body.label_pattern {
-            LabelPattern::StartsWith(v) => LabelPattern::StartsWith(trimmed(v)?),
-            LabelPattern::EndsWith(v) => LabelPattern::EndsWith(trimmed(v)?),
-            LabelPattern::Contains(v) => LabelPattern::Contains(trimmed(v)?),
-        };
+        let label_pattern = super::trimmed_label_pattern(body.label_pattern, MAX_VALUE_LEN)?;
         if body.amount.is_some_and(|a| a <= Decimal::ZERO) {
             return Err(AppError::BadRequest("amount must be positive".to_string()));
         }
@@ -239,6 +226,7 @@ mod tests {
             ignore_rule_id: None,
             category_id: None,
             budget_category_id: None,
+            transfer: None,
             splits: vec![],
         }
     }

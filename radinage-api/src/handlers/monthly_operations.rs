@@ -97,6 +97,7 @@ mod tests {
             ignore_rule_id: None,
             category_id: None,
             budget_category_id: None,
+            transfer: None,
             splits: vec![],
         }
     }

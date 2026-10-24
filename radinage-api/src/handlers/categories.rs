@@ -103,21 +103,9 @@ impl TryFrom<CategoryRequest> for CategoryFields {
 }
 
 fn trimmed_rule(pattern: LabelPattern) -> AppResult<CategoryRule> {
-    let trim = |value: String| {
-        let value = value.trim().to_string();
-        if value.is_empty() || value.chars().count() > MAX_PATTERN_LEN {
-            return Err(AppError::BadRequest(format!(
-                "rule values must be 1 to {MAX_PATTERN_LEN} characters"
-            )));
-        }
-        Ok(value)
-    };
-    let label_pattern = match pattern {
-        LabelPattern::StartsWith(v) => LabelPattern::StartsWith(trim(v)?),
-        LabelPattern::EndsWith(v) => LabelPattern::EndsWith(trim(v)?),
-        LabelPattern::Contains(v) => LabelPattern::Contains(trim(v)?),
-    };
-    Ok(CategoryRule { label_pattern })
+    Ok(CategoryRule {
+        label_pattern: super::trimmed_label_pattern(pattern, MAX_PATTERN_LEN)?,
+    })
 }
 
 /// Body of an apply of a category's rules.
@@ -236,7 +224,7 @@ pub async fn apply_category<U, O: OperationRepository, B, P, C: CategoryReposito
         {
             continue;
         }
-        if op.is_split() || (!body.force && op.category_id.is_some()) {
+        if op.is_split() || op.transfer.is_some() || (!body.force && op.category_id.is_some()) {
             skipped += 1;
             continue;
         }
@@ -323,6 +311,7 @@ mod tests {
             ignore_rule_id: None,
             category_id,
             budget_category_id: None,
+            transfer: None,
             splits: if split {
                 vec![OperationSplit {
                     id: Uuid::new_v4(),

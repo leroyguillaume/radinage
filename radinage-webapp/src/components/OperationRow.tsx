@@ -1,8 +1,11 @@
 import { Badge, Box, Checkbox, Text, UnstyledButton } from "@mantine/core";
 import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
+import { TransferBadge } from "@/components/TransferBadge";
 import { formatIsoDate, formatSignedAmount } from "@/lib/format";
+import { useAccounts } from "@/lib/hooks";
 import { balanceTextColor } from "@/lib/tones";
+import { transferFlow, transferTone } from "@/lib/transfers";
 import type { OperationResponse } from "@/lib/types";
 import { palette } from "@/theme";
 
@@ -47,6 +50,9 @@ export function OperationRow({
 	selection,
 }: OperationRowProps) {
 	const { t, i18n } = useTranslation();
+	const accounts = useAccounts().data ?? [];
+	const flow = transferFlow(op, accounts);
+	const amountColor = flow ? transferTone(flow).text : balanceTextColor(amount);
 
 	return (
 		<Box
@@ -79,6 +85,7 @@ export function OperationRow({
 						{op.label}
 					</Text>
 					{badge}
+					{op.transfer && <TransferBadge op={op} accounts={accounts} />}
 					{op.ignored && (
 						<Badge size="sm" color="gray" tt="none" flex="none">
 							{op.ignoreRuleId === null
@@ -90,7 +97,7 @@ export function OperationRow({
 				<Text
 					fw={700}
 					className="tabular-nums [grid-area:amount] sm:text-right"
-					c={op.ignored ? "dimmed" : balanceTextColor(amount)}
+					c={op.ignored ? "dimmed" : amountColor}
 					td={op.ignored ? "line-through" : undefined}
 					style={{ whiteSpace: "nowrap" }}
 				>

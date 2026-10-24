@@ -73,6 +73,8 @@ interface MonthForecast {
 	income: number;
 	expenses: number;
 	savings: number;
+	/** Money taken back from savings, positive: net savings are `savings + withdrawals`. */
+	withdrawals: number;
 	balance: number;
 	committed: number;
 	unbudgetedForecast: number;
@@ -87,11 +89,19 @@ function toMonthForecast(m: ForecastMonth): MonthForecast {
 		income: Number(m.income),
 		expenses: Number(m.expenses),
 		savings: Number(m.savings),
+		withdrawals: Number(m.withdrawals),
 		balance: Number(m.balance),
 		committed: Number(m.committed),
 		unbudgetedForecast: Number(m.unbudgetedForecast),
 		cumulative: Number(m.cumulative),
 	};
+}
+
+/** Savings gold, orange once more was taken back from savings than was put in. */
+function netSavingsTone(savings: number, withdrawals: number): Tone {
+	return savings + withdrawals > 0
+		? budgetTypeTones.expense
+		: budgetTypeTones.savings;
 }
 
 function daysInMonth({ year, month }: YearMonth): number {
@@ -482,7 +492,7 @@ function MonthlyTable({
 	onSelectMonth,
 }: ForecastViewProps) {
 	const { t } = useTranslation();
-	const { income, expense, savings } = budgetTypeTones;
+	const { income, expense } = budgetTypeTones;
 	return (
 		<Paper component="section" p={0} style={{ overflow: "hidden" }}>
 			<Box
@@ -592,8 +602,18 @@ function MonthlyTable({
 											</Text>
 										)}
 									</Table.Td>
-									<Table.Td ta="right" c={savings.text}>
-										{formatAmount(m.savings)}
+									<Table.Td
+										ta="right"
+										c={netSavingsTone(m.savings, m.withdrawals).text}
+									>
+										{formatAmount(m.savings + m.withdrawals)}
+										{m.withdrawals !== 0 && (
+											<Text size="xs" fw={400} c="dimmed">
+												{t("forecast.withdrawn", {
+													amount: formatAmount(m.withdrawals),
+												})}
+											</Text>
+										)}
 									</Table.Td>
 									<Table.Td ta="right" fw={600} c={balanceTextColor(m.balance)}>
 										{formatSignedAmount(m.balance)}
@@ -892,6 +912,7 @@ interface SurplusCardProps {
 	income: number;
 	expenses: number;
 	savings: number;
+	withdrawals: number;
 	unbudgetedRate: number | null;
 	compact: boolean;
 }
@@ -901,6 +922,7 @@ function SurplusCard({
 	income,
 	expenses,
 	savings,
+	withdrawals,
 	unbudgetedRate,
 	compact,
 }: SurplusCardProps) {
@@ -940,11 +962,25 @@ function SurplusCard({
 						tone={budgetTypeTones.expense}
 					/>
 					<TotalRow
-						label={t("forecast.totalSavings")}
-						amount={savings}
-						ratio={shareOfIncome(savings)}
-						tone={budgetTypeTones.savings}
+						label={
+							withdrawals === 0
+								? t("forecast.totalSavings")
+								: t("forecast.netSavings")
+						}
+						amount={savings + withdrawals}
+						ratio={shareOfIncome(Math.min(0, savings + withdrawals))}
+						tone={netSavingsTone(savings, withdrawals)}
 					/>
+					{withdrawals !== 0 && (
+						<Text size="sm" c="dimmed">
+							{t("forecast.savingsDetail", {
+								saved: formatAmount(-savings),
+								withdrawn: formatAmount(withdrawals),
+							})}
+							{savings + withdrawals > 0 &&
+								` · ${t("forecast.negativeSavings")}`}
+						</Text>
+					)}
 					{unbudgetedRate !== null && (
 						<Text size="sm" c="dimmed" mt="auto">
 							{t("forecast.unbudgetedRate", {
@@ -1084,6 +1120,7 @@ function ForecastPage() {
 			income={Number(totals?.income ?? 0)}
 			expenses={Number(totals?.expenses ?? 0)}
 			savings={Number(totals?.savings ?? 0)}
+			withdrawals={Number(totals?.withdrawals ?? 0)}
 			unbudgetedRate={unbudgetedRate}
 			compact={isMobile}
 		/>

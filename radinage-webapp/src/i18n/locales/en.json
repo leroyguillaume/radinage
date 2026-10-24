@@ -63,7 +63,8 @@
 			"expenses": "Expenses",
 			"income": "Income",
 			"savings": "Savings",
-			"balance": "Balance"
+			"balance": "Balance",
+			"transfers": "Transfers"
 		},
 		"split": {
 			"title": "Split operation",
@@ -567,7 +568,11 @@
 			"monthTotals": "Month totals",
 			"noBudgets": "No budget this month.",
 			"fetchError": "Failed to load the month's details"
-		}
+		},
+		"netSavings": "Net savings",
+		"savingsDetail": "{{saved}} paid in, {{withdrawn}} taken back",
+		"withdrawn": "incl. {{amount}} taken back",
+		"negativeSavings": "More taken back than paid in"
 	},
 	"nav": {
 		"operations": "Operations",
@@ -671,7 +676,7 @@
 		"imported": "I import this account's statements",
 		"importedHint": "Its balance follows from the imported operations, and is where the summary starts from.",
 		"notImportedHint": "It is worth the last balance you read on it, and stays out of the summary.",
-		"savingsHint": "It is worth the last balance you read on it, plus what the savings budgets paying into it saved since, and stays out of the summary.",
+		"savingsHint": "It is worth the last balance you read on it, plus what transfers and the savings budgets paid into it since, minus what was taken back, and stays out of the summary.",
 		"savedBy": "Fed by {{budgets}}",
 		"savedInto": "Savings budgets pay into this account: it must stay a savings account.",
 		"startingBalance": "Starting point",
@@ -713,14 +718,15 @@
 			"history": "Balance history",
 			"noBalance": "No balance recorded: record the balance your bank shows to follow this account.",
 			"today": "Today",
-			"todayEstimated": "Estimated: latest balance + payments in",
+			"todayEstimated": "Estimated: latest balance + payments in and transfers",
 			"todayComputed": "Computed: latest balance + operations",
 			"estimation": "Estimate: {{amount}}",
 			"firstReading": "First balance",
 			"gapHint": "The gap compares each balance with that day's estimate: interest, market changes, fees or missing operations.",
 			"correct": "Correct the balance of {{date}}",
 			"deleteReading": "Delete the balance of {{date}}",
-			"confirmDelete": "Delete the balance of {{date}}?"
+			"confirmDelete": "Delete the balance of {{date}}?",
+			"takenSince": "− {{amount}} taken back since"
 		},
 		"balanceModal": {
 			"title": "Record a balance · {{name}}",
@@ -730,7 +736,8 @@
 			"gap": "Gap: interest, market changes, fees",
 			"replaces": "This balance replaces the estimate: later movements add up from it. Earlier balances stay in the history.",
 			"dateTaken": "A balance is already recorded on that date."
-		}
+		},
+		"transfersInto": "Transfers land on this account: it must keep its type."
 	},
 	"activate": {
 		"title": "Activate your account",
@@ -855,5 +862,70 @@
 		"sheetIgnoredByRule": "Ignored automatically by the rule {{rule}}: left out of totals, budgets and forecasts",
 		"seeRule": "See the rule",
 		"ignoredByRule": "Ignored by a rule"
+	},
+	"transfers": {
+		"nature": "Kind",
+		"natures": {
+			"operation": "Operation",
+			"transfer": "Transfer"
+		},
+		"toAccount": "To account",
+		"fromAccount": "From account",
+		"toHint": "The operation is a debit: the money goes to this account.",
+		"fromHint": "The operation is a credit: the money comes from this account.",
+		"accountPlaceholder": "Pick the account",
+		"flows": {
+			"toSavings": "Counted as savings: {{amount}} put aside on {{account}}.",
+			"fromSavings": "Taken back from savings: {{amount}} withdrawn from {{account}}, deducted from net savings. It is not income.",
+			"internal": "Internal transfer: neither income nor expense. It still moves the balance of both accounts."
+		},
+		"savingsBudget": "Savings budget",
+		"savingsBudgetHint": "Optional. Only the savings budgets paying into this account are offered.",
+		"counterpart": "Other side on {{account}}",
+		"linked": "Linked",
+		"waiting": "No other side yet: it will be linked when the statement of {{account}} is imported.",
+		"badgeTo": "To {{account}}",
+		"badgeFrom": "From {{account}}",
+		"always": "Always for this label",
+		"byRule": "Made by the rule {{rule}}",
+		"seeRules": "See the account's rules",
+		"section": "Transfers",
+		"internalStat": "Internal transfers",
+		"fedBy": "{{accounts}} (transfers)",
+		"rules": {
+			"title": "Transfer rules",
+			"description": "An operation imported on this account whose label matches becomes a transfer with the other account.",
+			"incomingTitle": "Rules transferring here",
+			"on": "on {{account}}",
+			"with": "Transfer with {{account}}",
+			"otherAccount": "Other account",
+			"empty": "No rule for this account.",
+			"add": "Add a rule",
+			"createTitle": "New transfer rule",
+			"create": "Create the rule",
+			"hint": "Debit: transfer to the other account. Credit: transfer from the other account.",
+			"errorValue": "The value is required",
+			"errorAccount": "Pick the other account",
+			"errorLimit": "You have reached the maximum number of transfer rules",
+			"saveError": "Error saving the rule",
+			"fetchError": "Unable to load the transfer rules",
+			"edit": "Edit the rule {{rule}}",
+			"delete": "Delete the rule {{rule}}",
+			"confirmDelete": "Delete the rule {{rule}}? The transfers it made become ordinary operations again.",
+			"applyTitle": "Apply the rule",
+			"applyPrompt": "The rule will apply to the next imports. Also mark the existing operations it matches as transfers?",
+			"applyResult": "{{transferred}} operation(s) marked as transfers, {{skipped}} left as they were",
+			"applyError": "Error applying the rule",
+			"later": "Later",
+			"apply": "Apply"
+		},
+		"account": {
+			"title": "Transfers",
+			"empty": "No transfer with this account.",
+			"total_one": "{{count}} transfer in all",
+			"total_other": "{{count}} transfers in all",
+			"from": "from {{account}}",
+			"to": "to {{account}}"
+		}
 	}
 }

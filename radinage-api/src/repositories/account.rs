@@ -1,18 +1,28 @@
+mod transfer_rule;
+
 use crate::{
-    domain::account::{Account, AccountBalance, AccountFields, BalanceEntry, DailyMovement},
+    domain::{
+        account::{Account, AccountBalance, AccountFields, BalanceEntry, DailyMovement},
+        transfer::{TransferRule, TransferRuleFields},
+    },
     error::{AppError, AppResult},
 };
 use sqlx::{PgPool, Row, postgres::PgRow};
 use uuid::Uuid;
 
-/// The amounts linked to the savings budgets of account `a`, by bank date: what left the
-/// account they are on to land on `a`, so their sign is flipped when they are added to it.
-/// Ignored operations count towards no budget, so they saved nothing.
+/// The amounts that left the account they are on to land on account `a`, by bank date, so
+/// their sign is flipped when they are added to it: the transfers with `a`, ignored ones
+/// included since they still moved the money, and the other amounts linked to its savings
+/// budgets. An ignored operation counts towards no budget, so it saved nothing; a transfer
+/// with another account landed on that one, whatever its budget.
 macro_rules! saved_amounts {
     () => {
         "SELECT o.date, o.amount FROM operations o
+         WHERE o.transfer_account_id = a.id
+         UNION ALL
+         SELECT o.date, o.amount FROM operations o
          JOIN budgets sb ON sb.id = o.budget_link_id
-         WHERE sb.account_id = a.id AND NOT o.ignored
+         WHERE sb.account_id = a.id AND NOT o.ignored AND o.transfer_account_id IS NULL
            AND NOT EXISTS (SELECT 1 FROM operation_splits s WHERE s.operation_id = o.id)
          UNION ALL
          SELECT o.date, s.amount FROM operation_splits s
@@ -32,7 +42,9 @@ const ACCOUNT_SELECT: &str = concat!(
                                WHERE o.account_id = a.id AND o.date > b.date), 0)
                 ELSE -COALESCE((SELECT SUM(saved.amount) FROM (",
     saved_amounts!(),
-    ") saved WHERE saved.date > b.date), 0) END AS current_balance
+    ") saved WHERE saved.date > b.date), 0) END AS current_balance,
+            EXISTS (SELECT 1 FROM operations t WHERE t.transfer_account_id = a.id)
+                AS transferred_into
      FROM accounts a
      LEFT JOIN LATERAL (SELECT id, amount, date FROM account_balances
                         WHERE account_id = a.id ORDER BY date DESC LIMIT 1) b ON TRUE"
@@ -40,7 +52,7 @@ const ACCOUNT_SELECT: &str = concat!(
 
 /// What account `$1` of user `$2` moved each day, the way its current balance adds it up:
 /// every operation of an account receiving them, ignored ones included since they still
-/// moved the money, or else what its savings budgets saved.
+/// moved the money, or else what was transferred to it and what its savings budgets saved.
 const DAILY_MOVEMENTS: &str = concat!(
     "SELECT m.date, SUM(m.amount) AS amount FROM accounts a
      CROSS JOIN LATERAL (
@@ -105,8 +117,9 @@ pub trait AccountRepository: Send + Sync + 'static {
         user_id: Uuid,
     ) -> impl std::future::Future<Output = AppResult<bool>> + Send;
 
-    /// Delete an account and its balances, unlinking its savings budgets. Returns `false` if it does not exist or belongs to
-    /// another user, `AppError::Conflict` while operations or import profiles point at it.
+    /// Delete an account and its balances and transfer rules, unlinking its savings budgets.
+    /// Returns `false` if it does not exist or belongs to another user, `AppError::Conflict`
+    /// while operations or import profiles point at it.
     fn delete(
         &self,
         id: Uuid,
@@ -154,6 +167,50 @@ pub trait AccountRepository: Send + Sync + 'static {
         account_id: Uuid,
         user_id: Uuid,
     ) -> impl std::future::Future<Output = AppResult<bool>> + Send;
+
+    /// All transfer rules of a user, oldest first: the order they are tried in.
+    fn list_transfer_rules(
+        &self,
+        user_id: Uuid,
+    ) -> impl std::future::Future<Output = AppResult<Vec<TransferRule>>> + Send;
+
+    /// Number of transfer rules a user has.
+    fn count_transfer_rules(
+        &self,
+        user_id: Uuid,
+    ) -> impl std::future::Future<Output = AppResult<i64>> + Send;
+
+    /// The rule, or `None` if it does not exist or belongs to another user.
+    fn find_transfer_rule(
+        &self,
+        id: Uuid,
+        user_id: Uuid,
+    ) -> impl std::future::Future<Output = AppResult<Option<TransferRule>>> + Send;
+
+    /// Create a rule between two accounts of the user.
+    fn create_transfer_rule(
+        &self,
+        user_id: Uuid,
+        fields: &TransferRuleFields,
+    ) -> impl std::future::Future<Output = AppResult<TransferRule>> + Send;
+
+    /// Replace a rule's fields, leaving the transfers it already made as they are. Returns
+    /// `None` if it does not exist or belongs to another user.
+    fn update_transfer_rule(
+        &self,
+        id: Uuid,
+        user_id: Uuid,
+        fields: &TransferRuleFields,
+    ) -> impl std::future::Future<Output = AppResult<Option<TransferRule>>> + Send;
+
+    /// Delete a rule and undo the transfers it made, with their other side unless a rule of
+    /// its own made it a transfer. Returns `false` if it does not exist or belongs to another
+    /// user.
+    fn delete_transfer_rule(
+        &self,
+        id: Uuid,
+        user_id: Uuid,
+    ) -> impl std::future::Future<Output = AppResult<bool>> + Send;
 }
 
 /// PostgreSQL-backed account repository.
@@ -191,6 +248,7 @@ fn row_to_account(row: &PgRow) -> AppResult<Account> {
                 balance: AccountBalance { amount, date },
             }),
         current_balance: row.try_get("current_balance")?,
+        transferred_into: row.try_get("transferred_into")?,
         created_at: row.try_get("created_at")?,
     })
 }
@@ -333,7 +391,9 @@ impl AccountRepository for PgAccountRepository {
             .map_err(|e| match e {
                 sqlx::Error::Database(ref db) if db.is_foreign_key_violation() => {
                     AppError::Conflict(
-                        "the account still holds operations or import profiles".to_string(),
+                        "the account still holds operations or import profiles, or operations \
+                         are transfers with it"
+                            .to_string(),
                     )
                 }
                 other => AppError::Database(other),
@@ -431,6 +491,39 @@ impl AccountRepository for PgAccountRepository {
         .execute(&self.pool)
         .await?;
         Ok(result.rows_affected() > 0)
+    }
+
+    async fn list_transfer_rules(&self, user_id: Uuid) -> AppResult<Vec<TransferRule>> {
+        transfer_rule::list(&self.pool, user_id).await
+    }
+
+    async fn count_transfer_rules(&self, user_id: Uuid) -> AppResult<i64> {
+        transfer_rule::count(&self.pool, user_id).await
+    }
+
+    async fn find_transfer_rule(&self, id: Uuid, user_id: Uuid) -> AppResult<Option<TransferRule>> {
+        transfer_rule::find(&self.pool, id, user_id).await
+    }
+
+    async fn create_transfer_rule(
+        &self,
+        user_id: Uuid,
+        fields: &TransferRuleFields,
+    ) -> AppResult<TransferRule> {
+        transfer_rule::create(&self.pool, user_id, fields).await
+    }
+
+    async fn update_transfer_rule(
+        &self,
+        id: Uuid,
+        user_id: Uuid,
+        fields: &TransferRuleFields,
+    ) -> AppResult<Option<TransferRule>> {
+        transfer_rule::update(&self.pool, id, user_id, fields).await
+    }
+
+    async fn delete_transfer_rule(&self, id: Uuid, user_id: Uuid) -> AppResult<bool> {
+        transfer_rule::delete(&self.pool, id, user_id).await
     }
 }
 

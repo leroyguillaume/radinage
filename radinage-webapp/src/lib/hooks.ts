@@ -20,6 +20,7 @@ import type {
 	ApplyBudgetResponse,
 	ApplyCategoryResponse,
 	ApplyIgnoreRuleResponse,
+	ApplyTransferRuleResponse,
 	BalanceEntry,
 	BalancePoint,
 	BalanceReading,
@@ -46,7 +47,10 @@ import type {
 	OperationSplitRequest,
 	OperationsUpdatedResponse,
 	ResetPasswordResponse,
+	SetTransferRequest,
 	SummaryResponse,
+	TransferRuleRequest,
+	TransferRuleResponse,
 	YearMonth,
 } from "@/lib/types";
 
@@ -348,6 +352,45 @@ export function useSetOperationIgnored() {
 	});
 }
 
+/** Makes an operation a transfer with another account, or an ordinary one again with `null`. */
+export function useSetOperationTransfer() {
+	const invalidate = useInvalidateOperationData();
+	return useMutation({
+		mutationFn: ({
+			opId,
+			transfer,
+		}: {
+			opId: string;
+			transfer: SetTransferRequest | null;
+		}) =>
+			apiFetch<OperationResponse>(`/operations/${opId}/transfer`, {
+				method: transfer ? "PUT" : "DELETE",
+				body: transfer ? JSON.stringify(transfer) : undefined,
+			}),
+		onSuccess: invalidate,
+	});
+}
+
+/** One operation, such as the other side of a transfer, which may be on another account. */
+export function useOperation(id: string | null) {
+	return useQuery({
+		queryKey: ["operation-search", "operation", id],
+		queryFn: () => apiFetch<OperationResponse>(`/operations/${id}`),
+		enabled: id !== null,
+	});
+}
+
+/** The latest transfers with an account, ignored ones included, and how many there are. */
+export function useAccountTransfers(accountId: string, pageSize: number) {
+	return useQuery({
+		queryKey: ["operation-search", "transfers", accountId, pageSize],
+		queryFn: () =>
+			apiFetch<OperationSearchResponse>(
+				`/operations?transferAccountId=${accountId}&ignored=included&pageSize=${pageSize}`,
+			),
+	});
+}
+
 export function useSplitOperation() {
 	const invalidate = useInvalidateOperationData();
 	return useMutation({
@@ -432,6 +475,8 @@ function useInvalidateAccounts() {
 	return () => {
 		queryClient.invalidateQueries({ queryKey: accountsKey });
 		queryClient.invalidateQueries({ queryKey: ["forecast"] });
+		// Deleting an account deletes the transfer rules naming it.
+		queryClient.invalidateQueries({ queryKey: transferRulesKey });
 	};
 }
 
@@ -560,6 +605,7 @@ export function useImportData() {
 			queryClient.invalidateQueries({ queryKey: ["budgets"] });
 			queryClient.invalidateQueries({ queryKey: categoriesKey });
 			queryClient.invalidateQueries({ queryKey: ignoreRulesKey });
+			queryClient.invalidateQueries({ queryKey: transferRulesKey });
 			queryClient.invalidateQueries({ queryKey: ["summary"] });
 			queryClient.invalidateQueries({ queryKey: ["forecast"] });
 			queryClient.invalidateQueries({ queryKey: accountsKey });
@@ -773,6 +819,57 @@ export function useApplyIgnoreRule() {
 	return useMutation({
 		mutationFn: (id: string) =>
 			apiFetch<ApplyIgnoreRuleResponse>(`/ignore-rules/${id}/apply`, {
+				method: "POST",
+			}),
+		onSuccess: invalidate,
+	});
+}
+
+const transferRulesKey = ["transfer-rules"];
+
+export function useTransferRules() {
+	return useQuery({
+		queryKey: transferRulesKey,
+		queryFn: () => apiFetch<TransferRuleResponse[]>("/transfer-rules"),
+	});
+}
+
+export function useSaveTransferRule() {
+	const queryClient = useQueryClient();
+	return useMutation({
+		mutationFn: ({ id, body }: { id?: string; body: TransferRuleRequest }) =>
+			apiFetch<TransferRuleResponse>(
+				id === undefined ? "/transfer-rules" : `/transfer-rules/${id}`,
+				{
+					method: id === undefined ? "POST" : "PUT",
+					body: JSON.stringify(body),
+				},
+			),
+		onSuccess: () => {
+			queryClient.invalidateQueries({ queryKey: transferRulesKey });
+		},
+	});
+}
+
+export function useDeleteTransferRule() {
+	const queryClient = useQueryClient();
+	const invalidate = useInvalidateOperationData();
+	return useMutation({
+		mutationFn: (id: string) =>
+			apiFetch<void>(`/transfer-rules/${id}`, { method: "DELETE" }),
+		onSuccess: () => {
+			// The transfers the rule made become ordinary operations again.
+			queryClient.invalidateQueries({ queryKey: transferRulesKey });
+			invalidate();
+		},
+	});
+}
+
+export function useApplyTransferRule() {
+	const invalidate = useInvalidateOperationData();
+	return useMutation({
+		mutationFn: (id: string) =>
+			apiFetch<ApplyTransferRuleResponse>(`/transfer-rules/${id}/apply`, {
 				method: "POST",
 			}),
 		onSuccess: invalidate,

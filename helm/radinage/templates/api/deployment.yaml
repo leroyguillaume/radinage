@@ -44,6 +44,8 @@ spec:
               value: {{ $app.maxCategoriesPerUser | quote }}
             - name: MAX_IGNORE_RULES_PER_USER
               value: {{ $app.maxIgnoreRulesPerUser | quote }}
+            - name: MAX_TRANSFER_RULES_PER_USER
+              value: {{ $app.maxTransferRulesPerUser | quote }}
             - name: MAX_ACCOUNTS_PER_USER
               value: {{ $app.maxAccountsPerUser | quote }}
             - name: DATABASE_URL

@@ -1,13 +1,17 @@
 use crate::{
     AppState,
     auth::middleware::AuthUser,
-    domain::operation::{
-        BudgetLink, NewOperation, NewOperationSplit, Operation, OperationSplit, validate_splits,
+    domain::{
+        budget::Budget,
+        operation::{
+            BudgetLink, NewOperation, NewOperationSplit, Operation, OperationSplit, validate_splits,
+        },
+        transfer::Transfer,
     },
     error::{AppError, AppResult},
     handlers::{
         accounts::account_receiving_operations, categories::ensure_category_is_users,
-        ignore_rules::auto_ignore_operation,
+        ignore_rules::auto_ignore_operation, transfer_rules::auto_transfer_operation,
     },
     repositories::{
         AccountRepository, BudgetRepository, CategoryFilter, CategoryRepository,
@@ -58,9 +62,37 @@ pub struct OperationResponse {
     /// Category the operation counts towards: its own, else its linked budget's. Always `null`
     /// when split, each part carrying its own.
     pub effective_category_id: Option<Uuid>,
+    /// Transfer with another of the user's accounts, `null` when the operation is not one.
+    pub transfer: Option<TransferResponse>,
     /// Parts this operation is split into, ordered by position; empty when not split.
     /// A split operation is accounted through its parts and its own budget link is unlinked.
     pub splits: Vec<OperationSplitResponse>,
+}
+
+/// An operation's transfer with another of the user's accounts. A transfer with a savings
+/// account counts as savings when the operation is a debit, deducted from savings when it is
+/// a credit; a transfer with a checking account is neither income nor expense.
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct TransferResponse {
+    /// The other account: where the money went, or where it came from.
+    pub account_id: Uuid,
+    /// Transfer rule that made the operation a transfer, `null` when set by hand or by
+    /// pairing.
+    pub rule_id: Option<Uuid>,
+    /// The operation on the other side, when the other account receives operations and it
+    /// has been found.
+    pub operation_id: Option<Uuid>,
+}
+
+impl From<Transfer> for TransferResponse {
+    fn from(t: Transfer) -> Self {
+        Self {
+            account_id: t.account_id,
+            rule_id: t.rule_id,
+            operation_id: t.operation_id,
+        }
+    }
 }
 
 /// One part of a split operation. It shares the operation's ignored flag.
@@ -111,6 +143,7 @@ impl From<Operation> for OperationResponse {
             ignore_rule_id: op.ignore_rule_id,
             category_id: op.category_id,
             effective_category_id,
+            transfer: op.transfer.map(Into::into),
             splits: op
                 .splits
                 .into_iter()
@@ -169,6 +202,18 @@ pub struct SetCategoryRequest {
 pub struct SetAccountRequest {
     /// One of the caller's imported checking accounts.
     pub account_id: Uuid,
+}
+
+/// Body of `PUT /operations/{id}/transfer`.
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct SetTransferRequest {
+    /// Another of the caller's accounts: where the money went, or where it came from.
+    pub account_id: Uuid,
+    /// Operation of that account on the other side of the transfer, of opposite amount; when
+    /// omitted, the closest one by date within a few days is looked for.
+    #[serde(default)]
+    pub counterpart_id: Option<Uuid>,
 }
 
 /// Most operations a single request changes at once.
@@ -300,6 +345,10 @@ pub struct ListOperationsQuery {
     /// accounts.
     #[serde(default)]
     pub account_id: Vec<Uuid>,
+    /// Include only the transfers with one of these accounts. Repeat the parameter for
+    /// several accounts.
+    #[serde(default)]
+    pub transfer_account_id: Vec<Uuid>,
 }
 
 fn default_page() -> Option<u32> {
@@ -397,6 +446,7 @@ pub async fn list_operations<U, O: OperationRepository, B, P, C, R, A>(
         },
         budget_ids: q.budget_id,
         account_ids: q.account_id,
+        transfer_account_ids: q.transfer_account_id,
     };
 
     let (ops, totals) = state.operation_repo.list(auth_user.id, &params).await?;
@@ -466,8 +516,11 @@ pub async fn create_operation<
         ignore_rule_id: None,
         category_id: None,
         budget_category_id: None,
+        transfer: None,
         splits: Vec::new(),
     };
+    let transfer_rules = state.account_repo.list_transfer_rules(user_id).await?;
+    let op = auto_transfer_operation(&state.operation_repo, &transfer_rules, op).await?;
     auto_match_operation(
         &state.operation_repo,
         &state.budget_repo,
@@ -508,6 +561,19 @@ pub async fn update_operation<U, O: OperationRepository, B, P, C, R, A>(
     if !found {
         return Err(AppError::NotFound);
     }
+    // A new amount may no longer match the other side, nor the budget of money put aside.
+    if let Some(transfer) = current.transfer
+        && current.amount != body.amount
+    {
+        state
+            .operation_repo
+            .set_transfer(id, auth_user.id, transfer.account_id, transfer.rule_id)
+            .await?;
+        state
+            .operation_repo
+            .pair_transfer(id, auth_user.id, None)
+            .await?;
+    }
     let op = state.operation_repo.find_by_id(id, auth_user.id).await?;
     Ok(Json(op.into()))
 }
@@ -534,7 +600,20 @@ pub async fn link_budget<U, O: OperationRepository, B: BudgetRepository, P, C, R
     if !state.budget_repo.exists(body.budget_id, user_id).await? {
         return Err(AppError::NotFound);
     }
-    ensure_not_split(&state.operation_repo, op_id, user_id, "budget link").await?;
+    let op = ensure_not_split(&state.operation_repo, op_id, user_id, "budget link").await?;
+    if op.transfer.is_some() {
+        let budget = state
+            .budget_repo
+            .find_by_id(body.budget_id, user_id)
+            .await?;
+        if !op.accepts_budget(&budget) {
+            return Err(AppError::Conflict(
+                "the operation is a transfer: only money put on a savings account can be linked \
+                 to a budget, a savings one sending its money there"
+                    .to_string(),
+            ));
+        }
+    }
 
     let link = BudgetLink::Manual {
         budget_id: body.budget_id,
@@ -670,7 +749,12 @@ async fn store_category(
     user_id: Uuid,
     category_id: Option<Uuid>,
 ) -> AppResult<Json<OperationResponse>> {
-    ensure_not_split(op_repo, id, user_id, "category").await?;
+    let op = ensure_not_split(op_repo, id, user_id, "category").await?;
+    if op.transfer.is_some() && category_id.is_some() {
+        return Err(AppError::Conflict(
+            "the operation is a transfer: it has no category".to_string(),
+        ));
+    }
     if !op_repo.set_category(id, user_id, category_id).await? {
         return Err(AppError::NotFound);
     }
@@ -726,6 +810,11 @@ pub async fn replace_splits<
 ) -> AppResult<Json<OperationResponse>> {
     let user_id = auth_user.id;
     let op = state.operation_repo.find_by_id(id, user_id).await?;
+    if op.transfer.is_some() {
+        return Err(AppError::Conflict(
+            "the operation is a transfer: it cannot be split".to_string(),
+        ));
+    }
 
     let splits: Vec<NewOperationSplit> = body.splits.into_iter().map(Into::into).collect();
     validate_splits(op.amount, &splits).map_err(|e| AppError::BadRequest(e.to_string()))?;
@@ -768,26 +857,130 @@ pub async fn clear_splits<U, O: OperationRepository, B, P, C, R, A>(
     Ok(Json(op.into()))
 }
 
-/// Reject changes to the budget link or category of a split operation, which is accounted
-/// through its parts.
+/// The operation, unless it is split: its budget link or category cannot change then, since
+/// it is accounted through its parts.
 async fn ensure_not_split(
     op_repo: &impl OperationRepository,
     id: Uuid,
     user_id: Uuid,
     what: &str,
-) -> AppResult<()> {
-    if op_repo.find_by_id(id, user_id).await?.is_split() {
+) -> AppResult<Operation> {
+    let op = op_repo.find_by_id(id, user_id).await?;
+    if op.is_split() {
         return Err(AppError::Conflict(format!(
             "the operation is split: its {what} cannot be changed"
         )));
     }
-    Ok(())
+    Ok(op)
+}
+
+pub async fn set_transfer<U, O: OperationRepository, B, P, C, R, A: AccountRepository>(
+    State(state): State<AppState<U, O, B, P, C, R, A>>,
+    auth_user: AuthUser,
+    Path(id): Path<Uuid>,
+    Json(body): Json<SetTransferRequest>,
+) -> AppResult<Json<OperationResponse>> {
+    let user_id = auth_user.id;
+    let op = state.operation_repo.find_by_id(id, user_id).await?;
+    if op.is_split() {
+        return Err(AppError::Conflict(
+            "the operation is split: it cannot be a transfer".to_string(),
+        ));
+    }
+    if body.account_id == op.account_id {
+        return Err(AppError::BadRequest(
+            "a transfer is with another account than the operation's".to_string(),
+        ));
+    }
+    if state
+        .account_repo
+        .find(body.account_id, user_id)
+        .await?
+        .is_none()
+    {
+        return Err(AppError::BadRequest(format!(
+            "unknown account {}",
+            body.account_id
+        )));
+    }
+    if let Some(counterpart_id) = body.counterpart_id {
+        let fits = match state
+            .operation_repo
+            .find_by_id(counterpart_id, user_id)
+            .await
+        {
+            Ok(c) => c.account_id == body.account_id && c.amount == -op.amount && !c.is_split(),
+            Err(AppError::NotFound) => false,
+            Err(e) => return Err(e),
+        };
+        if !fits {
+            return Err(AppError::BadRequest(format!(
+                "operation {counterpart_id} is not an operation of the other account of \
+                 opposite amount"
+            )));
+        }
+    }
+    // The same transfer again keeps the rule that made it and its other side.
+    let unchanged = op.transfer.is_some_and(|t| t.account_id == body.account_id);
+    if !unchanged {
+        state
+            .operation_repo
+            .set_transfer(id, user_id, body.account_id, None)
+            .await?;
+    }
+    if !unchanged || body.counterpart_id.is_some() {
+        state
+            .operation_repo
+            .pair_transfer(id, user_id, body.counterpart_id)
+            .await?;
+    }
+    let op = state.operation_repo.find_by_id(id, user_id).await?;
+    Ok(Json(op.into()))
+}
+
+pub async fn clear_transfer<
+    U,
+    O: OperationRepository,
+    B: BudgetRepository,
+    P,
+    C: CategoryRepository,
+    R,
+    A,
+>(
+    State(state): State<AppState<U, O, B, P, C, R, A>>,
+    auth_user: AuthUser,
+    Path(id): Path<Uuid>,
+) -> AppResult<Json<OperationResponse>> {
+    let user_id = auth_user.id;
+    let other_side = state
+        .operation_repo
+        .find_by_id(id, user_id)
+        .await?
+        .transfer
+        .and_then(|t| t.operation_id);
+    if !state.operation_repo.clear_transfer(id, user_id).await? {
+        return Err(AppError::NotFound);
+    }
+    // Marking a transfer cleared its category and budget: the rules may give them back.
+    for cleared in std::iter::once(id).chain(other_side) {
+        let op = state.operation_repo.find_by_id(cleared, user_id).await?;
+        auto_match_operation(
+            &state.operation_repo,
+            &state.budget_repo,
+            &state.category_repo,
+            &op,
+        )
+        .await?;
+    }
+    let op = state.operation_repo.find_by_id(id, user_id).await?;
+    Ok(Json(op.into()))
 }
 
 // ── Auto-matching helper ──────────────────────────────────────────────────────
 
 /// Run automatic budget and category matching for a single operation.
-/// A split operation is never matched; a manual budget link and an own category are kept.
+/// A split operation is never matched; a manual budget link and an own category are kept. A
+/// transfer is only matched to the budgets it accepts, and never to a category.
 pub async fn auto_match_operation<OR, BR, CR>(
     op_repo: &OR,
     budget_repo: &BR,
@@ -802,13 +995,18 @@ where
     if op.is_split() {
         return Ok(());
     }
-    if !op.budget_link.is_manual() {
-        let budgets = budget_repo.list_all_for_user(op.user_id).await?;
+    if !op.budget_link.is_manual() && op.may_have_budget() {
+        let budgets: Vec<Budget> = budget_repo
+            .list_all_for_user(op.user_id)
+            .await?
+            .into_iter()
+            .filter(|b| op.accepts_budget(b))
+            .collect();
         if let Some(budget_id) = MatcherServiceImpl.match_operation(op, &budgets) {
             op_repo.set_auto_link(op.id, budget_id).await?;
         }
     }
-    if op.category_id.is_none() {
+    if op.category_id.is_none() && op.transfer.is_none() {
         let categories = category_repo.list(op.user_id).await?;
         if let Some(category_id) = MatcherServiceImpl.match_category(op, &categories) {
             op_repo
@@ -857,6 +1055,7 @@ mod tests {
             ignore_rule_id: None,
             category_id: None,
             budget_category_id: None,
+            transfer: None,
             splits: vec![],
         }
     }
@@ -876,6 +1075,185 @@ mod tests {
             category_id: None,
             account_id: None,
             created_at: Utc::now(),
+        }
+    }
+
+    /// An operation of `user_id` that is a transfer with the checking account `account_id`.
+    fn internal_transfer(id: Uuid, user_id: Uuid, account_id: Uuid) -> Operation {
+        Operation {
+            transfer: Some(Transfer {
+                account_id,
+                account_kind: crate::domain::account::AccountKind::Checking,
+                rule_id: None,
+                operation_id: None,
+            }),
+            ..make_op(id, user_id)
+        }
+    }
+
+    /// `op_repo` finding `op` whatever id it is asked for.
+    fn finding(op: Operation) -> MockOperationRepository {
+        let mut op_repo = MockOperationRepository::new();
+        op_repo.expect_find_by_id().returning(move |_, _| {
+            let op = op.clone();
+            Box::pin(async move { Ok(op) })
+        });
+        op_repo
+    }
+
+    async fn put_transfer(
+        op_repo: MockOperationRepository,
+        user_id: Uuid,
+        id: Uuid,
+        body: serde_json::Value,
+    ) -> Response {
+        let app = build_test_router(make_test_state(
+            MockUserRepository::new(),
+            op_repo,
+            MockBudgetRepository::new(),
+        ));
+        let auth = auth_header(user_id, UserRole::User);
+        app.oneshot(json_request(
+            "PUT",
+            &format!("/operations/{id}/transfer"),
+            Some(&body.to_string()),
+            Some(&auth),
+        ))
+        .await
+        .unwrap()
+    }
+
+    #[tokio::test]
+    async fn set_transfer_marks_the_operation_then_pairs_it() {
+        let user_id = Uuid::new_v4();
+        let id = Uuid::new_v4();
+        let joint = Uuid::new_v4();
+        let mut op_repo = finding(make_op(id, user_id));
+        op_repo
+            .expect_set_transfer()
+            .withf(move |i, u, a, r| *i == id && *u == user_id && *a == joint && r.is_none())
+            .times(1)
+            .returning(|_, _, _, _| Box::pin(async { Ok(true) }));
+        op_repo
+            .expect_pair_transfer()
+            .withf(move |i, _, c| *i == id && c.is_none())
+            .times(1)
+            .returning(|_, _, _| Box::pin(async { Ok(None) }));
+
+        let resp = put_transfer(
+            op_repo,
+            user_id,
+            id,
+            serde_json::json!({"accountId": joint}),
+        )
+        .await;
+
+        assert_eq!(resp.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn the_same_transfer_again_keeps_its_rule_and_other_side() {
+        let user_id = Uuid::new_v4();
+        let id = Uuid::new_v4();
+        let joint = Uuid::new_v4();
+        let mut op_repo = finding(internal_transfer(id, user_id, joint));
+        op_repo.expect_set_transfer().never();
+        op_repo.expect_pair_transfer().never();
+
+        let resp = put_transfer(
+            op_repo,
+            user_id,
+            id,
+            serde_json::json!({"accountId": joint}),
+        )
+        .await;
+
+        assert_eq!(resp.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn set_transfer_refuses_the_own_account_a_split_operation_and_a_wrong_counterpart() {
+        let user_id = Uuid::new_v4();
+        let id = Uuid::new_v4();
+        let own = serde_json::json!({"accountId": Uuid::nil()});
+        let resp = put_transfer(finding(make_op(id, user_id)), user_id, id, own).await;
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+
+        let split = Operation {
+            splits: vec![OperationSplit {
+                id: Uuid::new_v4(),
+                amount: Decimal::new(-50, 0),
+                effective_date: None,
+                budget_id: None,
+                category_id: None,
+                budget_category_id: None,
+            }],
+            ..make_op(id, user_id)
+        };
+        let body = serde_json::json!({"accountId": Uuid::new_v4()});
+        let resp = put_transfer(finding(split), user_id, id, body).await;
+        assert_eq!(resp.status(), StatusCode::CONFLICT);
+
+        let joint = Uuid::new_v4();
+        let mut op_repo = finding(internal_transfer(id, user_id, joint));
+        op_repo
+            .expect_pair_transfer()
+            .returning(|_, _, _| Box::pin(async { Ok(None) }));
+        let body = serde_json::json!({"accountId": joint, "counterpartId": Uuid::new_v4()});
+        let resp = put_transfer(op_repo, user_id, id, body).await;
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn an_internal_transfer_takes_neither_budget_nor_category() {
+        let user_id = Uuid::new_v4();
+        let id = Uuid::new_v4();
+        let budget_id = Uuid::new_v4();
+        let mut op_repo = finding(internal_transfer(id, user_id, Uuid::new_v4()));
+        op_repo.expect_set_budget_link().never();
+        op_repo.expect_set_category().never();
+        let mut budget_repo = MockBudgetRepository::new();
+        budget_repo
+            .expect_exists()
+            .returning(|_, _| Box::pin(async { Ok(true) }));
+        budget_repo.expect_find_by_id().returning(|id, user_id| {
+            let mut budget = make_budget(id, user_id);
+            budget.budget_type = BudgetType::Savings;
+            Box::pin(async move { Ok(budget) })
+        });
+        let mut category_repo = MockCategoryRepository::new();
+        category_repo
+            .expect_exists()
+            .returning(|_, _| Box::pin(async { Ok(true) }));
+        let app = build_test_router(make_test_state_with_categories(
+            MockUserRepository::new(),
+            op_repo,
+            budget_repo,
+            category_repo,
+        ));
+        let auth = auth_header(user_id, UserRole::User);
+
+        for (uri, body) in [
+            (
+                format!("/operations/{id}/budget"),
+                serde_json::json!({"budgetId": budget_id}),
+            ),
+            (
+                format!("/operations/{id}/category"),
+                serde_json::json!({"categoryId": Uuid::new_v4()}),
+            ),
+        ] {
+            let resp = app
+                .clone()
+                .oneshot(json_request(
+                    "PUT",
+                    &uri,
+                    Some(&body.to_string()),
+                    Some(&auth),
+                ))
+                .await
+                .unwrap();
+            assert_eq!(resp.status(), StatusCode::CONFLICT, "{uri}");
         }
     }
 
@@ -949,6 +1327,7 @@ mod tests {
     async fn create_operation_inserts_and_returns_created() {
         let user_id = Uuid::new_v4();
         let mut op_repo = MockOperationRepository::new();
+        crate::test_util::no_waiting_transfers(&mut op_repo);
         let mut budget_repo = MockBudgetRepository::new();
 
         op_repo
@@ -1013,6 +1392,7 @@ mod tests {
                     },
                     balance: None,
                     current_balance: None,
+                    transferred_into: false,
                     created_at: chrono::Utc::now(),
                 }))
             })
@@ -1076,6 +1456,7 @@ mod tests {
             .expect_list_all_for_user()
             .returning(|_| Box::pin(async { Ok(vec![]) }));
         let mut op_repo = MockOperationRepository::new();
+        crate::test_util::no_waiting_transfers(&mut op_repo);
         op_repo
             .expect_insert()
             .returning(|_, _, _| Box::pin(async { Ok(()) }));
@@ -1653,6 +2034,110 @@ mod tests {
             .unwrap();
 
         assert_eq!(resp.status(), StatusCode::CONFLICT);
+    }
+
+    #[tokio::test]
+    async fn a_new_amount_makes_the_transfer_again_to_repair_it() {
+        let user_id = Uuid::new_v4();
+        let id = Uuid::new_v4();
+        let joint = Uuid::new_v4();
+        let mut op_repo = finding(internal_transfer(id, user_id, joint));
+        op_repo
+            .expect_update()
+            .returning(|_, _, _, _, _, _| Box::pin(async { Ok(true) }));
+        op_repo
+            .expect_set_transfer()
+            .withf(move |i, _, a, r| *i == id && *a == joint && r.is_none())
+            .times(1)
+            .returning(|_, _, _, _| Box::pin(async { Ok(true) }));
+        op_repo
+            .expect_pair_transfer()
+            .times(1)
+            .returning(|_, _, _| Box::pin(async { Ok(None) }));
+
+        let auth = auth_header(user_id, UserRole::User);
+        let body = serde_json::to_string(&UpdateOperationRequest {
+            amount: Decimal::new(-40, 0),
+            date: NaiveDate::from_ymd_opt(2024, 1, 15).unwrap(),
+            effective_date: None,
+            label: "Test".to_string(),
+        })
+        .unwrap();
+        let app = build_test_router(make_test_state(
+            MockUserRepository::new(),
+            op_repo,
+            MockBudgetRepository::new(),
+        ));
+        let resp = app
+            .oneshot(json_request(
+                "PUT",
+                &format!("/operations/{id}"),
+                Some(&body),
+                Some(&auth),
+            ))
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn an_operation_no_longer_a_transfer_is_matched_again() {
+        let user_id = Uuid::new_v4();
+        let id = Uuid::new_v4();
+        let mut op_repo = finding(internal_transfer(id, user_id, Uuid::new_v4()));
+        op_repo
+            .expect_clear_transfer()
+            .times(1)
+            .returning(|_, _| Box::pin(async { Ok(true) }));
+        let app = build_test_router(make_test_state(
+            MockUserRepository::new(),
+            op_repo,
+            MockBudgetRepository::new(),
+        ));
+        let auth = auth_header(user_id, UserRole::User);
+
+        let resp = app
+            .oneshot(json_request(
+                "DELETE",
+                &format!("/operations/{id}/transfer"),
+                None,
+                Some(&auth),
+            ))
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::OK);
+    }
+
+    #[test]
+    fn money_put_aside_accepts_only_savings_budgets_of_its_account() {
+        let user_id = Uuid::new_v4();
+        let livret = Uuid::new_v4();
+        let op = Operation {
+            transfer: Some(Transfer {
+                account_id: livret,
+                account_kind: crate::domain::account::AccountKind::Savings,
+                rule_id: None,
+                operation_id: None,
+            }),
+            ..make_op(Uuid::new_v4(), user_id)
+        };
+        let budget = |budget_type, account_id| Budget {
+            budget_type,
+            account_id,
+            ..make_budget(Uuid::new_v4(), user_id)
+        };
+
+        assert!(op.accepts_budget(&budget(BudgetType::Savings, Some(livret))));
+        assert!(op.accepts_budget(&budget(BudgetType::Savings, None)));
+        assert!(!op.accepts_budget(&budget(BudgetType::Savings, Some(Uuid::new_v4()))));
+        assert!(!op.accepts_budget(&budget(BudgetType::Expense, None)));
+        let taken_back = Operation {
+            amount: Decimal::new(50, 0),
+            ..op
+        };
+        assert!(!taken_back.accepts_budget(&budget(BudgetType::Savings, Some(livret))));
     }
 
     #[tokio::test]

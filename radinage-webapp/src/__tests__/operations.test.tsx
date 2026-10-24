@@ -58,6 +58,7 @@ const mockMonthlyResponse: MonthlyOperationsResponse = {
 			budgetLink: { type: "manual", budgetId: "b1" },
 			ignored: false,
 			ignoreRuleId: null,
+			transfer: null,
 			categoryId: null,
 			effectiveCategoryId: null,
 			splits: [],
@@ -72,6 +73,7 @@ const mockMonthlyResponse: MonthlyOperationsResponse = {
 			budgetLink: { type: "manual", budgetId: "b1" },
 			ignored: false,
 			ignoreRuleId: null,
+			transfer: null,
 			categoryId: null,
 			effectiveCategoryId: null,
 			splits: [],
@@ -86,6 +88,7 @@ const mockMonthlyResponse: MonthlyOperationsResponse = {
 			budgetLink: { type: "unlinked" },
 			ignored: false,
 			ignoreRuleId: null,
+			transfer: null,
 			categoryId: null,
 			effectiveCategoryId: null,
 			splits: [],
@@ -100,6 +103,7 @@ const mockMonthlyResponse: MonthlyOperationsResponse = {
 			budgetLink: { type: "auto", budgetId: "b2" },
 			ignored: false,
 			ignoreRuleId: null,
+			transfer: null,
 			categoryId: null,
 			effectiveCategoryId: null,
 			splits: [],
@@ -156,6 +160,8 @@ const forecastResponse: ForecastResponse = {
 			income: "2000.00",
 			expenses: "-480.00",
 			savings: "0",
+			withdrawals: "0",
+			transfers: "0",
 			balance: "1520.00",
 			committed: "0",
 			unbudgetedForecast: "-100.00",
@@ -166,6 +172,8 @@ const forecastResponse: ForecastResponse = {
 		income: "2000.00",
 		expenses: "-480.00",
 		savings: "0",
+		withdrawals: "0",
+		transfers: "0",
 		balance: "1520.00",
 	},
 	startingBalance: null,
@@ -185,6 +193,7 @@ function account(id: string, name: string): AccountResponse {
 		receivesOperations: true,
 		balance: null,
 		currentBalance: null,
+		transferredInto: false,
 		createdAt: "2026-01-01T00:00:00Z",
 	};
 }
@@ -192,6 +201,12 @@ function account(id: string, name: string): AccountResponse {
 const accounts = [
 	account("account-1", "Compte perso"),
 	account("account-2", "Compte joint"),
+	{
+		...account("account-3", "Livret A"),
+		kind: "savings" as const,
+		imported: false,
+		receivesOperations: false,
+	},
 ];
 
 let apiCalls: Array<{
@@ -242,6 +257,7 @@ function setupMocks(
 				budgetLink: { type: "unlinked" },
 				ignored: false,
 				ignoreRuleId: null,
+				transfer: null,
 				categoryId: null,
 				effectiveCategoryId: null,
 				splits: [],
@@ -272,6 +288,14 @@ function setupMocks(
 		}
 		if (path === "/ignore-rules") {
 			return Promise.resolve(ignoreRules);
+		}
+		if (path === "/transfer-rules") {
+			return Promise.resolve([]);
+		}
+		const transferMatch = path.match(/^\/operations\/([^/]+)\/transfer$/);
+		if (transferMatch) {
+			const op = operations.operations.find((o) => o.id === transferMatch[1]);
+			return Promise.resolve(op);
 		}
 		if (path === "/accounts") {
 			return Promise.resolve(accounts);
@@ -613,6 +637,7 @@ describe("MonthlyOperationsPage", () => {
 					budgetLink: { type: "manual", budgetId: "b1" },
 					ignored: false,
 					ignoreRuleId: null,
+					transfer: null,
 					categoryId: null,
 					effectiveCategoryId: null,
 					splits: [],
@@ -627,6 +652,7 @@ describe("MonthlyOperationsPage", () => {
 					budgetLink: { type: "manual", budgetId: "b4" },
 					ignored: false,
 					ignoreRuleId: null,
+					transfer: null,
 					categoryId: null,
 					effectiveCategoryId: null,
 					splits: [],
@@ -641,6 +667,7 @@ describe("MonthlyOperationsPage", () => {
 					budgetLink: { type: "auto", budgetId: "b2" },
 					ignored: false,
 					ignoreRuleId: null,
+					transfer: null,
 					categoryId: null,
 					effectiveCategoryId: null,
 					splits: [],
@@ -655,6 +682,7 @@ describe("MonthlyOperationsPage", () => {
 					budgetLink: { type: "auto", budgetId: "b5" },
 					ignored: false,
 					ignoreRuleId: null,
+					transfer: null,
 					categoryId: null,
 					effectiveCategoryId: null,
 					splits: [],
@@ -735,6 +763,7 @@ describe("MonthlyOperationsPage", () => {
 					budgetLink: { type: "manual", budgetId: "b1" },
 					ignored: false,
 					ignoreRuleId: null,
+					transfer: null,
 					categoryId: null,
 					effectiveCategoryId: null,
 					splits: [],
@@ -749,6 +778,7 @@ describe("MonthlyOperationsPage", () => {
 					budgetLink: { type: "manual", budgetId: "b4" },
 					ignored: false,
 					ignoreRuleId: null,
+					transfer: null,
 					categoryId: null,
 					effectiveCategoryId: null,
 					splits: [],
@@ -792,6 +822,7 @@ describe("MonthlyOperationsPage", () => {
 					budgetLink: { type: "manual" as const, budgetId: "b1" },
 					ignored: false,
 					ignoreRuleId: null,
+					transfer: null,
 					categoryId: null,
 					effectiveCategoryId: null,
 					splits: [],
@@ -806,6 +837,7 @@ describe("MonthlyOperationsPage", () => {
 					budgetLink: { type: "manual" as const, budgetId: "b1" },
 					ignored: false,
 					ignoreRuleId: null,
+					transfer: null,
 					categoryId: null,
 					effectiveCategoryId: null,
 					splits: [],
@@ -841,6 +873,7 @@ describe("MonthlyOperationsPage", () => {
 					budgetLink: { type: "unlinked" },
 					ignored: false,
 					ignoreRuleId: null,
+					transfer: null,
 					categoryId: null,
 					effectiveCategoryId: null,
 					splits: [],
@@ -855,6 +888,7 @@ describe("MonthlyOperationsPage", () => {
 					budgetLink: { type: "unlinked" },
 					ignored: false,
 					ignoreRuleId: null,
+					transfer: null,
 					categoryId: null,
 					effectiveCategoryId: null,
 					splits: [],
@@ -869,6 +903,7 @@ describe("MonthlyOperationsPage", () => {
 					budgetLink: { type: "unlinked" },
 					ignored: false,
 					ignoreRuleId: null,
+					transfer: null,
 					categoryId: null,
 					effectiveCategoryId: null,
 					splits: [],
@@ -964,6 +999,7 @@ describe("MonthlyOperationsPage", () => {
 					budgetLink: { type: "manual", budgetId: "b1" },
 					ignored: false,
 					ignoreRuleId: null,
+					transfer: null,
 					categoryId: null,
 					effectiveCategoryId: null,
 					splits: [],
@@ -992,6 +1028,7 @@ describe("MonthlyOperationsPage", () => {
 					budgetLink: { type: "auto", budgetId: "b2" },
 					ignored: false,
 					ignoreRuleId: null,
+					transfer: null,
 					categoryId: null,
 					effectiveCategoryId: null,
 					splits: [],
@@ -1019,6 +1056,7 @@ describe("MonthlyOperationsPage", () => {
 					budgetLink: { type: "manual", budgetId: "b1" },
 					ignored: false,
 					ignoreRuleId: null,
+					transfer: null,
 					categoryId: null,
 					effectiveCategoryId: null,
 					splits: [],
@@ -1033,6 +1071,7 @@ describe("MonthlyOperationsPage", () => {
 					budgetLink: { type: "unlinked" },
 					ignored: false,
 					ignoreRuleId: null,
+					transfer: null,
 					categoryId: null,
 					effectiveCategoryId: null,
 					splits: [
@@ -1064,6 +1103,7 @@ describe("MonthlyOperationsPage", () => {
 					budgetLink: { type: "unlinked" },
 					ignored: false,
 					ignoreRuleId: null,
+					transfer: null,
 					categoryId: null,
 					effectiveCategoryId: null,
 					splits: [],
@@ -1189,6 +1229,7 @@ describe("MonthlyOperationsPage", () => {
 					budgetLink: { type: "unlinked" },
 					ignored: true,
 					ignoreRuleId: null,
+					transfer: null,
 					categoryId: null,
 					effectiveCategoryId: null,
 					splits: [],
@@ -1263,6 +1304,7 @@ describe("MonthlyOperationsPage", () => {
 				label: "VIR LIVRET A",
 				ignored: true,
 				ignoreRuleId: "r1",
+				transfer: null,
 			} satisfies OperationResponse;
 			setupMocks({
 				operations: { operations: [...operations.operations, byRule] },
@@ -1643,5 +1685,122 @@ describe("operation sheet", () => {
 				dialog.getByRole("heading", { name: "Créer un budget" }),
 			).toBeInTheDocument();
 		});
+	});
+});
+
+describe("transfers", () => {
+	function op(
+		id: string,
+		label: string,
+		amount: string,
+		transfer: OperationResponse["transfer"],
+	): OperationResponse {
+		return {
+			id,
+			accountId: "account-1",
+			amount,
+			date: "2026-04-10",
+			effectiveDate: null,
+			label,
+			budgetLink: { type: "unlinked" },
+			ignored: false,
+			ignoreRuleId: null,
+			transfer,
+			categoryId: null,
+			effectiveCategoryId: null,
+			splits: [],
+		};
+	}
+	const toLivret = { accountId: "account-3", ruleId: null, operationId: null };
+	const operations: MonthlyOperationsResponse = {
+		operations: [
+			op("t1", "VIR INTERNE VERS LIVRET A", "-300.00", toLivret),
+			op("t2", "VIR SEPA COMPTE JOINT", "450.00", {
+				accountId: "account-2",
+				ruleId: null,
+				operationId: null,
+			}),
+			op("o1", "CB CARREFOUR", "-20.00", null),
+		],
+	};
+
+	function statText(label: string): string {
+		return (
+			screen
+				.getByText(label)
+				.closest(".mantine-Paper-root")
+				?.textContent?.replace(/\s/g, "") ?? ""
+		);
+	}
+
+	it("keeps transfers apart and counts money put aside as savings", async () => {
+		setupMocks({ budgets: [], operations });
+		await renderOperationsPage();
+
+		const section = await screen.findByRole("region", { name: "Virements" });
+		expect(within(section).getByText("Vers Livret A")).toBeInTheDocument();
+		expect(
+			within(section).getByText("Depuis Compte joint"),
+		).toBeInTheDocument();
+		const daily = screen.getByRole("region", {
+			name: "Opérations quotidiennes",
+		});
+		expect(within(daily).queryByText(/VIR INTERNE/)).not.toBeInTheDocument();
+
+		expect(statText("Dépenses")).toMatch(/-20,00/);
+		expect(statText("Revenus")).toMatch(/0,00/);
+		expect(statText("Épargne")).toMatch(/-300,00/);
+		expect(statText("Virements internes")).toMatch(/\+450,00/);
+	});
+
+	it("makes an operation a transfer from its sheet", async () => {
+		setupMocks({ budgets: [], operations });
+		await renderOperationsPage();
+		const user = userEvent.setup();
+		await user.click(await screen.findByRole("button", { name: /CARREFOUR/ }));
+		const sheet = within(await screen.findByRole("dialog"));
+
+		await user.click(sheet.getByText("Virement"));
+		await selectMantineOption("Vers le compte", "Livret A");
+
+		await waitFor(() =>
+			expect(apiCalls).toContainEqual({
+				path: "/operations/o1/transfer",
+				options: {
+					method: "PUT",
+					body: JSON.stringify({ accountId: "account-3" }),
+				},
+			}),
+		);
+	});
+
+	it("says how a transfer counts and offers a rule for its label", async () => {
+		setupMocks({ budgets: [], operations });
+		await renderOperationsPage();
+		const user = userEvent.setup();
+		await user.click(
+			await screen.findByRole("button", { name: /VIR INTERNE VERS LIVRET A/ }),
+		);
+		const sheet = within(await screen.findByRole("dialog"));
+
+		expect(
+			sheet.getByText(
+				/Compté dans l'épargne : 300,00\s€ mis de côté sur Livret A/,
+			),
+		).toBeInTheDocument();
+		expect(
+			sheet.queryByRole("combobox", { name: "Catégorie" }),
+		).not.toBeInTheDocument();
+
+		await user.click(
+			sheet.getByRole("button", { name: "Toujours pour ce libellé" }),
+		);
+		const dialog = within(await screen.findByRole("dialog"));
+		expect(
+			dialog.getByRole("heading", { name: "Nouvelle règle de virement" }),
+		).toBeInTheDocument();
+		expect(dialog.getByRole("textbox", { name: /Valeur/ })).toHaveValue(
+			"VIR INTERNE VERS LIVRET A",
+		);
 	});
 });

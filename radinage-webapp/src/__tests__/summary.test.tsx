@@ -39,6 +39,8 @@ interface MonthFlows {
 	income: number;
 	expenses: number;
 	savings: number;
+	/** Money taken back from savings, positive. */
+	withdrawals?: number;
 	committed?: number;
 	unbudgetedForecast?: number;
 }
@@ -72,7 +74,7 @@ function makeForecastFrom(
 	const startingBalance = extras.startingBalance ?? null;
 	let cumulative = Number(startingBalance ?? 0);
 	let firstNegativeMonth: ForecastResponse["firstNegativeMonth"] = null;
-	const totals = { income: 0, expenses: 0, savings: 0 };
+	const totals = { income: 0, expenses: 0, savings: 0, withdrawals: 0 };
 	const months = Array.from({ length: count }, (_, i) => {
 		const index = from.year * 12 + from.month - 1 + i;
 		const year = Math.floor(index / 12);
@@ -81,10 +83,11 @@ function makeForecastFrom(
 			income,
 			expenses,
 			savings,
+			withdrawals = 0,
 			committed = 0,
 			unbudgetedForecast = 0,
 		} = flowsOf(month);
-		const balance = income + expenses + savings;
+		const balance = income + expenses + savings + withdrawals;
 		cumulative += balance;
 		const status = statusOf(year, month);
 		if (
@@ -98,6 +101,7 @@ function makeForecastFrom(
 		totals.income += income;
 		totals.expenses += expenses;
 		totals.savings += savings;
+		totals.withdrawals += withdrawals;
 		return {
 			year,
 			month,
@@ -105,6 +109,8 @@ function makeForecastFrom(
 			income: money(income),
 			expenses: money(expenses),
 			savings: money(savings),
+			withdrawals: money(withdrawals),
+			transfers: "0",
 			balance: money(balance),
 			committed: money(committed),
 			unbudgetedForecast: money(unbudgetedForecast),
@@ -117,7 +123,11 @@ function makeForecastFrom(
 			income: money(totals.income),
 			expenses: money(totals.expenses),
 			savings: money(totals.savings),
-			balance: money(totals.income + totals.expenses + totals.savings),
+			withdrawals: money(totals.withdrawals),
+			transfers: "0",
+			balance: money(
+				totals.income + totals.expenses + totals.savings + totals.withdrawals,
+			),
 		},
 		startingBalance,
 		endBalance: money(cumulative),
@@ -405,6 +415,28 @@ describe("SummaryPage", () => {
 		const januaryText = (january?.textContent ?? "").replace(/\s/g, "");
 		expect(januaryText).toMatch(/1234,00/);
 		expect(januaryText).toMatch(/-567,00/);
+	});
+
+	it("nets what was taken back from savings and flags a month taking more than it saves", async () => {
+		setupMocks((year) =>
+			makeForecast(year, (month) =>
+				month === 7
+					? { income: 2000, expenses: -1500, savings: -400, withdrawals: 500 }
+					: { income: 2000, expenses: -1500, savings: -400 },
+			),
+		);
+
+		await renderSummaryPage("?year=2025");
+
+		const card = await screen.findByRole("region", {
+			name: "Excédent 2025",
+		});
+		const text = compact(card);
+		expect(text).toMatch(/Épargnenette-4300,00€/);
+		expect(text).toMatch(/4800,00€versés,500,00€repris/);
+		expect(text).not.toMatch(/Plusreprisqueversé/);
+		const july = within(screen.getByRole("table")).getAllByRole("row")[7];
+		expect(compact(july as HTMLElement)).toMatch(/100,00€dont500,00€repris/);
 	});
 
 	it("shows the projected balance next to the surplus from the recorded balance", async () => {
@@ -695,6 +727,8 @@ function breakdownOf(year: number, month: number): ForecastMonthBreakdown {
 			income: "2500.00",
 			expenses: "-1055.00",
 			savings: "-300.00",
+			withdrawals: "0",
+			transfers: "0",
 			balance: "1145.00",
 		},
 	};

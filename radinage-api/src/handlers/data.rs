@@ -10,10 +10,13 @@ use crate::{
         operation::{
             BudgetLink, NewOperation, NewOperationSplit, Operation, OperationSplit, validate_splits,
         },
+        transfer::{TransferRule, TransferRuleFields},
     },
     error::{AppError, AppResult},
     handlers::{
-        accounts::AccountRequest, categories::CategoryRequest, ignore_rules::IgnoreRuleRequest,
+        accounts::AccountRequest,
+        categories::CategoryRequest,
+        ignore_rules::{IgnoreRuleRequest, MAX_VALUE_LEN},
         import_profiles::ImportProfileRequest,
     },
     repositories::{
@@ -117,6 +120,32 @@ impl From<IgnoreRule> for ExportIgnoreRule {
     }
 }
 
+/// A transfer rule inside an export payload (omits `userId`).
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ExportTransferRule {
+    /// Identifier the payload's operations refer to it by.
+    pub id: Uuid,
+    /// Payload account whose operations the rule applies to.
+    pub account_id: Uuid,
+    /// Payload account the operations it matches are transfers with.
+    pub counterpart_account_id: Uuid,
+    pub label_pattern: LabelPattern,
+    pub created_at: DateTime<Utc>,
+}
+
+impl From<TransferRule> for ExportTransferRule {
+    fn from(rule: TransferRule) -> Self {
+        Self {
+            id: rule.id,
+            account_id: rule.fields.account_id,
+            counterpart_account_id: rule.fields.counterpart_account_id,
+            label_pattern: rule.fields.label_pattern,
+            created_at: rule.created_at,
+        }
+    }
+}
+
 /// An operation as stored inside an export payload (omits `userId`).
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
@@ -137,6 +166,16 @@ pub struct ExportOperation {
     /// existed.
     #[serde(default)]
     pub ignore_rule_id: Option<Uuid>,
+    /// Payload account the operation is a transfer with; absent from exports made before
+    /// transfers existed.
+    #[serde(default)]
+    pub transfer_account_id: Option<Uuid>,
+    /// Transfer rule that made the operation a transfer.
+    #[serde(default)]
+    pub transfer_rule_id: Option<Uuid>,
+    /// Payload operation on the other side of the transfer.
+    #[serde(default)]
+    pub transfer_operation_id: Option<Uuid>,
     /// Absent from exports made before categories existed.
     #[serde(default)]
     pub category_id: Option<Uuid>,
@@ -194,6 +233,9 @@ impl From<Operation> for ExportOperation {
             ignored: op.ignored,
             account_id: Some(op.account_id),
             ignore_rule_id: op.ignore_rule_id,
+            transfer_account_id: op.transfer.map(|t| t.account_id),
+            transfer_rule_id: op.transfer.and_then(|t| t.rule_id),
+            transfer_operation_id: op.transfer.and_then(|t| t.operation_id),
             category_id: op.category_id,
             splits: op
                 .splits
@@ -310,6 +352,7 @@ pub struct ExportResponse {
     pub categories: Vec<ExportCategory>,
     pub budgets: Vec<ExportBudget>,
     pub ignore_rules: Vec<ExportIgnoreRule>,
+    pub transfer_rules: Vec<ExportTransferRule>,
     pub operations: Vec<ExportOperation>,
     pub import_profiles: Vec<ExportImportProfile>,
 }
@@ -335,6 +378,9 @@ pub struct ImportDataRequest {
     /// Absent from exports made before ignore rules existed.
     #[serde(default)]
     pub ignore_rules: Vec<ExportIgnoreRule>,
+    /// Absent from exports made before transfers existed.
+    #[serde(default)]
+    pub transfer_rules: Vec<ExportTransferRule>,
     #[serde(default)]
     pub operations: Vec<ExportOperation>,
     /// Absent from exports made before import profiles existed.
@@ -356,6 +402,10 @@ pub struct ImportDataResponse {
     /// Rules skipped because the account already has one with the same pattern and amount,
     /// which is used instead.
     pub skipped_ignore_rules: usize,
+    pub imported_transfer_rules: usize,
+    /// Rules skipped because the user already has one with the same accounts and pattern, which
+    /// is used instead, or because they name an account the payload does not carry.
+    pub skipped_transfer_rules: usize,
     pub imported_operations: usize,
     pub skipped_operations: usize,
     pub imported_import_profiles: usize,
@@ -404,6 +454,7 @@ pub async fn export_data<
     let operations = state.operation_repo.list_all_for_user(user_id).await?;
     let import_profiles = state.import_profile_repo.list(user_id).await?;
     let ignore_rules = state.ignore_rule_repo.list(user_id).await?;
+    let transfer_rules = state.account_repo.list_transfer_rules(user_id).await?;
 
     Ok(Json(ExportResponse {
         version: EXPORT_VERSION,
@@ -414,6 +465,10 @@ pub async fn export_data<
         ignore_rules: ignore_rules
             .into_iter()
             .map(ExportIgnoreRule::from)
+            .collect(),
+        transfer_rules: transfer_rules
+            .into_iter()
+            .map(ExportTransferRule::from)
             .collect(),
         operations: operations.into_iter().map(ExportOperation::from).collect(),
         import_profiles: import_profiles
@@ -507,6 +562,24 @@ pub async fn import_data<
         })
         .collect::<AppResult<Vec<_>>>()?;
 
+    let transfer_rules = body
+        .transfer_rules
+        .iter()
+        .map(|r| {
+            let label_pattern =
+                super::trimmed_label_pattern(r.label_pattern.clone(), MAX_VALUE_LEN)
+                    .map_err(|e| AppError::BadRequest(format!("transfer rule {}: {e}", r.id)))?;
+            Ok((
+                r.id,
+                TransferRuleFields {
+                    account_id: r.account_id,
+                    counterpart_account_id: r.counterpart_account_id,
+                    label_pattern,
+                },
+            ))
+        })
+        .collect::<AppResult<Vec<_>>>()?;
+
     let user_id = auth_user.id;
 
     let targets: Vec<Option<Uuid>> = body
@@ -523,6 +596,16 @@ pub async fn import_data<
         &targets,
         legacy_balance,
         state.config.max_accounts_per_user,
+    )
+    .await?;
+
+    check_transfer_rules(
+        &state.account_repo,
+        user_id,
+        &transfer_rules,
+        &accounts,
+        &account_plan,
+        state.config.max_transfer_rules_per_user,
     )
     .await?;
 
@@ -550,6 +633,8 @@ pub async fn import_data<
         legacy_balance,
     )
     .await?;
+    let (transfer_rule_id_map, imported_transfer_rules) =
+        import_transfer_rules(&state.account_repo, user_id, &transfer_rules, &imported.ids).await?;
 
     // Merge budgets by label: keep existing, create missing. Track id mapping
     // so that operations can re-point their budget links to the correct budget.
@@ -587,6 +672,7 @@ pub async fn import_data<
     // exists.
     let mut imported_operations = 0usize;
     let mut skipped_operations = 0usize;
+    let mut transfers: HashMap<Uuid, RestoredTransfer> = HashMap::new();
     for op in &body.operations {
         let account_id = imported.account_for(op.account_id)?;
         let exists = state
@@ -675,8 +761,36 @@ pub async fn import_data<
             }
         }
 
+        let transfer_account_id = op
+            .transfer_account_id
+            .and_then(|id| imported.ids.get(&id).copied())
+            .filter(|id| *id != account_id);
+        if let Some(other_account_id) = transfer_account_id
+            && op.splits.is_empty()
+        {
+            let rule_id = op
+                .transfer_rule_id
+                .and_then(|id| transfer_rule_id_map.get(&id).copied());
+            let found = state
+                .operation_repo
+                .set_transfer(new_id, user_id, other_account_id, rule_id)
+                .await?;
+            if found {
+                transfers.insert(
+                    op.id,
+                    RestoredTransfer {
+                        new_id,
+                        account_id,
+                        other_account_id,
+                        partner: op.transfer_operation_id,
+                    },
+                );
+            }
+        }
+
         imported_operations += 1;
     }
+    pair_restored_transfers(&state.operation_repo, user_id, &transfers).await?;
 
     let profiles = profiles
         .into_iter()
@@ -699,6 +813,8 @@ pub async fn import_data<
             skipped_budgets,
             imported_ignore_rules,
             skipped_ignore_rules: ignore_rules.len() - imported_ignore_rules,
+            imported_transfer_rules,
+            skipped_transfer_rules: transfer_rules.len() - imported_transfer_rules,
             imported_operations,
             skipped_operations,
             imported_import_profiles,
@@ -986,6 +1102,167 @@ async fn import_ignore_rules(
     Ok((id_map, imported))
 }
 
+/// The rules with their accounts replaced by the ones `ids` maps them to; a rule naming an
+/// account `ids` does not map, or the same account twice, is dropped.
+fn map_transfer_rules(
+    incoming: &[(Uuid, TransferRuleFields)],
+    ids: &HashMap<Uuid, Uuid>,
+) -> Vec<(Uuid, TransferRuleFields)> {
+    incoming
+        .iter()
+        .filter_map(|(id, fields)| {
+            let account_id = *ids.get(&fields.account_id)?;
+            let counterpart_account_id = *ids.get(&fields.counterpart_account_id)?;
+            (account_id != counterpart_account_id).then(|| {
+                (
+                    *id,
+                    TransferRuleFields {
+                        account_id,
+                        counterpart_account_id,
+                        label_pattern: fields.label_pattern.clone(),
+                    },
+                )
+            })
+        })
+        .collect()
+}
+
+/// The distinct fields of `mapped` that none of `existing` has.
+fn new_transfer_rule_fields<'a>(
+    existing: &[TransferRule],
+    mapped: &'a [(Uuid, TransferRuleFields)],
+) -> Vec<&'a TransferRuleFields> {
+    let mut new_fields: Vec<&TransferRuleFields> = Vec::new();
+    for (_, fields) in mapped {
+        if !existing.iter().any(|r| r.fields == *fields) && !new_fields.contains(&fields) {
+            new_fields.push(fields);
+        }
+    }
+    new_fields
+}
+
+/// Check, writing nothing, that the payload's transfer rules apply to accounts receiving
+/// operations (`BadRequest`) and that the ones to create fit within `max` (`Conflict`). The
+/// accounts the import creates are stood in for by fresh ids: no rule exists on them yet.
+async fn check_transfer_rules(
+    repo: &impl AccountRepository,
+    user_id: Uuid,
+    incoming: &[(Uuid, TransferRuleFields)],
+    accounts: &[(Uuid, AccountFields, Vec<AccountBalance>)],
+    plan: &AccountPlan,
+    max: u32,
+) -> AppResult<()> {
+    if incoming.is_empty() {
+        return Ok(());
+    }
+    let mut ids = HashMap::new();
+    let mut receiving = HashSet::new();
+    for (incoming_id, fields, _) in accounts {
+        let (id, receives) = match plan.existing.iter().find(|a| a.fields.name == fields.name) {
+            Some(a) => (a.id, a.fields.receives_operations()),
+            None => (Uuid::new_v4(), fields.receives_operations()),
+        };
+        ids.insert(*incoming_id, id);
+        if receives {
+            receiving.insert(id);
+        }
+    }
+    let mapped = map_transfer_rules(incoming, &ids);
+    if let Some((id, _)) = mapped
+        .iter()
+        .find(|(_, fields)| !receiving.contains(&fields.account_id))
+    {
+        return Err(AppError::BadRequest(format!(
+            "transfer rule {id}: its account does not receive operations"
+        )));
+    }
+
+    let existing = repo.list_transfer_rules(user_id).await?;
+    let new_fields = new_transfer_rule_fields(&existing, &mapped);
+    if existing.len() + new_fields.len() > max as usize {
+        return Err(AppError::Conflict(format!(
+            "importing {} new transfer rules would exceed the transfer rule limit ({max})",
+            new_fields.len()
+        )));
+    }
+    Ok(())
+}
+
+/// Create the payload's transfer rules the user has no rule with the same fields for, and map
+/// each payload id to the user's rule with those fields; returns the map and how many were
+/// created. `account_ids` maps the payload's accounts to the user's.
+async fn import_transfer_rules(
+    repo: &impl AccountRepository,
+    user_id: Uuid,
+    incoming: &[(Uuid, TransferRuleFields)],
+    account_ids: &HashMap<Uuid, Uuid>,
+) -> AppResult<(HashMap<Uuid, Uuid>, usize)> {
+    let mut id_map = HashMap::new();
+    let mapped = map_transfer_rules(incoming, account_ids);
+    if mapped.is_empty() {
+        return Ok((id_map, 0));
+    }
+    let mut existing: Vec<(TransferRuleFields, Uuid)> = repo
+        .list_transfer_rules(user_id)
+        .await?
+        .into_iter()
+        .map(|r| (r.fields, r.id))
+        .collect();
+
+    let mut imported = 0usize;
+    for (incoming_id, fields) in &mapped {
+        let id = match existing.iter().find(|(f, _)| f == fields) {
+            Some((_, id)) => *id,
+            None => {
+                let created = repo.create_transfer_rule(user_id, fields).await?;
+                existing.push((created.fields, created.id));
+                imported += 1;
+                created.id
+            }
+        };
+        id_map.insert(*incoming_id, id);
+    }
+    Ok((id_map, imported))
+}
+
+/// An imported operation made a transfer again.
+struct RestoredTransfer {
+    new_id: Uuid,
+    account_id: Uuid,
+    other_account_id: Uuid,
+    /// Payload operation on the other side.
+    partner: Option<Uuid>,
+}
+
+/// Pair each restored transfer with its other side, once per pair, where both name each other
+/// and each other's account; anything else is left unpaired.
+async fn pair_restored_transfers(
+    repo: &impl OperationRepository,
+    user_id: Uuid,
+    transfers: &HashMap<Uuid, RestoredTransfer>,
+) -> AppResult<()> {
+    let mut paired: HashSet<Uuid> = HashSet::new();
+    for (payload_id, transfer) in transfers {
+        let Some(partner_id) = transfer.partner else {
+            continue;
+        };
+        let Some(partner) = transfers.get(&partner_id) else {
+            continue;
+        };
+        let consistent = partner.partner == Some(*payload_id)
+            && partner.account_id == transfer.other_account_id
+            && partner.other_account_id == transfer.account_id;
+        if !consistent || paired.contains(&transfer.new_id) {
+            continue;
+        }
+        repo.pair_transfer(transfer.new_id, user_id, Some(partner.new_id))
+            .await?;
+        paired.insert(transfer.new_id);
+        paired.insert(partner.new_id);
+    }
+    Ok(())
+}
+
 /// Create the payload's profiles the account has no profile by that name for; returns how many
 /// were imported and skipped.
 async fn import_profiles(
@@ -1021,6 +1298,7 @@ mod tests {
         domain::{
             account::{Account, BalanceEntry},
             budget::{Budget, BudgetKind, BudgetType, CurrentPeriod, Recurrence, YearMonth},
+            transfer::Transfer,
             user::UserRole,
         },
         repositories::{
@@ -1087,6 +1365,7 @@ mod tests {
             ignore_rule_id: None,
             category_id: None,
             budget_category_id: None,
+            transfer: None,
             splits: vec![],
         }
     }
@@ -1910,6 +2189,7 @@ mod tests {
             categories: vec![],
             budgets: vec![ExportBudget::from(budget)],
             ignore_rules: vec![],
+            transfer_rules: vec![],
             operations: vec![],
             import_profiles: vec![],
         };
@@ -2003,6 +2283,9 @@ mod tests {
         let account_id = account.id;
         let mut account_repo = accounts_listing(vec![account]);
         account_repo
+            .expect_list_transfer_rules()
+            .returning(|_| Box::pin(async { Ok(vec![]) }));
+        account_repo
             .expect_list_balances()
             .withf(move |id, uid| *id == account_id && *uid == user_id)
             .returning(|_, _| {
@@ -2042,6 +2325,286 @@ mod tests {
             }])
         );
         assert!(json.get("balance").is_none());
+    }
+
+    fn named_account(user_id: Uuid, name: &str) -> Account {
+        let account = main_account(Uuid::new_v4(), user_id);
+        Account {
+            fields: AccountFields {
+                name: name.to_string(),
+                ..account.fields.clone()
+            },
+            ..account
+        }
+    }
+
+    fn transfer_rule(
+        user_id: Uuid,
+        account_id: Uuid,
+        counterpart: Uuid,
+        value: &str,
+    ) -> TransferRule {
+        TransferRule {
+            id: Uuid::new_v4(),
+            user_id,
+            fields: TransferRuleFields {
+                account_id,
+                counterpart_account_id: counterpart,
+                label_pattern: LabelPattern::Contains(value.to_string()),
+            },
+            created_at: Utc::now(),
+        }
+    }
+
+    /// An account repository listing `accounts` and `rules`, with no balance.
+    fn accounts_with_rules(
+        accounts: Vec<Account>,
+        rules: Vec<TransferRule>,
+    ) -> MockAccountRepository {
+        let mut repo = accounts_listing(accounts);
+        repo.expect_list_balances()
+            .returning(|_, _| Box::pin(async { Ok(vec![]) }));
+        repo.expect_list_transfer_rules().returning(move |_| {
+            let rules = rules.clone();
+            Box::pin(async move { Ok(rules) })
+        });
+        repo
+    }
+
+    #[tokio::test]
+    async fn export_includes_transfer_rules_and_the_transfer_of_each_operation() {
+        let user_id = Uuid::new_v4();
+        let main = named_account(user_id, "Main");
+        let joint = named_account(user_id, "Joint");
+        let rule = transfer_rule(user_id, main.id, joint.id, "VIR JOINT");
+        let (main_id, joint_id, rule_id) = (main.id, joint.id, rule.id);
+        let partner_id = Uuid::new_v4();
+        let mut op_repo = MockOperationRepository::new();
+        op_repo.expect_list_all_for_user().returning(move |_| {
+            let op = Operation {
+                account_id: main_id,
+                transfer: Some(Transfer {
+                    account_id: joint_id,
+                    account_kind: AccountKind::Checking,
+                    rule_id: Some(rule_id),
+                    operation_id: Some(partner_id),
+                }),
+                ..make_operation(user_id, "VIR JOINT", BudgetLink::Unlinked)
+            };
+            Box::pin(async move { Ok(vec![op]) })
+        });
+        let app = data_app(op_repo, accounts_with_rules(vec![main, joint], vec![rule]));
+
+        let auth = auth_header(user_id, UserRole::User);
+        let resp = app
+            .oneshot(json_request("GET", "/data/export", None, Some(&auth)))
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        let json: serde_json::Value = response_json(resp).await;
+        let exported = &json["transferRules"][0];
+        assert_eq!(exported["id"], rule_id.to_string());
+        assert_eq!(exported["accountId"], main_id.to_string());
+        assert_eq!(exported["counterpartAccountId"], joint_id.to_string());
+        assert_eq!(exported["labelPattern"]["value"], "VIR JOINT");
+        assert!(exported["createdAt"].is_string());
+        let op = &json["operations"][0];
+        assert_eq!(op["transferAccountId"], joint_id.to_string());
+        assert_eq!(op["transferRuleId"], rule_id.to_string());
+        assert_eq!(op["transferOperationId"], partner_id.to_string());
+    }
+
+    const MAIN_ID: &str = "aaaaaaaa-0000-0000-0000-00000000000a";
+    const JOINT_ID: &str = "aaaaaaaa-0000-0000-0000-00000000000b";
+
+    fn transfer_payload(rules: &str, operations: &str) -> String {
+        format!(
+            r#"{{"version":1,
+            "accounts":[
+                {{"id":"{MAIN_ID}","name":"Main","kind":"checking","imported":true,"balances":[]}},
+                {{"id":"{JOINT_ID}","name":"Joint","kind":"checking","imported":true,"balances":[]}}
+            ],
+            "transferRules":[{rules}],
+            "operations":[{operations}]}}"#
+        )
+    }
+
+    fn payload_rule(id: &str, account: &str, counterpart: &str, value: &str) -> String {
+        format!(
+            r#"{{"id":"{id}","accountId":"{account}","counterpartAccountId":"{counterpart}",
+            "labelPattern":{{"type":"contains","value":"{value}"}},
+            "createdAt":"2026-01-01T00:00:00Z"}}"#
+        )
+    }
+
+    fn payload_transfer_op(id: &str, account: &str, amount: &str, transfer: &str) -> String {
+        format!(
+            r#"{{"id":"{id}","amount":"{amount}","date":"2024-01-01","effectiveDate":null,
+            "label":"VIR","budgetLink":{{"type":"unlinked"}},"ignored":false,
+            "accountId":"{account}",{transfer}}}"#
+        )
+    }
+
+    fn inserting_operations() -> MockOperationRepository {
+        let mut op_repo = MockOperationRepository::new();
+        op_repo
+            .expect_exists_by_fields()
+            .returning(|_, _, _, _, _| Box::pin(async { Ok(false) }));
+        op_repo
+            .expect_insert()
+            .returning(|_, _, _| Box::pin(async { Ok(()) }));
+        op_repo
+    }
+
+    #[tokio::test]
+    async fn import_reuses_identical_transfer_rules_creates_others_and_restores_the_pair() {
+        let user_id = Uuid::new_v4();
+        let main = named_account(user_id, "Main");
+        let joint = named_account(user_id, "Joint");
+        let (main_id, joint_id) = (main.id, joint.id);
+        let existing = transfer_rule(user_id, main_id, joint_id, "VIR JOINT");
+        let existing_id = existing.id;
+        let created_id = Uuid::new_v4();
+        let mut account_repo = accounts_with_rules(vec![main, joint], vec![existing]);
+        account_repo
+            .expect_create_transfer_rule()
+            .withf(move |_, fields| {
+                fields.account_id == joint_id
+                    && fields.counterpart_account_id == main_id
+                    && fields.label_pattern == LabelPattern::Contains("VIR MAIN".to_string())
+            })
+            .once()
+            .returning(move |user_id, fields| {
+                let created = TransferRule {
+                    id: created_id,
+                    user_id,
+                    fields: fields.clone(),
+                    created_at: Utc::now(),
+                };
+                Box::pin(async move { Ok(created) })
+            });
+        let mut op_repo = inserting_operations();
+        op_repo
+            .expect_set_transfer()
+            .withf(move |_, _, account_id, rule_id| {
+                *account_id == joint_id && *rule_id == Some(existing_id)
+            })
+            .once()
+            .returning(|_, _, _, _| Box::pin(async { Ok(true) }));
+        op_repo
+            .expect_set_transfer()
+            .withf(move |_, _, account_id, rule_id| {
+                *account_id == main_id && *rule_id == Some(created_id)
+            })
+            .once()
+            .returning(|_, _, _, _| Box::pin(async { Ok(true) }));
+        op_repo
+            .expect_pair_transfer()
+            .withf(|id, _, counterpart| counterpart.is_some_and(|c| c != *id))
+            .once()
+            .returning(|_, _, counterpart| Box::pin(async move { Ok(counterpart) }));
+
+        let (rule_a, rule_b) = (
+            "bbbbbbbb-0000-0000-0000-000000000001",
+            "bbbbbbbb-0000-0000-0000-000000000002",
+        );
+        let (op_a, op_b) = (
+            "11111111-1111-1111-1111-111111111111",
+            "22222222-2222-2222-2222-222222222222",
+        );
+        let body = transfer_payload(
+            &format!(
+                "{},{}",
+                payload_rule(rule_a, MAIN_ID, JOINT_ID, "VIR JOINT"),
+                payload_rule(rule_b, JOINT_ID, MAIN_ID, "VIR MAIN"),
+            ),
+            &format!(
+                "{},{}",
+                payload_transfer_op(
+                    op_a,
+                    MAIN_ID,
+                    "-100",
+                    &format!(
+                        r#""transferAccountId":"{JOINT_ID}","transferRuleId":"{rule_a}","transferOperationId":"{op_b}""#
+                    )
+                ),
+                payload_transfer_op(
+                    op_b,
+                    JOINT_ID,
+                    "100",
+                    &format!(
+                        r#""transferAccountId":"{MAIN_ID}","transferRuleId":"{rule_b}","transferOperationId":"{op_a}""#
+                    )
+                ),
+            ),
+        );
+
+        let resp = import_payload(data_app(op_repo, account_repo), &body).await;
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        let json: ImportDataResponse = response_json(resp).await;
+        assert_eq!(json.imported_transfer_rules, 1);
+        assert_eq!(json.skipped_transfer_rules, 1);
+        assert_eq!(json.imported_operations, 2);
+    }
+
+    #[tokio::test]
+    async fn import_leaves_a_transfer_with_an_unknown_account_an_ordinary_operation() {
+        let user_id = Uuid::new_v4();
+        let account_repo = accounts_with_rules(
+            vec![
+                named_account(user_id, "Main"),
+                named_account(user_id, "Joint"),
+            ],
+            vec![],
+        );
+        let mut op_repo = inserting_operations();
+        op_repo.expect_set_transfer().never();
+        op_repo.expect_pair_transfer().never();
+        let body = transfer_payload(
+            "",
+            &payload_transfer_op(
+                "11111111-1111-1111-1111-111111111111",
+                MAIN_ID,
+                "-100",
+                r#""transferAccountId":"cccccccc-0000-0000-0000-000000000001","transferOperationId":"22222222-2222-2222-2222-222222222222""#,
+            ),
+        );
+
+        let resp = import_payload(data_app(op_repo, account_repo), &body).await;
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        let json: ImportDataResponse = response_json(resp).await;
+        assert_eq!(json.imported_operations, 1);
+    }
+
+    #[tokio::test]
+    async fn import_beyond_the_transfer_rule_limit_is_a_conflict() {
+        let user_id = Uuid::new_v4();
+        let main = named_account(user_id, "Main");
+        let joint = named_account(user_id, "Joint");
+        let full: Vec<_> = (0..100)
+            .map(|i| transfer_rule(user_id, main.id, joint.id, &format!("RULE {i}")))
+            .collect();
+        let mut account_repo = accounts_with_rules(vec![main, joint], full);
+        account_repo.expect_create_transfer_rule().never();
+        account_repo.expect_create().never();
+        let mut op_repo = MockOperationRepository::new();
+        op_repo.expect_insert().never();
+        let body = transfer_payload(
+            &payload_rule(
+                "bbbbbbbb-0000-0000-0000-000000000001",
+                MAIN_ID,
+                JOINT_ID,
+                "NEW",
+            ),
+            "",
+        );
+
+        let resp = import_payload(data_app(op_repo, account_repo), &body).await;
+
+        assert_eq!(resp.status(), StatusCode::CONFLICT);
     }
 
     #[tokio::test]

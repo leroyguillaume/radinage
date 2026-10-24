@@ -15,6 +15,7 @@ function makeOperation(
 		budgetLink: { type: "unlinked" },
 		ignored: false,
 		ignoreRuleId: null,
+		transfer: null,
 		categoryId: null,
 		effectiveCategoryId: null,
 		splits: [],

@@ -56,6 +56,10 @@ pub struct Config {
     #[arg(long, env = "MAX_IGNORE_RULES_PER_USER", default_value_t = 100)]
     pub max_ignore_rules_per_user: u32,
 
+    /// Maximum number of transfer rules a single user can create.
+    #[arg(long, env = "MAX_TRANSFER_RULES_PER_USER", default_value_t = 100)]
+    pub max_transfer_rules_per_user: u32,
+
     /// Maximum number of accounts a single user can create.
     #[arg(long, env = "MAX_ACCOUNTS_PER_USER", default_value_t = 20)]
     pub max_accounts_per_user: u32,
