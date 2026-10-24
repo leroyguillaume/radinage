@@ -102,6 +102,7 @@ function makeLinkedOperation(
 ): OperationResponse {
 	return {
 		id,
+		accountId: "account-1",
 		amount,
 		date: dayThisMonth(),
 		effectiveDate: null,
@@ -601,6 +602,7 @@ describe("BudgetsPage", () => {
 				makeLinkedOperation("o1", "b1", "-20.00"),
 				{
 					id: "o2",
+					accountId: "account-1",
 					amount: "-100.00",
 					date: dayThisMonth(),
 					effectiveDate: null,

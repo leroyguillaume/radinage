@@ -133,6 +133,7 @@ mod tests {
         Operation {
             id: Uuid::new_v4(),
             user_id: Uuid::new_v4(),
+            account_id: Uuid::nil(),
             amount,
             date,
             label: label.to_string(),

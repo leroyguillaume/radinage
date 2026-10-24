@@ -111,8 +111,8 @@ pub async fn auto_ignore_operation(
 
 // ── Handlers ─────────────────────────────────────────────────────────────────
 
-pub async fn list_ignore_rules<U, O, B, P, C, R: IgnoreRuleRepository>(
-    State(state): State<AppState<U, O, B, P, C, R>>,
+pub async fn list_ignore_rules<U, O, B, P, C, R: IgnoreRuleRepository, A>(
+    State(state): State<AppState<U, O, B, P, C, R, A>>,
     auth_user: AuthUser,
 ) -> AppResult<Json<Vec<IgnoreRuleResponse>>> {
     let rules = state.ignore_rule_repo.list(auth_user.id).await?;
@@ -121,8 +121,8 @@ pub async fn list_ignore_rules<U, O, B, P, C, R: IgnoreRuleRepository>(
     ))
 }
 
-pub async fn create_ignore_rule<U, O, B, P, C, R: IgnoreRuleRepository>(
-    State(state): State<AppState<U, O, B, P, C, R>>,
+pub async fn create_ignore_rule<U, O, B, P, C, R: IgnoreRuleRepository, A>(
+    State(state): State<AppState<U, O, B, P, C, R, A>>,
     auth_user: AuthUser,
     Json(body): Json<IgnoreRuleRequest>,
 ) -> AppResult<(StatusCode, Json<IgnoreRuleResponse>)> {
@@ -137,8 +137,8 @@ pub async fn create_ignore_rule<U, O, B, P, C, R: IgnoreRuleRepository>(
     Ok((StatusCode::CREATED, Json(rule.into())))
 }
 
-pub async fn update_ignore_rule<U, O, B, P, C, R: IgnoreRuleRepository>(
-    State(state): State<AppState<U, O, B, P, C, R>>,
+pub async fn update_ignore_rule<U, O, B, P, C, R: IgnoreRuleRepository, A>(
+    State(state): State<AppState<U, O, B, P, C, R, A>>,
     auth_user: AuthUser,
     Path(id): Path<Uuid>,
     Json(body): Json<IgnoreRuleRequest>,
@@ -152,8 +152,8 @@ pub async fn update_ignore_rule<U, O, B, P, C, R: IgnoreRuleRepository>(
     Ok(Json(rule.into()))
 }
 
-pub async fn delete_ignore_rule<U, O, B, P, C, R: IgnoreRuleRepository>(
-    State(state): State<AppState<U, O, B, P, C, R>>,
+pub async fn delete_ignore_rule<U, O, B, P, C, R: IgnoreRuleRepository, A>(
+    State(state): State<AppState<U, O, B, P, C, R, A>>,
     auth_user: AuthUser,
     Path(id): Path<Uuid>,
 ) -> AppResult<StatusCode> {
@@ -163,8 +163,8 @@ pub async fn delete_ignore_rule<U, O, B, P, C, R: IgnoreRuleRepository>(
     Ok(StatusCode::NO_CONTENT)
 }
 
-pub async fn apply_ignore_rule<U, O: OperationRepository, B, P, C, R: IgnoreRuleRepository>(
-    State(state): State<AppState<U, O, B, P, C, R>>,
+pub async fn apply_ignore_rule<U, O: OperationRepository, B, P, C, R: IgnoreRuleRepository, A>(
+    State(state): State<AppState<U, O, B, P, C, R, A>>,
     auth_user: AuthUser,
     Path(id): Path<Uuid>,
 ) -> AppResult<Json<ApplyIgnoreRuleResponse>> {
@@ -229,6 +229,7 @@ mod tests {
         Operation {
             id: Uuid::new_v4(),
             user_id,
+            account_id: Uuid::nil(),
             amount: dec!(-500),
             date: NaiveDate::from_ymd_opt(2026, 10, 14).unwrap(),
             effective_date: None,

@@ -39,6 +39,7 @@ A personal bank account tracking application
 | apps.api.jwtSecret.labels | object | `{}` | Extra labels for the Secret |
 | apps.api.jwtSecret.name | string | `""` | Secret name (defaults to `<release>-jwt`) |
 | apps.api.logJson | bool | `false` | Emit logs in JSON format |
+| apps.api.maxAccountsPerUser | string | `"20"` | Maximum number of accounts per user |
 | apps.api.maxBudgetsPerUser | string | `"100"` | Maximum number of budgets per user |
 | apps.api.maxCategoriesPerUser | string | `"50"` | Maximum number of categories per user |
 | apps.api.maxIgnoreRulesPerUser | string | `"100"` | Maximum number of ignore rules per user |

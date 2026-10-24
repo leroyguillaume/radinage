@@ -1,0 +1,260 @@
+import { MantineProvider } from "@mantine/core";
+import { DatesProvider } from "@mantine/dates";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { render, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { AccountsSection } from "@/components/AccountsSection";
+import { i18n } from "@/i18n";
+import type { AccountResponse } from "@/lib/types";
+import { theme } from "@/theme";
+
+vi.mock("@/lib/api", () => ({
+	ApiError: class ApiError extends Error {
+		status: number;
+		constructor(status: number, message: string) {
+			super(message);
+			this.name = "ApiError";
+			this.status = status;
+		}
+	},
+	apiFetch: vi.fn(),
+}));
+
+const { apiFetch, ApiError } = await import("@/lib/api");
+const apiFetchMock = vi.mocked(apiFetch);
+
+const perso: AccountResponse = {
+	id: "perso",
+	name: "Compte perso",
+	kind: "checking",
+	imported: true,
+	receivesOperations: true,
+	balance: { id: "b-perso", amount: "1500.00", date: "2025-02-03" },
+	currentBalance: "1655.18",
+	createdAt: "2026-01-01T10:00:00Z",
+};
+
+const livret: AccountResponse = {
+	id: "livret",
+	name: "Livret A",
+	kind: "savings",
+	imported: false,
+	receivesOperations: false,
+	balance: { id: "b-livret", amount: "9760.00", date: "2026-10-21" },
+	currentBalance: "9760.00",
+	createdAt: "2026-01-01T10:00:00Z",
+};
+
+const pro: AccountResponse = {
+	id: "pro",
+	name: "Compte pro",
+	kind: "checking",
+	imported: false,
+	receivesOperations: false,
+	balance: null,
+	currentBalance: null,
+	createdAt: "2026-01-01T10:00:00Z",
+};
+
+/** The id a write to `path` answers with: the account's or balance's, "new" when created. */
+function writtenId(path: string): string {
+	return (
+		path.match(/\/accounts\/[^/]+\/balances\/([^/]+)$/)?.[1] ??
+		path.match(/^\/accounts\/([^/]+)$/)?.[1] ??
+		"new"
+	);
+}
+
+/** Serve `accounts` on GET /accounts and answer writes with `onWrite`. */
+function mockApi(
+	accounts: AccountResponse[],
+	onWrite: (path: string, init: RequestInit) => Promise<unknown> = (
+		path,
+		init,
+	) =>
+		Promise.resolve(
+			typeof init.body === "string"
+				? { id: writtenId(path), ...JSON.parse(init.body) }
+				: undefined,
+		),
+) {
+	apiFetchMock.mockImplementation((path: string, init?: RequestInit) => {
+		if (init?.method) return onWrite(path, init);
+		if (path === "/accounts") return Promise.resolve(accounts);
+		return Promise.reject(new Error(`Unexpected path: ${path}`));
+	});
+}
+
+function renderSection() {
+	const queryClient = new QueryClient({
+		defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+	});
+	render(
+		<QueryClientProvider client={queryClient}>
+			<MantineProvider theme={theme} env="test">
+				<DatesProvider settings={{ locale: "fr" }}>
+					<AccountsSection />
+				</DatesProvider>
+			</MantineProvider>
+		</QueryClientProvider>,
+	);
+}
+
+function writes() {
+	return apiFetchMock.mock.calls
+		.filter(([, init]) => init?.method)
+		.map(([path, init]) => ({
+			path,
+			method: init?.method,
+			body: typeof init?.body === "string" ? JSON.parse(init.body) : undefined,
+		}));
+}
+
+beforeEach(async () => {
+	await i18n.changeLanguage("fr");
+	apiFetchMock.mockReset();
+});
+
+afterEach(() => {
+	vi.restoreAllMocks();
+});
+
+describe("AccountsSection", () => {
+	it("groups the accounts and shows how each balance is known", async () => {
+		mockApi([perso, pro, livret]);
+		renderSection();
+
+		const imported = (await screen.findByText("Courants importés")).closest(
+			"div.mantine-Stack-root",
+		);
+		if (!(imported instanceof HTMLElement)) throw new Error("no group");
+		expect(within(imported).getByText("Compte perso")).toBeInTheDocument();
+		expect(
+			within(imported).getByText("calculé depuis le 03/02/2025"),
+		).toBeInTheDocument();
+		expect(screen.getByText("Épargne")).toBeInTheDocument();
+		expect(screen.getByText("relevé au 21/10/2026")).toBeInTheDocument();
+		expect(screen.getByText("Non importés")).toBeInTheDocument();
+		expect(screen.getByText("sans solde")).toBeInTheDocument();
+	});
+
+	it("creates an imported checking account with its starting point", async () => {
+		mockApi([]);
+		renderSection();
+		const user = userEvent.setup();
+
+		expect(
+			await screen.findByText(/Aucun compte pour l'instant/),
+		).toBeInTheDocument();
+		await user.click(screen.getByRole("button", { name: "Ajouter un compte" }));
+		await user.type(screen.getByLabelText(/Nom/), "  Compte joint ");
+		await user.type(screen.getByLabelText("Point de départ"), "800");
+		await user.click(screen.getByRole("button", { name: "Enregistrer" }));
+
+		await waitFor(() => {
+			expect(writes()).toEqual([
+				{
+					path: "/accounts",
+					method: "POST",
+					body: { name: "Compte joint", kind: "checking", imported: true },
+				},
+				{
+					path: "/accounts/new/balances",
+					method: "POST",
+					body: { amount: "800.00", date: expect.any(String) },
+				},
+			]);
+		});
+	});
+
+	it("never marks a savings account as imported", async () => {
+		mockApi([]);
+		renderSection();
+		const user = userEvent.setup();
+
+		await user.click(
+			await screen.findByRole("button", { name: "Ajouter un compte" }),
+		);
+		await user.type(screen.getByLabelText(/Nom/), "Livret A");
+		await user.click(screen.getByText("Épargne"));
+		expect(
+			screen.queryByLabelText("J'importe les relevés de ce compte"),
+		).not.toBeInTheDocument();
+		await user.click(screen.getByRole("button", { name: "Enregistrer" }));
+
+		await waitFor(() => {
+			expect(writes()).toEqual([
+				{
+					path: "/accounts",
+					method: "POST",
+					body: { name: "Livret A", kind: "savings", imported: false },
+				},
+			]);
+		});
+	});
+
+	it("corrects the recorded balance in place, and leaves an unchanged one alone", async () => {
+		mockApi([perso]);
+		renderSection();
+		const user = userEvent.setup();
+
+		await user.click(
+			await screen.findByRole("button", { name: "Modifier Compte perso" }),
+		);
+		await user.click(screen.getByRole("button", { name: "Enregistrer" }));
+		await waitFor(() => expect(writes()).toHaveLength(1));
+		expect(writes()[0]).toMatchObject({
+			path: "/accounts/perso",
+			method: "PUT",
+		});
+
+		apiFetchMock.mockClear();
+		await user.click(
+			await screen.findByRole("button", { name: "Modifier Compte perso" }),
+		);
+		const amount = screen.getByLabelText("Point de départ");
+		await user.clear(amount);
+		await user.type(amount, "1450,5");
+		await user.click(screen.getByRole("button", { name: "Enregistrer" }));
+
+		await waitFor(() => {
+			expect(writes()).toContainEqual({
+				path: "/accounts/perso/balances/b-perso",
+				method: "PUT",
+				body: { amount: "1450.50", date: "2025-02-03" },
+			});
+		});
+	});
+
+	it("rejects an invalid amount without writing anything", async () => {
+		mockApi([]);
+		renderSection();
+		const user = userEvent.setup();
+
+		await user.click(
+			await screen.findByRole("button", { name: "Ajouter un compte" }),
+		);
+		await user.type(screen.getByLabelText(/Nom/), "Compte joint");
+		await user.type(screen.getByLabelText("Point de départ"), "douze");
+		await user.click(screen.getByRole("button", { name: "Enregistrer" }));
+
+		expect(await screen.findByText("Montant invalide")).toBeInTheDocument();
+		expect(writes()).toEqual([]);
+	});
+
+	it("explains why an account holding operations cannot be deleted", async () => {
+		mockApi([perso], () => Promise.reject(new ApiError(409, "Conflict")));
+		renderSection();
+		const user = userEvent.setup();
+
+		await user.click(
+			await screen.findByRole("button", { name: "Supprimer Compte perso" }),
+		);
+		await user.click(screen.getByRole("button", { name: "Supprimer" }));
+
+		expect(
+			await screen.findByText(/Ce compte contient des opérations/),
+		).toBeInTheDocument();
+	});
+});

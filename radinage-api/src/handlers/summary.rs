@@ -153,8 +153,8 @@ fn range_bounds(q: &SummaryQuery) -> AppResult<(NaiveDate, NaiveDate)> {
     Ok((start, end))
 }
 
-pub async fn get_category_summary<U, O: OperationRepository, B, P, C, R>(
-    State(state): State<AppState<U, O, B, P, C, R>>,
+pub async fn get_category_summary<U, O: OperationRepository, B, P, C, R, A>(
+    State(state): State<AppState<U, O, B, P, C, R, A>>,
     auth_user: AuthUser,
     Query(q): Query<SummaryQuery>,
 ) -> AppResult<Json<CategorySummaryResponse>> {
@@ -183,8 +183,8 @@ fn actuals_by_budget_and_month(rows: &[SummaryRow]) -> HashMap<(Uuid, YearMonth)
     actuals
 }
 
-pub async fn get_budget_summary<U, O: OperationRepository, B: BudgetRepository, P, C, R>(
-    State(state): State<AppState<U, O, B, P, C, R>>,
+pub async fn get_budget_summary<U, O: OperationRepository, B: BudgetRepository, P, C, R, A>(
+    State(state): State<AppState<U, O, B, P, C, R, A>>,
     auth_user: AuthUser,
     Query(q): Query<SummaryQuery>,
 ) -> AppResult<Json<BudgetSummaryResponse>> {
@@ -233,8 +233,8 @@ pub async fn get_budget_summary<U, O: OperationRepository, B: BudgetRepository, 
     Ok(Json(BudgetSummaryResponse { budgets }))
 }
 
-pub async fn get_summary<U, O: OperationRepository, B, P, C, R>(
-    State(state): State<AppState<U, O, B, P, C, R>>,
+pub async fn get_summary<U, O: OperationRepository, B, P, C, R, A>(
+    State(state): State<AppState<U, O, B, P, C, R, A>>,
     auth_user: AuthUser,
     Query(q): Query<SummaryQuery>,
 ) -> AppResult<Json<SummaryResponse>> {
@@ -384,6 +384,7 @@ mod tests {
             Box::pin(async {
                 Ok(vec![
                     SummaryRow {
+                        account_id: Uuid::nil(),
                         date: NaiveDate::from_ymd_opt(2024, 1, 15).unwrap(),
                         budget_id: None,
                         amount: Decimal::new(-800, 0),
@@ -391,6 +392,7 @@ mod tests {
                         budget_type: Some("expense".to_string()),
                     },
                     SummaryRow {
+                        account_id: Uuid::nil(),
                         date: NaiveDate::from_ymd_opt(2024, 1, 15).unwrap(),
                         budget_id: None,
                         amount: Decimal::new(-50, 0),
@@ -398,6 +400,7 @@ mod tests {
                         budget_type: None,
                     },
                     SummaryRow {
+                        account_id: Uuid::nil(),
                         date: NaiveDate::from_ymd_opt(2024, 1, 15).unwrap(),
                         budget_id: None,
                         amount: Decimal::new(3000, 0),
@@ -405,6 +408,7 @@ mod tests {
                         budget_type: Some("income".to_string()),
                     },
                     SummaryRow {
+                        account_id: Uuid::nil(),
                         date: NaiveDate::from_ymd_opt(2024, 1, 15).unwrap(),
                         budget_id: None,
                         amount: Decimal::new(-200, 0),
@@ -507,6 +511,7 @@ mod tests {
 
     fn linked(budget_id: Option<Uuid>, link: &str, date: NaiveDate, amount: i64) -> SummaryRow {
         SummaryRow {
+            account_id: Uuid::nil(),
             amount: Decimal::new(amount, 0),
             date,
             budget_link_type: link.to_string(),

@@ -76,6 +76,7 @@ const budgets: BudgetResponse[] = [
 function operation(overrides: Partial<OperationResponse>): OperationResponse {
 	return {
 		id: "op",
+		accountId: "account-1",
 		amount: "-10.00",
 		date: "2026-01-15",
 		effectiveDate: null,
@@ -92,6 +93,7 @@ function operation(overrides: Partial<OperationResponse>): OperationResponse {
 
 const rent = operation({
 	id: "op-rent",
+	accountId: "account-1",
 	amount: "-800.00",
 	date: "2026-02-01",
 	label: "LOYER FEVRIER",
@@ -101,6 +103,7 @@ const rent = operation({
 
 const groceries = operation({
 	id: "op-groceries",
+	accountId: "account-1",
 	amount: "-54.20",
 	date: "2025-12-30",
 	effectiveDate: "2025-11-30",
@@ -111,6 +114,7 @@ const groceries = operation({
 
 const salary = operation({
 	id: "op-salary",
+	accountId: "account-1",
 	amount: "2500.00",
 	date: "2025-11-28",
 	label: "SALAIRE",

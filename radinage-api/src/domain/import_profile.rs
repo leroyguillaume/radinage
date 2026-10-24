@@ -57,6 +57,8 @@ impl std::str::FromStr for CsvDelimiter {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ImportProfileFields {
     pub name: String,
+    /// Account the operations imported with the profile go to.
+    pub account_id: Uuid,
     pub label_col: usize,
     pub amount_col: usize,
     pub date_col: usize,

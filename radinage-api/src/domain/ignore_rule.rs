@@ -41,6 +41,7 @@ mod tests {
         Operation {
             id: Uuid::new_v4(),
             user_id: Uuid::new_v4(),
+            account_id: Uuid::nil(),
             amount,
             date: NaiveDate::from_ymd_opt(2026, 10, 14).unwrap(),
             effective_date: None,

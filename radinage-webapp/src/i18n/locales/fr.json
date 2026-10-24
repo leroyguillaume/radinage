@@ -157,7 +157,10 @@
 		"nameTaken": "Un profil porte déjà ce nom, ou le nombre maximal de profils est atteint",
 		"saveError": "Erreur lors de l'enregistrement du profil",
 		"deleteConfirm": "Confirmer la suppression",
-		"deleteError": "Erreur lors de la suppression du profil"
+		"deleteError": "Erreur lors de la suppression du profil",
+		"account": "Compte",
+		"accountHint": "Les opérations importées avec ce profil vont sur ce compte.",
+		"noAccount": "Ajoute d'abord, dans les réglages, un compte courant dont tu importes les relevés."
 	},
 	"importProfiles": {
 		"title": "Profils d'import",
@@ -620,19 +623,6 @@
 		"success": "Mot de passe modifié avec succès",
 		"errorCurrentPassword": "Le mot de passe actuel est incorrect",
 		"errorPasswordMismatch": "Les nouveaux mots de passe ne correspondent pas",
-		"balance": {
-			"title": "Solde du compte",
-			"description": "Le solde affiché par ta banque à une date donnée. Le résumé part de ce solde au lieu de zéro.",
-			"amount": "Solde",
-			"date": "Date du solde",
-			"hint": "Les opérations de ce jour-là sont considérées comme déjà incluses dans ce solde : choisis la date du relevé ou de la consultation, puis seules les opérations des jours suivants s'y ajoutent.",
-			"save": "Enregistrer le solde",
-			"clear": "Effacer le solde",
-			"saved": "Solde enregistré",
-			"cleared": "Solde effacé : le résumé repart de zéro.",
-			"errorAmount": "Montant invalide",
-			"errorDate": "La date du solde ne peut pas être dans le futur"
-		},
 		"data": {
 			"title": "Données",
 			"description": "Exportez une sauvegarde complète (budgets + opérations) ou importez-la pour restaurer ou migrer votre compte.",
@@ -641,8 +631,46 @@
 			"import": "Importer des données",
 			"importError": "Fichier invalide ou import refusé",
 			"importSuccess": "{{categories}} catégorie(s) importée(s) ({{skippedCategories}} déjà présente(s)), {{budgets}} budget(s) importé(s) ({{skippedBudgets}} ignoré(s)), {{ignoreRules}} règle(s) d'ignore importée(s) ({{skippedIgnoreRules}} déjà présente(s)), {{operations}} opération(s) importée(s) ({{skippedOperations}} ignorée(s))",
-			"importedBalance": "Solde du compte importé."
+			"importedAccounts": "{{accounts}} compte(s) importé(s) ({{skippedAccounts}} déjà présent(s)), {{balances}} solde(s) importé(s)."
 		}
+	},
+	"accounts": {
+		"title": "Mes comptes",
+		"description": "Le résumé part de la somme des comptes courants dont tu importes les relevés.",
+		"fetchError": "Impossible de charger les comptes",
+		"empty": "Aucun compte pour l'instant. Ajoute ton compte courant pour y importer tes relevés.",
+		"groups": {
+			"imported": "Courants importés",
+			"savings": "Épargne",
+			"other": "Non importés"
+		},
+		"add": "Ajouter un compte",
+		"edit": "Modifier {{name}}",
+		"delete": "Supprimer {{name}}",
+		"confirmDelete": "Supprimer le compte « {{name}} » et ses soldes ?",
+		"inUse": "Ce compte contient des opérations ou des profils d'import : il ne peut être ni supprimé, ni changé en compte qui ne reçoit pas d'opérations.",
+		"name": "Nom",
+		"namePlaceholder": "Ex. : Compte joint",
+		"kind": "Type",
+		"kinds": {
+			"checking": "Courant",
+			"savings": "Épargne"
+		},
+		"imported": "J'importe les relevés de ce compte",
+		"importedHint": "Son solde se calcule à partir des opérations importées, et sert de point de départ au résumé.",
+		"notImportedHint": "Il vaut le dernier solde que tu y relèves, et n'entre pas dans le résumé.",
+		"startingBalance": "Point de départ",
+		"balance": "Solde",
+		"balanceDate": "Au",
+		"balanceHint": "Le solde affiché par ta banque ce jour-là, opérations du jour comprises : seules les opérations des jours suivants s'y ajoutent.",
+		"computed": "calculé depuis le {{date}}",
+		"readOn": "relevé au {{date}}",
+		"noBalance": "sans solde",
+		"clearBalance": "Effacer le solde",
+		"nameTaken": "Un compte porte déjà ce nom, ou le nombre maximal de comptes est atteint",
+		"saveError": "Erreur lors de l'enregistrement du compte",
+		"errorAmount": "Montant invalide",
+		"errorDate": "La date du solde ne peut pas être dans le futur"
 	},
 	"activate": {
 		"title": "Activer votre compte",

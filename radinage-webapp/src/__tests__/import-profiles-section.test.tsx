@@ -29,6 +29,7 @@ function makeProfile(
 	return {
 		id: "p1",
 		name: "Crédit Agricole",
+		accountId: "account-1",
 		labelCol: 1,
 		amountCol: 3,
 		dateCol: 0,
@@ -41,11 +42,25 @@ function makeProfile(
 	};
 }
 
-/** Serve `profiles` on the list and accept every write. */
+/** Serve `profiles` on the list, one account receiving operations, and accept every write. */
 function mockApi(profiles: ImportProfileResponse[]) {
 	apiFetchMock.mockImplementation(async (path, init) => {
 		if (path === "/import-profiles" && init?.method === undefined) {
 			return profiles;
+		}
+		if (path === "/accounts") {
+			return [
+				{
+					id: "account-1",
+					name: "Compte perso",
+					kind: "checking",
+					imported: true,
+					receivesOperations: true,
+					balance: null,
+					currentBalance: null,
+					createdAt: "2026-01-01T10:00:00Z",
+				},
+			];
 		}
 		if (path.startsWith("/import-profiles")) return undefined;
 		throw new Error(`unexpected call to ${path}`);

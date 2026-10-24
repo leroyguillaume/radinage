@@ -5,7 +5,7 @@ use crate::{
 use sqlx::{PgPool, Row, postgres::PgRow};
 use uuid::Uuid;
 
-const COLUMNS: &str = "id, user_id, name, label_col, amount_col, date_col, date_format, skip_lines, \
+const COLUMNS: &str = "id, user_id, name, account_id, label_col, amount_col, date_col, date_format, skip_lines, \
      csv_delimiter, last_used_at, created_at";
 
 /// Data access interface for import profiles.
@@ -78,6 +78,7 @@ fn row_to_profile(row: &PgRow) -> AppResult<ImportProfile> {
         user_id: row.try_get("user_id")?,
         fields: ImportProfileFields {
             name: row.try_get("name")?,
+            account_id: row.try_get("account_id")?,
             label_col: from_db(row, "label_col")?,
             amount_col: from_db(row, "amount_col")?,
             date_col: from_db(row, "date_col")?,
@@ -132,8 +133,8 @@ impl ImportProfileRepository for PgImportProfileRepository {
         let row = sqlx::query(&format!(
             "INSERT INTO import_profiles \
              (user_id, name, label_col, amount_col, date_col, date_format, skip_lines, \
-             csv_delimiter) \
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING {COLUMNS}"
+             csv_delimiter, account_id) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING {COLUMNS}"
         ))
         .bind(user_id)
         .bind(&fields.name)
@@ -143,6 +144,7 @@ impl ImportProfileRepository for PgImportProfileRepository {
         .bind(&fields.date_format)
         .bind(to_db(fields.skip_lines)?)
         .bind(fields.csv_delimiter.as_str())
+        .bind(fields.account_id)
         .fetch_one(&self.pool)
         .await
         .map_err(|e| map_name_conflict(e, &fields.name))?;
@@ -157,7 +159,8 @@ impl ImportProfileRepository for PgImportProfileRepository {
     ) -> AppResult<Option<ImportProfile>> {
         let row = sqlx::query(&format!(
             "UPDATE import_profiles SET name = $3, label_col = $4, amount_col = $5, \
-             date_col = $6, date_format = $7, skip_lines = $8, csv_delimiter = $9 \
+             date_col = $6, date_format = $7, skip_lines = $8, csv_delimiter = $9, \
+             account_id = $10 \
              WHERE id = $1 AND user_id = $2 RETURNING {COLUMNS}"
         ))
         .bind(id)
@@ -169,6 +172,7 @@ impl ImportProfileRepository for PgImportProfileRepository {
         .bind(&fields.date_format)
         .bind(to_db(fields.skip_lines)?)
         .bind(fields.csv_delimiter.as_str())
+        .bind(fields.account_id)
         .fetch_optional(&self.pool)
         .await
         .map_err(|e| map_name_conflict(e, &fields.name))?;
@@ -204,18 +208,28 @@ mod tests {
         repositories::{PgUserRepository, UserRepository},
     };
 
+    /// A user with one imported checking account sharing its id.
     async fn make_user(pool: &PgPool, username: &str) -> Uuid {
         let id = Uuid::new_v4();
         PgUserRepository::new(pool.clone())
             .create(id, username, "hash", UserRole::User)
             .await
             .unwrap();
+        sqlx::query(
+            "INSERT INTO accounts (id, user_id, name, kind, imported) \
+             VALUES ($1, $1, 'Main', 'checking', TRUE)",
+        )
+        .bind(id)
+        .execute(pool)
+        .await
+        .unwrap();
         id
     }
 
-    fn fields(name: &str) -> ImportProfileFields {
+    fn fields(account_id: Uuid, name: &str) -> ImportProfileFields {
         ImportProfileFields {
             name: name.to_string(),
+            account_id,
             label_col: 1,
             amount_col: 3,
             date_col: 0,
@@ -237,12 +251,21 @@ mod tests {
         let bob = make_user(&pool, "bob").await;
         let repo = PgImportProfileRepository::new(pool);
 
-        let created = repo.create(alice, &fields("Bank")).await.unwrap();
+        let created = repo.create(alice, &fields(alice, "Bank")).await.unwrap();
 
-        assert_eq!(created.fields, fields("Bank"));
+        assert_eq!(created.fields, fields(alice, "Bank"));
         assert_eq!(created.last_used_at, None);
         assert_eq!(only(&repo, alice).await, created);
         assert!(repo.list(bob).await.unwrap().is_empty());
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn a_profile_cannot_point_at_another_users_account(pool: PgPool) {
+        let alice = make_user(&pool, "alice").await;
+        let bob = make_user(&pool, "bob").await;
+        let repo = PgImportProfileRepository::new(pool);
+
+        assert!(repo.create(alice, &fields(bob, "Bank")).await.is_err());
     }
 
     #[sqlx::test(migrations = "./migrations")]
@@ -251,13 +274,13 @@ mod tests {
         let bob = make_user(&pool, "bob").await;
         let repo = PgImportProfileRepository::new(pool);
 
-        repo.create(alice, &fields("Bank")).await.unwrap();
+        repo.create(alice, &fields(alice, "Bank")).await.unwrap();
 
         assert!(matches!(
-            repo.create(alice, &fields("Bank")).await,
+            repo.create(alice, &fields(alice, "Bank")).await,
             Err(AppError::Conflict(_))
         ));
-        repo.create(bob, &fields("Bank")).await.unwrap();
+        repo.create(bob, &fields(bob, "Bank")).await.unwrap();
     }
 
     #[sqlx::test(migrations = "./migrations")]
@@ -265,9 +288,16 @@ mod tests {
         let user_id = make_user(&pool, "alice").await;
         let repo = PgImportProfileRepository::new(pool);
 
-        repo.create(user_id, &fields("Zeta")).await.unwrap();
-        repo.create(user_id, &fields("Alpha")).await.unwrap();
-        let used = repo.create(user_id, &fields("Used")).await.unwrap();
+        repo.create(user_id, &fields(user_id, "Zeta"))
+            .await
+            .unwrap();
+        repo.create(user_id, &fields(user_id, "Alpha"))
+            .await
+            .unwrap();
+        let used = repo
+            .create(user_id, &fields(user_id, "Used"))
+            .await
+            .unwrap();
         repo.mark_used(used.id, user_id).await.unwrap();
 
         let names: Vec<String> = repo
@@ -287,11 +317,11 @@ mod tests {
         let alice = make_user(&pool, "alice").await;
         let bob = make_user(&pool, "bob").await;
         let repo = PgImportProfileRepository::new(pool);
-        let created = repo.create(alice, &fields("Bank")).await.unwrap();
+        let created = repo.create(alice, &fields(alice, "Bank")).await.unwrap();
         let changed = ImportProfileFields {
             skip_lines: 4,
             csv_delimiter: CsvDelimiter::Semicolon,
-            ..fields("Renamed")
+            ..fields(alice, "Renamed")
         };
 
         assert!(
@@ -314,7 +344,7 @@ mod tests {
         let alice = make_user(&pool, "alice").await;
         let bob = make_user(&pool, "bob").await;
         let repo = PgImportProfileRepository::new(pool);
-        let created = repo.create(alice, &fields("Bank")).await.unwrap();
+        let created = repo.create(alice, &fields(alice, "Bank")).await.unwrap();
 
         repo.mark_used(created.id, bob).await.unwrap();
         assert!(only(&repo, alice).await.last_used_at.is_none());
@@ -328,7 +358,7 @@ mod tests {
         let alice = make_user(&pool, "alice").await;
         let bob = make_user(&pool, "bob").await;
         let repo = PgImportProfileRepository::new(pool);
-        let created = repo.create(alice, &fields("Bank")).await.unwrap();
+        let created = repo.create(alice, &fields(alice, "Bank")).await.unwrap();
 
         assert!(!repo.delete(created.id, bob).await.unwrap());
         assert!(repo.delete(created.id, alice).await.unwrap());

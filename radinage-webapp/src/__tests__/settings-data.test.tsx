@@ -19,23 +19,21 @@ vi.mock("@/lib/api", () => ({
 	apiFetch: vi.fn(),
 }));
 
-const { apiFetch, ApiError } = await import("@/lib/api");
+const { apiFetch } = await import("@/lib/api");
 const apiFetchMock = vi.mocked(apiFetch);
 
 /**
- * Answer data calls with `handler`; the account balance section finds no balance, the
- * categories section no category, the ignore rules section no rule and the import
- * profiles section no profile.
+ * Answer data calls with `handler`; the accounts, categories, ignore rules and import
+ * profiles sections find nothing.
  */
 function mockApi(handler: (path: string) => Promise<unknown>) {
-	apiFetchMock.mockImplementation((path: string) => {
-		if (path === "/users/me/balance") {
-			return Promise.reject(new ApiError(404, "Not Found"));
-		}
-		return ["/categories", "/ignore-rules", "/import-profiles"].includes(path)
+	apiFetchMock.mockImplementation((path: string) =>
+		["/accounts", "/categories", "/ignore-rules", "/import-profiles"].includes(
+			path,
+		)
 			? Promise.resolve([])
-			: handler(path);
-	});
+			: handler(path),
+	);
 }
 
 function renderPage() {
@@ -134,7 +132,9 @@ describe("SettingsPage data section", () => {
 				skippedIgnoreRules: 0,
 				importedOperations: 5,
 				skippedOperations: 3,
-				importedBalance: false,
+				importedAccounts: 0,
+				skippedAccounts: 0,
+				importedBalances: 0,
 			}),
 		);
 
@@ -159,7 +159,7 @@ describe("SettingsPage data section", () => {
 		});
 		expect(
 			await screen.findByText(
-				"4 catégorie(s) importée(s) (1 déjà présente(s)), 2 budget(s) importé(s) (1 ignoré(s)), 3 règle(s) d'ignore importée(s) (0 déjà présente(s)), 5 opération(s) importée(s) (3 ignorée(s))",
+				/^4 catégorie\(s\) importée\(s\) \(1 déjà présente\(s\)\), 2 budget\(s\) importé\(s\) \(1 ignoré\(s\)\), 3 règle\(s\) d'ignore importée\(s\) \(0 déjà présente\(s\)\), 5 opération\(s\) importée\(s\) \(3 ignorée\(s\)\)/,
 			),
 		).toBeInTheDocument();
 	});
@@ -205,7 +205,7 @@ describe("SettingsPage data section", () => {
 		).toBeInTheDocument();
 	});
 
-	it("says when the import recorded the account balance", async () => {
+	it("says how many accounts and balances the import brought", async () => {
 		mockApi(() =>
 			Promise.resolve({
 				importedCategories: 0,
@@ -216,7 +216,9 @@ describe("SettingsPage data section", () => {
 				skippedIgnoreRules: 0,
 				importedOperations: 0,
 				skippedOperations: 0,
-				importedBalance: true,
+				importedAccounts: 2,
+				skippedAccounts: 1,
+				importedBalances: 3,
 			}),
 		);
 		renderPage();
@@ -237,7 +239,9 @@ describe("SettingsPage data section", () => {
 		await user.upload(fileInput, file);
 
 		expect(
-			await screen.findByText(/Solde du compte importé\./),
+			await screen.findByText(
+				/2 compte\(s\) importé\(s\) \(1 déjà présent\(s\)\), 3 solde\(s\) importé\(s\)\./,
+			),
 		).toBeInTheDocument();
 	});
 });

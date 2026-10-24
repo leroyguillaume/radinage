@@ -157,7 +157,10 @@
 		"nameTaken": "A profile already has this name, or the maximum number of profiles is reached",
 		"saveError": "Could not save the profile",
 		"deleteConfirm": "Confirm deletion",
-		"deleteError": "Could not delete the profile"
+		"deleteError": "Could not delete the profile",
+		"account": "Account",
+		"accountHint": "The operations imported with this profile go to this account.",
+		"noAccount": "First add, in the settings, a checking account whose statements you import."
 	},
 	"importProfiles": {
 		"title": "Import profiles",
@@ -620,19 +623,6 @@
 		"success": "Password changed successfully",
 		"errorCurrentPassword": "Current password is incorrect",
 		"errorPasswordMismatch": "New passwords do not match",
-		"balance": {
-			"title": "Account balance",
-			"description": "The balance your bank shows on a given date. The summary starts from it instead of zero.",
-			"amount": "Balance",
-			"date": "Balance date",
-			"hint": "Operations on that day are considered already included in this balance: pick the date you read it, and only operations of the following days are added to it.",
-			"save": "Save balance",
-			"clear": "Clear balance",
-			"saved": "Balance saved",
-			"cleared": "Balance cleared: the summary starts from zero again.",
-			"errorAmount": "Invalid amount",
-			"errorDate": "The balance date cannot be in the future"
-		},
 		"data": {
 			"title": "Data",
 			"description": "Export a full backup (budgets + operations) or import one to restore or migrate your account.",
@@ -641,8 +631,46 @@
 			"import": "Import data",
 			"importError": "Invalid file or import rejected",
 			"importSuccess": "{{categories}} category(ies) imported ({{skippedCategories}} already present), {{budgets}} budget(s) imported ({{skippedBudgets}} skipped), {{ignoreRules}} ignore rule(s) imported ({{skippedIgnoreRules}} already present), {{operations}} operation(s) imported ({{skippedOperations}} skipped)",
-			"importedBalance": "Account balance imported."
+			"importedAccounts": "{{accounts}} account(s) imported ({{skippedAccounts}} already present), {{balances}} balance(s) imported."
 		}
+	},
+	"accounts": {
+		"title": "My accounts",
+		"description": "The summary starts from the sum of the checking accounts whose statements you import.",
+		"fetchError": "Could not load the accounts",
+		"empty": "No accounts yet. Add your checking account to import your statements on it.",
+		"groups": {
+			"imported": "Imported checking",
+			"savings": "Savings",
+			"other": "Not imported"
+		},
+		"add": "Add an account",
+		"edit": "Edit {{name}}",
+		"delete": "Delete {{name}}",
+		"confirmDelete": "Delete the account “{{name}}” and its balances?",
+		"inUse": "This account holds operations or import profiles: it can neither be deleted nor changed into an account that receives no operations.",
+		"name": "Name",
+		"namePlaceholder": "E.g. Joint account",
+		"kind": "Type",
+		"kinds": {
+			"checking": "Checking",
+			"savings": "Savings"
+		},
+		"imported": "I import this account's statements",
+		"importedHint": "Its balance follows from the imported operations, and is where the summary starts from.",
+		"notImportedHint": "It is worth the last balance you read on it, and stays out of the summary.",
+		"startingBalance": "Starting point",
+		"balance": "Balance",
+		"balanceDate": "On",
+		"balanceHint": "The balance your bank showed that day, that day's operations included: only the operations of the following days add to it.",
+		"computed": "computed since {{date}}",
+		"readOn": "read on {{date}}",
+		"noBalance": "no balance",
+		"clearBalance": "Clear the balance",
+		"nameTaken": "An account already has this name, or the maximum number of accounts is reached",
+		"saveError": "Could not save the account",
+		"errorAmount": "Invalid amount",
+		"errorDate": "The balance date cannot be in the future"
 	},
 	"activate": {
 		"title": "Activate your account",

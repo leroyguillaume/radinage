@@ -54,6 +54,7 @@ function makeOperation(
 ): OperationResponse {
 	return {
 		id: "op1",
+		accountId: "account-1",
 		amount: "-100.00",
 		date: "2026-04-05",
 		effectiveDate: null,

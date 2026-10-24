@@ -36,6 +36,7 @@ macro_rules! string_enum {
     };
 }
 
+pub mod account;
 pub mod budget;
 pub mod category;
 pub mod ignore_rule;

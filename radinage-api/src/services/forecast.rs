@@ -3,8 +3,8 @@
 
 use crate::{
     domain::{
+        account::AccountBalance,
         budget::{Budget, BudgetType, YearMonth},
-        user::AccountBalance,
     },
     repositories::{SummaryCategory, SummaryRow},
 };
@@ -255,6 +255,35 @@ pub fn starting_balance<'a>(
     } else {
         balance.amount - net
     }
+}
+
+/// The smallest span of accounting dates covering the [`balance_adjustment_window`] of every
+/// balance, `None` when none needs any operation.
+pub fn accounts_adjustment_window(
+    balances: &[(Uuid, AccountBalance)],
+    start: NaiveDate,
+) -> Option<(NaiveDate, NaiveDate)> {
+    balances
+        .iter()
+        .filter_map(|(_, balance)| balance_adjustment_window(balance.date, start))
+        .reduce(|(first, last), (f, l)| (first.min(f), last.max(l)))
+}
+
+/// Balance of several accounts at the start of `start`: each account's balance brought there by
+/// [`starting_balance`] with the rows of its own operations, summed. `None` without any balance.
+/// `rows` must cover [`accounts_adjustment_window`]; rows outside it are ignored.
+pub fn accounts_starting_balance(
+    balances: &[(Uuid, AccountBalance)],
+    start: NaiveDate,
+    rows: &[SummaryRow],
+) -> Option<Decimal> {
+    balances
+        .iter()
+        .map(|(account_id, balance)| {
+            let own = rows.iter().filter(|row| row.account_id == *account_id);
+            starting_balance(*balance, start, own)
+        })
+        .reduce(|sum, balance| sum + balance)
 }
 
 pub fn compute_forecast(input: &ForecastInput<'_>) -> Forecast {
@@ -551,6 +580,7 @@ mod tests {
 
     fn row(day: NaiveDate, amount: Decimal, budget_type: Option<&str>) -> SummaryRow {
         SummaryRow {
+            account_id: Uuid::nil(),
             amount,
             date: day,
             budget_link_type: if budget_type.is_some() {
@@ -742,6 +772,7 @@ mod tests {
 
     fn linked(day: NaiveDate, amount: Decimal, budget: &Budget) -> SummaryRow {
         SummaryRow {
+            account_id: Uuid::nil(),
             amount,
             date: day,
             budget_link_type: "manual".to_string(),
@@ -1309,6 +1340,59 @@ mod tests {
             starting_balance(balance, date(2026, 1, 1), &rows),
             dec!(42.5)
         );
+    }
+
+    fn account_row(account_id: Uuid, day: NaiveDate, amount: Decimal) -> SummaryRow {
+        SummaryRow {
+            account_id,
+            ..row(day, amount, None)
+        }
+    }
+
+    #[test]
+    fn accounts_start_from_the_sum_of_their_own_brought_forward_balances() {
+        let (perso, joint) = (Uuid::new_v4(), Uuid::new_v4());
+        let balances = [
+            (
+                perso,
+                AccountBalance {
+                    amount: dec!(1000),
+                    date: date(2025, 12, 10),
+                },
+            ),
+            (
+                joint,
+                AccountBalance {
+                    amount: dec!(800),
+                    date: date(2026, 1, 20),
+                },
+            ),
+        ];
+        let rows = [
+            // After the perso balance and before the start: added to perso.
+            account_row(perso, date(2025, 12, 15), dec!(-200)),
+            // Before the joint balance and before the start: outside the joint window.
+            account_row(joint, date(2025, 12, 15), dec!(-999)),
+            // Up to the more recent joint balance: taken back out of joint only.
+            account_row(joint, date(2026, 1, 5), dec!(300)),
+            account_row(perso, date(2026, 1, 5), dec!(-999)),
+        ];
+
+        assert_eq!(
+            accounts_adjustment_window(&balances, date(2026, 1, 1)),
+            Some((date(2025, 12, 11), date(2026, 1, 20)))
+        );
+        // (1000 - 200) + (800 - 300)
+        assert_eq!(
+            accounts_starting_balance(&balances, date(2026, 1, 1), &rows),
+            Some(dec!(1300))
+        );
+    }
+
+    #[test]
+    fn no_account_balance_means_no_starting_balance() {
+        assert_eq!(accounts_adjustment_window(&[], date(2026, 1, 1)), None);
+        assert_eq!(accounts_starting_balance(&[], date(2026, 1, 1), &[]), None);
     }
 
     #[test]

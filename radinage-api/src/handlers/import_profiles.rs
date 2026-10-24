@@ -3,7 +3,8 @@ use crate::{
     auth::middleware::AuthUser,
     domain::import_profile::{CsvDelimiter, ImportProfile, ImportProfileFields},
     error::{AppError, AppResult},
-    repositories::ImportProfileRepository,
+    handlers::accounts::account_receiving_operations,
+    repositories::{AccountRepository, ImportProfileRepository},
 };
 use axum::{
     Json,
@@ -27,6 +28,7 @@ const MAX_NAME_LEN: usize = 100;
 #[serde(rename_all = "camelCase")]
 #[schemars(extend("example" = serde_json::json!({
     "name": "Crédit Agricole — CSV",
+    "accountId": "0b6f3f8e-2c1a-4d5e-9f00-1a2b3c4d5e6f",
     "labelCol": 1,
     "amountCol": 3,
     "dateCol": 0,
@@ -37,6 +39,9 @@ const MAX_NAME_LEN: usize = 100;
 pub struct ImportProfileRequest {
     /// Name shown when picking a profile, unique per user (1 to 100 characters).
     pub name: String,
+    /// Account the operations imported with the profile go to: one of the user's imported
+    /// checking accounts.
+    pub account_id: Uuid,
     /// Column index of the label (0-based).
     pub label_col: usize,
     /// Column index of the amount (0-based).
@@ -58,6 +63,7 @@ pub struct ImportProfileRequest {
 pub struct ImportProfileResponse {
     pub id: Uuid,
     pub name: String,
+    pub account_id: Uuid,
     pub label_col: usize,
     pub amount_col: usize,
     pub date_col: usize,
@@ -74,6 +80,7 @@ impl From<ImportProfile> for ImportProfileResponse {
         Self {
             id: p.id,
             name: p.fields.name,
+            account_id: p.fields.account_id,
             label_col: p.fields.label_col,
             amount_col: p.fields.amount_col,
             date_col: p.fields.date_col,
@@ -114,6 +121,7 @@ impl TryFrom<ImportProfileRequest> for ImportProfileFields {
         }
         Ok(Self {
             name,
+            account_id: body.account_id,
             label_col: body.label_col,
             amount_col: body.amount_col,
             date_col: body.date_col,
@@ -126,8 +134,8 @@ impl TryFrom<ImportProfileRequest> for ImportProfileFields {
 
 // ── Handlers ─────────────────────────────────────────────────────────────────
 
-pub async fn list_import_profiles<U, O, B, P: ImportProfileRepository, C, R>(
-    State(state): State<AppState<U, O, B, P, C, R>>,
+pub async fn list_import_profiles<U, O, B, P: ImportProfileRepository, C, R, A>(
+    State(state): State<AppState<U, O, B, P, C, R, A>>,
     auth_user: AuthUser,
 ) -> AppResult<Json<Vec<ImportProfileResponse>>> {
     let profiles = state.import_profile_repo.list(auth_user.id).await?;
@@ -139,12 +147,21 @@ pub async fn list_import_profiles<U, O, B, P: ImportProfileRepository, C, R>(
     ))
 }
 
-pub async fn create_import_profile<U, O, B, P: ImportProfileRepository, C, R>(
-    State(state): State<AppState<U, O, B, P, C, R>>,
+pub async fn create_import_profile<
+    U,
+    O,
+    B,
+    P: ImportProfileRepository,
+    C,
+    R,
+    A: AccountRepository,
+>(
+    State(state): State<AppState<U, O, B, P, C, R, A>>,
     auth_user: AuthUser,
     Json(body): Json<ImportProfileRequest>,
 ) -> AppResult<(StatusCode, Json<ImportProfileResponse>)> {
     let fields = ImportProfileFields::try_from(body)?;
+    account_receiving_operations(&state.account_repo, fields.account_id, auth_user.id).await?;
     let max = state.config.max_import_profiles_per_user;
     if state.import_profile_repo.count(auth_user.id).await? >= i64::from(max) {
         return Err(AppError::Conflict(format!(
@@ -158,13 +175,22 @@ pub async fn create_import_profile<U, O, B, P: ImportProfileRepository, C, R>(
     Ok((StatusCode::CREATED, Json(profile.into())))
 }
 
-pub async fn update_import_profile<U, O, B, P: ImportProfileRepository, C, R>(
-    State(state): State<AppState<U, O, B, P, C, R>>,
+pub async fn update_import_profile<
+    U,
+    O,
+    B,
+    P: ImportProfileRepository,
+    C,
+    R,
+    A: AccountRepository,
+>(
+    State(state): State<AppState<U, O, B, P, C, R, A>>,
     auth_user: AuthUser,
     Path(id): Path<Uuid>,
     Json(body): Json<ImportProfileRequest>,
 ) -> AppResult<Json<ImportProfileResponse>> {
     let fields = ImportProfileFields::try_from(body)?;
+    account_receiving_operations(&state.account_repo, fields.account_id, auth_user.id).await?;
     let profile = state
         .import_profile_repo
         .update(id, auth_user.id, &fields)
@@ -173,8 +199,8 @@ pub async fn update_import_profile<U, O, B, P: ImportProfileRepository, C, R>(
     Ok(Json(profile.into()))
 }
 
-pub async fn delete_import_profile<U, O, B, P: ImportProfileRepository, C, R>(
-    State(state): State<AppState<U, O, B, P, C, R>>,
+pub async fn delete_import_profile<U, O, B, P: ImportProfileRepository, C, R, A>(
+    State(state): State<AppState<U, O, B, P, C, R, A>>,
     auth_user: AuthUser,
     Path(id): Path<Uuid>,
 ) -> AppResult<StatusCode> {
@@ -190,12 +216,12 @@ mod tests {
     use crate::{
         domain::user::UserRole,
         repositories::{
-            MockBudgetRepository, MockImportProfileRepository, MockOperationRepository,
-            MockUserRepository,
+            MockAccountRepository, MockBudgetRepository, MockImportProfileRepository,
+            MockOperationRepository, MockUserRepository,
         },
         test_util::{
-            auth_header, build_test_router, json_request, make_test_state_with_profiles,
-            response_json,
+            auth_header, build_test_router, json_request, make_test_state_with_all,
+            make_test_state_with_profiles, no_categories, no_ignore_rules, response_json,
         },
     };
     use tower::ServiceExt;
@@ -203,6 +229,7 @@ mod tests {
     fn request() -> ImportProfileRequest {
         ImportProfileRequest {
             name: "  Bank  ".to_string(),
+            account_id: Uuid::nil(),
             label_col: 1,
             amount_col: 3,
             date_col: 0,
@@ -246,6 +273,7 @@ mod tests {
     fn missing_delimiter_defaults_to_comma() {
         let req: ImportProfileRequest = serde_json::from_value(serde_json::json!({
             "name": "Bank",
+            "accountId": Uuid::nil(),
             "labelCol": 1,
             "amountCol": 3,
             "dateCol": 0,
@@ -293,6 +321,42 @@ mod tests {
                 ImportProfileFields::try_from(req),
                 Err(AppError::BadRequest(_))
             ));
+        }
+    }
+
+    #[tokio::test]
+    async fn a_profile_needs_an_account_receiving_operations() {
+        let mut accounts = MockAccountRepository::new();
+        accounts
+            .expect_find()
+            .returning(|_, _| Box::pin(async { Ok(None) }));
+        let app = build_test_router(make_test_state_with_all(
+            MockUserRepository::new(),
+            MockOperationRepository::new(),
+            MockBudgetRepository::new(),
+            MockImportProfileRepository::new(),
+            no_categories(),
+            no_ignore_rules(),
+            accounts,
+        ));
+        let auth = auth_header(Uuid::new_v4(), UserRole::User);
+        let id = Uuid::new_v4();
+
+        for (method, uri) in [
+            ("POST", "/import-profiles".to_string()),
+            ("PUT", format!("/import-profiles/{id}")),
+        ] {
+            let resp = app
+                .clone()
+                .oneshot(json_request(
+                    method,
+                    &uri,
+                    Some(&body(&request())),
+                    Some(&auth),
+                ))
+                .await
+                .unwrap();
+            assert_eq!(resp.status(), StatusCode::BAD_REQUEST, "{method}");
         }
     }
 
