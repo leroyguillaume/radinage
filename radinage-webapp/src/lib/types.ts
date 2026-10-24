@@ -155,7 +155,7 @@ export interface ForecastFlows {
 	expenses: string;
 	/** Savings budgets plus money put on savings accounts; zero or negative. */
 	savings: string;
-	/** Money taken back from savings accounts; zero or positive. Net savings are `savings + withdrawals`. */
+	/** Money taken back from savings accounts; zero or positive. */
 	withdrawals: string;
 	/** Net of the transfers with checking accounts. */
 	transfers: string;
