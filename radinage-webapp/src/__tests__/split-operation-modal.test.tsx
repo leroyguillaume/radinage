@@ -174,8 +174,18 @@ describe("SplitOperationModal", () => {
 			method: "PUT",
 			body: {
 				splits: [
-					{ amount: "-30.50", budgetId: "b2", categoryId: null },
-					{ amount: "-69.50", budgetId: null, categoryId: null },
+					{
+						amount: "-30.50",
+						effectiveDate: null,
+						budgetId: "b2",
+						categoryId: null,
+					},
+					{
+						amount: "-69.50",
+						effectiveDate: null,
+						budgetId: null,
+						categoryId: null,
+					},
 				],
 			},
 		});
@@ -191,8 +201,18 @@ describe("SplitOperationModal", () => {
 		await waitFor(() =>
 			expect(lastCall().body).toEqual({
 				splits: [
-					{ amount: "200.00", budgetId: null, categoryId: null },
-					{ amount: "50.00", budgetId: null, categoryId: null },
+					{
+						amount: "200.00",
+						effectiveDate: null,
+						budgetId: null,
+						categoryId: null,
+					},
+					{
+						amount: "50.00",
+						effectiveDate: null,
+						budgetId: null,
+						categoryId: null,
+					},
 				],
 			}),
 		);
@@ -213,9 +233,102 @@ describe("SplitOperationModal", () => {
 		await waitFor(() =>
 			expect(lastCall().body).toEqual({
 				splits: [
-					{ amount: "-30.00", budgetId: null, categoryId: null },
-					{ amount: "-30.00", budgetId: null, categoryId: null },
-					{ amount: "-40.00", budgetId: null, categoryId: null },
+					{
+						amount: "-30.00",
+						effectiveDate: null,
+						budgetId: null,
+						categoryId: null,
+					},
+					{
+						amount: "-30.00",
+						effectiveDate: null,
+						budgetId: null,
+						categoryId: null,
+					},
+					{
+						amount: "-40.00",
+						effectiveDate: null,
+						budgetId: null,
+						categoryId: null,
+					},
+				],
+			}),
+		);
+	});
+
+	it("dates a part on another day than its operation", async () => {
+		const { user } = renderModal(makeOperation());
+
+		await user.type(amountInput(1), "40");
+		await user.type(amountInput(2), "60");
+		await user.click(screen.getByRole("button", { name: "Date (Part 2)" }));
+		await user.click(await screen.findByRole("button", { name: /^20 / }));
+		await user.click(saveButton());
+
+		await waitFor(() =>
+			expect(lastCall().body).toEqual({
+				splits: [
+					{
+						amount: "-40.00",
+						effectiveDate: null,
+						budgetId: null,
+						categoryId: null,
+					},
+					{
+						amount: "-60.00",
+						effectiveDate: "2026-04-20",
+						budgetId: null,
+						categoryId: null,
+					},
+				],
+			}),
+		);
+	});
+
+	it("keeps the date of a part already dated", async () => {
+		const { user } = renderModal(
+			makeOperation({
+				splits: [
+					{
+						id: "s1",
+						amount: "-30.00",
+						effectiveDate: null,
+						budgetId: null,
+						categoryId: null,
+						effectiveCategoryId: null,
+					},
+					{
+						id: "s2",
+						amount: "-70.00",
+						effectiveDate: "2026-05-01",
+						budgetId: null,
+						categoryId: null,
+						effectiveCategoryId: null,
+					},
+				],
+			}),
+		);
+
+		expect(
+			screen.getByRole("button", { name: "Date (Part 2)" }),
+		).toHaveTextContent("01/05/2026");
+		await user.click(saveButton());
+
+		await waitFor(() =>
+			expect(lastCall().body).toEqual({
+				splits: [
+					{
+						amount: "-30.00",
+						effectiveDate: null,
+						budgetId: null,
+						categoryId: null,
+					},
+					{
+						amount: "-70.00",
+						effectiveDate: "2026-05-01",
+						budgetId: null,
+						categoryId: null,
+					},
 				],
 			}),
 		);
@@ -259,6 +372,7 @@ describe("SplitOperationModal", () => {
 					{
 						id: "s1",
 						amount: "-30.00",
+						effectiveDate: null,
 						budgetId: "b1",
 						categoryId: null,
 						effectiveCategoryId: null,
@@ -266,6 +380,7 @@ describe("SplitOperationModal", () => {
 					{
 						id: "s2",
 						amount: "-70.00",
+						effectiveDate: null,
 						budgetId: null,
 						categoryId: null,
 						effectiveCategoryId: null,
@@ -356,8 +471,18 @@ describe("SplitOperationModal", () => {
 			await waitFor(() => expect(onClose).toHaveBeenCalled());
 			expect(lastCall().body).toEqual({
 				splits: [
-					{ amount: "-40.00", budgetId: null, categoryId: "c1" },
-					{ amount: "-60.00", budgetId: null, categoryId: "c2" },
+					{
+						amount: "-40.00",
+						effectiveDate: null,
+						budgetId: null,
+						categoryId: "c1",
+					},
+					{
+						amount: "-60.00",
+						effectiveDate: null,
+						budgetId: null,
+						categoryId: "c2",
+					},
 				],
 			});
 		});

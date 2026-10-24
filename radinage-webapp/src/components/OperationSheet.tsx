@@ -42,7 +42,11 @@ import {
 	formatSignedAmount,
 } from "@/lib/format";
 import { useBelowBreakpoint } from "@/lib/hooks";
-import { isSplit, operationEntries } from "@/lib/operation-parts";
+import {
+	accountingDate,
+	isSplit,
+	operationEntries,
+} from "@/lib/operation-parts";
 import { budgetTypeTones } from "@/lib/tones";
 import type {
 	BudgetResponse,
@@ -113,9 +117,7 @@ function capitalize(text: string): string {
 }
 
 function accountingMonth(op: OperationResponse) {
-	const [year = 0, month = 1] = (op.effectiveDate ?? op.date)
-		.split("-")
-		.map(Number);
+	const [year = 0, month = 1] = accountingDate(op).split("-").map(Number);
 	return { year, month };
 }
 
@@ -549,7 +551,7 @@ function SplitParts({
 	op: OperationResponse;
 	handlers: OperationHandlers;
 }) {
-	const { t } = useTranslation();
+	const { t, i18n } = useTranslation();
 	const budgetById = new Map(handlers.budgets.map((b) => [b.id, b]));
 	const categoryById = new Map(handlers.categories.map((c) => [c.id, c]));
 
@@ -582,6 +584,15 @@ function SplitParts({
 										{budget?.label ?? t("operations.sheet.unlinked")}
 									</Text>
 								</Text>
+								{entry.date !== accountingDate(op) && (
+									<Text size="xs" c="gold.8" fw={600}>
+										{t("operations.split.countsOn", {
+											date: formatIsoDate(entry.date, i18n.language, {
+												dateStyle: "long",
+											}),
+										})}
+									</Text>
+								)}
 								{category && (
 									<CategoryBadge
 										category={category}

@@ -140,6 +140,9 @@ pub struct ExportOperation {
 pub struct ExportOperationSplit {
     #[schemars(with = "String")]
     pub amount: Decimal,
+    /// Absent from exports made before parts had their own date.
+    #[serde(default)]
+    pub effective_date: Option<NaiveDate>,
     pub budget_id: Option<Uuid>,
     /// Absent from exports made before categories existed.
     #[serde(default)]
@@ -150,6 +153,7 @@ impl From<OperationSplit> for ExportOperationSplit {
     fn from(split: OperationSplit) -> Self {
         Self {
             amount: split.amount,
+            effective_date: split.effective_date,
             budget_id: split.budget_id,
             category_id: split.category_id,
         }
@@ -160,6 +164,7 @@ impl From<&ExportOperationSplit> for NewOperationSplit {
     fn from(split: &ExportOperationSplit) -> Self {
         Self {
             amount: split.amount,
+            effective_date: split.effective_date,
             budget_id: split.budget_id,
             category_id: split.category_id,
         }
@@ -1361,6 +1366,7 @@ mod tests {
                 OperationSplit {
                     id: Uuid::new_v4(),
                     amount: Decimal::new(-234, 2),
+                    effective_date: None,
                     budget_id: Some(budget_id),
                     category_id: None,
                     budget_category_id: None,
@@ -1368,6 +1374,7 @@ mod tests {
                 OperationSplit {
                     id: Uuid::new_v4(),
                     amount: Decimal::new(-1000, 2),
+                    effective_date: NaiveDate::from_ymd_opt(2024, 4, 1),
                     budget_id: None,
                     category_id: None,
                     budget_category_id: None,
@@ -1402,7 +1409,9 @@ mod tests {
         let splits = &json["operations"][0]["splits"];
         assert_eq!(splits[0]["amount"], "-2.34");
         assert_eq!(splits[0]["budgetId"], budget_id.to_string());
+        assert!(splits[0]["effectiveDate"].is_null());
         assert!(splits[1]["budgetId"].is_null());
+        assert_eq!(splits[1]["effectiveDate"], "2024-04-01");
     }
 
     #[tokio::test]
@@ -1439,11 +1448,13 @@ mod tests {
                         == [
                             NewOperationSplit {
                                 amount: Decimal::new(-30, 0),
+                                effective_date: None,
                                 budget_id: Some(existing_id),
                                 category_id: None,
                             },
                             NewOperationSplit {
                                 amount: Decimal::new(-70, 0),
+                                effective_date: NaiveDate::from_ymd_opt(2024, 4, 1),
                                 budget_id: None,
                                 category_id: None,
                             },
@@ -1483,7 +1494,7 @@ mod tests {
                     "ignored": false,
                     "splits": [
                         {"amount": "-30", "budgetId": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"},
-                        {"amount": "-70", "budgetId": "ffffffff-ffff-ffff-ffff-ffffffffffff"}
+                        {"amount": "-70", "budgetId": "ffffffff-ffff-ffff-ffff-ffffffffffff", "effectiveDate": "2024-04-01"}
                     ]
                 }
             ]

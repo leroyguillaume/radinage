@@ -336,6 +336,14 @@ describe("MonthlyOperationsPage", () => {
 	});
 
 	it("scales the forecast to the number of days of the month shown", async () => {
+		setupMocks({
+			operations: {
+				operations: mockMonthlyResponse.operations.map((op) => ({
+					...op,
+					date: op.date.replace("2026-04", "2026-02"),
+				})),
+			},
+		});
 		await renderOperationsPage("2026", "2");
 
 		const section = await screen.findByRole("region", {
@@ -979,6 +987,7 @@ describe("MonthlyOperationsPage", () => {
 						{
 							id: "s1",
 							amount: "-30.00",
+							effectiveDate: null,
 							budgetId: "b1",
 							categoryId: null,
 							effectiveCategoryId: null,
@@ -986,6 +995,7 @@ describe("MonthlyOperationsPage", () => {
 						{
 							id: "s2",
 							amount: "-70.00",
+							effectiveDate: null,
 							budgetId: null,
 							categoryId: null,
 							effectiveCategoryId: null,
@@ -1034,6 +1044,45 @@ describe("MonthlyOperationsPage", () => {
 			const foodPart = rowOf("part 1/2");
 			expect(foodPart.getByText("CASH WITHDRAWAL")).toBeInTheDocument();
 			expect(foodPart.getByText(/-30,00/)).toBeInTheDocument();
+		});
+
+		it("shows each part on its own date, leaving out those of another month", async () => {
+			const [groceries, withdrawal, taxi] = operations.operations;
+			if (!groceries || !withdrawal || !taxi) throw new Error("fixture");
+			setupMocks({
+				operations: {
+					operations: [
+						groceries,
+						{
+							...withdrawal,
+							amount: "-110.00",
+							splits: [
+								...withdrawal.splits.map((split) =>
+									split.id === "s2"
+										? { ...split, effectiveDate: "2026-04-20" }
+										: split,
+								),
+								{
+									id: "s3",
+									amount: "-10.00",
+									effectiveDate: "2026-05-02",
+									budgetId: null,
+									categoryId: null,
+									effectiveCategoryId: null,
+								},
+							],
+						},
+						taxi,
+					],
+				},
+			});
+			await renderOperationsPage();
+
+			const dailyPart = await screen.findByText("part 2/3");
+			const row = dailyPart.closest("li");
+			if (!(row instanceof HTMLElement)) throw new Error("no part row");
+			expect(within(row).getByText("20/04/2026")).toBeInTheDocument();
+			expect(screen.queryByText("part 3/3")).not.toBeInTheDocument();
 		});
 
 		it("uses part amounts in the stat tiles", async () => {

@@ -47,6 +47,8 @@ export interface OperationSplitResponse {
 	id: string;
 	/** Signed decimal, same sign as the parent operation's amount. */
 	amount: string;
+	/** Date the part counts on (YYYY-MM-DD); null to follow its operation. */
+	effectiveDate: string | null;
 	budgetId: string | null;
 	categoryId: string | null;
 	/** Own category, else the part's budget's. */

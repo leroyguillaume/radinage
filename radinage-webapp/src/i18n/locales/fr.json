@@ -83,7 +83,10 @@
 			"unsplitError": "Impossible d'annuler la division",
 			"category": "Catégorie",
 			"budgetCategory": "Catégorie du budget : {{name}}",
-			"noCategory": "Aucune catégorie"
+			"noCategory": "Aucune catégorie",
+			"date": "Date",
+			"countsOn": "Compte le {{date}}",
+			"sameDate": "Même date que l'opération"
 		},
 		"category": {
 			"filter": "Filtrer par catégorie",

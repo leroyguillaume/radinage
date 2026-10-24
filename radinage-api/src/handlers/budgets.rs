@@ -659,6 +659,7 @@ mod tests {
                 OperationSplit {
                     id: Uuid::new_v4(),
                     amount: Decimal::new(-20, 0),
+                    effective_date: None,
                     budget_id: None,
                     category_id: None,
                     budget_category_id: None,
@@ -666,6 +667,7 @@ mod tests {
                 OperationSplit {
                     id: Uuid::new_v4(),
                     amount: Decimal::new(-30, 0),
+                    effective_date: None,
                     budget_id: None,
                     category_id: None,
                     budget_category_id: None,

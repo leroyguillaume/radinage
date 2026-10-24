@@ -58,7 +58,7 @@ pub struct OperationResponse {
     pub splits: Vec<OperationSplitResponse>,
 }
 
-/// One part of a split operation. It shares the operation's dates and ignored flag.
+/// One part of a split operation. It shares the operation's ignored flag.
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct OperationSplitResponse {
@@ -67,6 +67,9 @@ pub struct OperationSplitResponse {
     /// Signed amount of the part, with the same sign as the operation amount.
     #[schemars(with = "String")]
     pub amount: Decimal,
+    /// Optional override date attributing the part to another month than its operation's,
+    /// `null` when the part follows the operation.
+    pub effective_date: Option<NaiveDate>,
     /// Budget this part is assigned to, or `null` when it is unbudgeted.
     pub budget_id: Option<Uuid>,
     /// Category the user put this part in, `null` when none.
@@ -80,6 +83,7 @@ impl From<OperationSplit> for OperationSplitResponse {
         Self {
             id: split.id,
             amount: split.amount,
+            effective_date: split.effective_date,
             budget_id: split.budget_id,
             category_id: split.category_id,
             effective_category_id: split.effective_category_id(),
@@ -182,6 +186,9 @@ pub struct OperationSplitRequest {
     /// Signed amount of the part.
     #[schemars(with = "String")]
     pub amount: Decimal,
+    /// Optional override date for the part, or `null` (the default) to follow the operation.
+    #[serde(default)]
+    pub effective_date: Option<NaiveDate>,
     /// One of the caller's budgets, or `null` to leave the part unbudgeted.
     pub budget_id: Option<Uuid>,
     /// One of the caller's categories, or `null` (the default) to fall back on the budget's.
@@ -193,6 +200,7 @@ impl From<OperationSplitRequest> for NewOperationSplit {
     fn from(split: OperationSplitRequest) -> Self {
         Self {
             amount: split.amount,
+            effective_date: split.effective_date,
             budget_id: split.budget_id,
             category_id: split.category_id,
         }
@@ -1102,6 +1110,7 @@ mod tests {
                 OperationSplit {
                     id: Uuid::new_v4(),
                     amount: Decimal::new(-20, 0),
+                    effective_date: None,
                     budget_id: None,
                     category_id: None,
                     budget_category_id: None,
@@ -1109,6 +1118,7 @@ mod tests {
                 OperationSplit {
                     id: Uuid::new_v4(),
                     amount: Decimal::new(-30, 0),
+                    effective_date: NaiveDate::from_ymd_opt(2024, 2, 1),
                     budget_id: None,
                     category_id: None,
                     budget_category_id: None,
@@ -1176,11 +1186,13 @@ mod tests {
                         == [
                             NewOperationSplit {
                                 amount: Decimal::new(-20, 0),
+                                effective_date: None,
                                 budget_id: Some(budget_id),
                                 category_id: None,
                             },
                             NewOperationSplit {
                                 amount: Decimal::new(-30, 0),
+                                effective_date: NaiveDate::from_ymd_opt(2024, 2, 1),
                                 budget_id: None,
                                 category_id: None,
                             },
@@ -1190,7 +1202,7 @@ mod tests {
             .returning(|_, _, _| Box::pin(async { Ok(true) }));
 
         let body = format!(
-            r#"{{"splits":[{{"amount":"-20","budgetId":"{budget_id}"}},{{"amount":"-30","budgetId":null}}]}}"#
+            r#"{{"splits":[{{"amount":"-20","budgetId":"{budget_id}"}},{{"amount":"-30","budgetId":null,"effectiveDate":"2024-02-01"}}]}}"#
         );
         let resp = put_splits(split_app(op_repo, budget_repo), user_id, op_id, &body).await;
 
@@ -1201,6 +1213,8 @@ mod tests {
         assert_eq!(splits[0]["amount"], "-20");
         assert!(splits[0]["id"].is_string());
         assert!(splits[0]["budgetId"].is_null());
+        assert!(splits[0]["effectiveDate"].is_null());
+        assert_eq!(splits[1]["effectiveDate"], "2024-02-01");
         assert!(json.get("userId").is_none());
     }
 

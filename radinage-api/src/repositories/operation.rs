@@ -31,7 +31,7 @@ pub enum OperationSortField {
 impl OperationSortField {
     pub fn as_sql(&self) -> &'static str {
         match self {
-            Self::Date => "COALESCE(o.effective_date, o.date)",
+            Self::Date => OPERATION_DATE,
             Self::Label => "o.label",
             Self::Amount => "o.amount",
         }
@@ -41,6 +41,7 @@ impl OperationSortField {
 /// Parameters for a paginated, filtered, sorted list of operations.
 #[derive(Debug, Default)]
 pub struct ListOperationsParams {
+    /// Inclusive bounds on the accounting date, which a split operation meets through any part.
     pub date_from: Option<NaiveDate>,
     pub date_to: Option<NaiveDate>,
     /// Label filter already formatted as `%pattern%` for SQL LIKE.
@@ -311,6 +312,12 @@ const OPERATION_COLUMNS: &str = "o.id, o.user_id, o.amount, o.date, o.effective_
      o.budget_link_type, o.budget_link_id, o.ignored, o.ignore_rule_id, o.category_id, \
      (SELECT b.category_id FROM budgets b WHERE b.id = o.budget_link_id) AS budget_category_id";
 
+/// Accounting date of an operation `o`.
+const OPERATION_DATE: &str = "COALESCE(o.effective_date, o.date)";
+
+/// Accounting date of a split part `s` of the operation `o`.
+const SPLIT_DATE: &str = "COALESCE(s.effective_date, o.effective_date, o.date)";
+
 /// Effective category of an unsplit operation `o`.
 const OPERATION_CATEGORY: &str = "COALESCE(o.category_id, \
      (SELECT b.category_id FROM budgets b WHERE b.id = o.budget_link_id))";
@@ -362,10 +369,13 @@ fn list_filters_sql(params: &ListOperationsParams) -> String {
     } else {
         whole_or_any_part("o.budget_link_id = ANY($7)", "s.budget_id = ANY($7)")
     };
+    let in_range = |date: &str| {
+        format!("($2::date IS NULL OR {date} >= $2) AND ($3::date IS NULL OR {date} <= $3)")
+    };
+    let dates = whole_or_any_part(&in_range(OPERATION_DATE), &in_range(SPLIT_DATE));
     format!(
         "WHERE o.user_id = $1
-           AND ($2::date IS NULL OR COALESCE(o.effective_date, o.date) >= $2)
-           AND ($3::date IS NULL OR COALESCE(o.effective_date, o.date) <= $3)
+           {dates}
            AND ($4::text IS NULL OR LOWER(o.label) LIKE $4)
            AND ($5::numeric IS NULL OR o.amount = $5)
            AND ($8::numeric IS NULL OR ABS(o.amount) >= $8)
@@ -434,7 +444,7 @@ async fn attach_splits(pool: &PgPool, ops: &mut [Operation]) -> AppResult<()> {
     }
     let ids: Vec<Uuid> = ops.iter().map(|op| op.id).collect();
     let rows = sqlx::query(
-        "SELECT s.id, s.operation_id, s.amount, s.budget_id, s.category_id,
+        "SELECT s.id, s.operation_id, s.amount, s.effective_date, s.budget_id, s.category_id,
                 (SELECT b.category_id FROM budgets b WHERE b.id = s.budget_id) AS budget_category_id
          FROM operation_splits s
          WHERE s.operation_id = ANY($1) ORDER BY s.operation_id, s.position",
@@ -451,6 +461,7 @@ async fn attach_splits(pool: &PgPool, ops: &mut [Operation]) -> AppResult<()> {
             .push(OperationSplit {
                 id: row.try_get("id")?,
                 amount: row.try_get("amount")?,
+                effective_date: row.try_get("effective_date")?,
                 budget_id: row.try_get("budget_id")?,
                 category_id: row.try_get("category_id")?,
                 budget_category_id: row.try_get("budget_category_id")?,
@@ -505,8 +516,8 @@ impl OperationRepository for PgOperationRepository {
             "SELECT COUNT(*) AS count,
                     COALESCE(SUM(o.amount) FILTER (WHERE o.amount > 0), 0) AS income,
                     COALESCE(SUM(o.amount) FILTER (WHERE o.amount < 0), 0) AS expense,
-                    MIN(COALESCE(o.effective_date, o.date)) AS first_date,
-                    MAX(COALESCE(o.effective_date, o.date)) AS last_date
+                    MIN({OPERATION_DATE}) AS first_date,
+                    MAX({OPERATION_DATE}) AS last_date
              FROM operations o {filters}"
         );
         let totals_row = bind_list_filters(sqlx::query(&totals_sql), user_id, params)
@@ -723,12 +734,14 @@ impl OperationRepository for PgOperationRepository {
             .await?;
         for (position, split) in (0_i32..).zip(splits) {
             sqlx::query(
-                "INSERT INTO operation_splits (operation_id, position, amount, budget_id, category_id)
-                 VALUES ($1, $2, $3, $4, $5)",
+                "INSERT INTO operation_splits
+                     (operation_id, position, amount, effective_date, budget_id, category_id)
+                 VALUES ($1, $2, $3, $4, $5, $6)",
             )
             .bind(id)
             .bind(position)
             .bind(split.amount)
+            .bind(split.effective_date)
             .bind(split.budget_id)
             .bind(split.category_id)
             .execute(&mut *tx)
@@ -760,28 +773,26 @@ impl OperationRepository for PgOperationRepository {
         month_start: NaiveDate,
         month_end: NaiveDate,
     ) -> AppResult<Vec<SummaryRow>> {
-        let rows = sqlx::query(
-            r#"SELECT o.amount, COALESCE(o.effective_date, o.date) AS accounting_date,
-                      o.budget_link_type, o.budget_link_id AS budget_id, b.budget_type
-               FROM operations o
-               LEFT JOIN budgets b ON b.id = o.budget_link_id
-               WHERE o.user_id = $1
-                 AND COALESCE(o.effective_date, o.date) >= $2
-                 AND COALESCE(o.effective_date, o.date) <= $3
-                 AND o.ignored = FALSE
-                 AND NOT EXISTS (SELECT 1 FROM operation_splits s WHERE s.operation_id = o.id)
-               UNION ALL
-               SELECT s.amount, COALESCE(o.effective_date, o.date),
-                      CASE WHEN s.budget_id IS NULL THEN 'unlinked' ELSE 'manual' END,
-                      s.budget_id, b.budget_type
-               FROM operation_splits s
-               JOIN operations o ON o.id = s.operation_id
-               LEFT JOIN budgets b ON b.id = s.budget_id
-               WHERE o.user_id = $1
-                 AND COALESCE(o.effective_date, o.date) >= $2
-                 AND COALESCE(o.effective_date, o.date) <= $3
-                 AND o.ignored = FALSE"#,
-        )
+        let rows = sqlx::query(&format!(
+            "SELECT o.amount, {OPERATION_DATE} AS accounting_date,
+                    o.budget_link_type, o.budget_link_id AS budget_id, b.budget_type
+             FROM operations o
+             LEFT JOIN budgets b ON b.id = o.budget_link_id
+             WHERE o.user_id = $1
+               AND {OPERATION_DATE} BETWEEN $2 AND $3
+               AND o.ignored = FALSE
+               AND NOT EXISTS (SELECT 1 FROM operation_splits s WHERE s.operation_id = o.id)
+             UNION ALL
+             SELECT s.amount, {SPLIT_DATE},
+                    CASE WHEN s.budget_id IS NULL THEN 'unlinked' ELSE 'manual' END,
+                    s.budget_id, b.budget_type
+             FROM operation_splits s
+             JOIN operations o ON o.id = s.operation_id
+             LEFT JOIN budgets b ON b.id = s.budget_id
+             WHERE o.user_id = $1
+               AND {SPLIT_DATE} BETWEEN $2 AND $3
+               AND o.ignored = FALSE"
+        ))
         .bind(user_id)
         .bind(month_start)
         .bind(month_end)
@@ -814,7 +825,7 @@ impl OperationRepository for PgOperationRepository {
                  FROM operations o
                  LEFT JOIN budgets b ON b.id = o.budget_link_id
                  WHERE o.user_id = $1
-                   AND COALESCE(o.effective_date, o.date) BETWEEN $2 AND $3
+                   AND {OPERATION_DATE} BETWEEN $2 AND $3
                    AND o.ignored = FALSE
                    AND b.budget_type IS DISTINCT FROM 'savings'
                    AND NOT EXISTS (SELECT 1 FROM operation_splits s WHERE s.operation_id = o.id)
@@ -824,7 +835,7 @@ impl OperationRepository for PgOperationRepository {
                  JOIN operations o ON o.id = s.operation_id
                  LEFT JOIN budgets b ON b.id = s.budget_id
                  WHERE o.user_id = $1
-                   AND COALESCE(o.effective_date, o.date) BETWEEN $2 AND $3
+                   AND {SPLIT_DATE} BETWEEN $2 AND $3
                    AND o.ignored = FALSE
                    AND b.budget_type IS DISTINCT FROM 'savings'
              )
@@ -902,6 +913,7 @@ mod unit_tests {
 #[cfg(test)]
 mod integration_tests {
     use super::*;
+    use crate::domain::last_day_of_month;
     use rust_decimal_macros::dec;
     use sqlx::PgPool;
 
@@ -1161,6 +1173,7 @@ mod integration_tests {
     fn part(amount: Decimal, budget_id: Option<Uuid>) -> NewOperationSplit {
         NewOperationSplit {
             amount,
+            effective_date: None,
             budget_id,
             category_id: None,
         }
@@ -1386,6 +1399,74 @@ mod integration_tests {
             .await
             .unwrap();
         assert!(outside.is_empty());
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn split_parts_count_in_the_month_of_their_own_date(pool: PgPool) {
+        let repo = PgOperationRepository::new(pool.clone());
+        let user_id = setup_user(&pool).await;
+        let food = setup_category(&pool, user_id, "Food").await;
+        let budget_id = setup_budget(&pool, user_id, "expense").await;
+        let april_5 = NaiveDate::from_ymd_opt(2024, 4, 5).unwrap();
+        let op_id = insert_op(&repo, user_id, dec!(-100)).await;
+        let parts = [
+            part(dec!(-60), None),
+            NewOperationSplit {
+                effective_date: Some(april_5),
+                category_id: Some(food),
+                ..part(dec!(-40), Some(budget_id))
+            },
+        ];
+        repo.replace_splits(op_id, user_id, &parts).await.unwrap();
+
+        let op = repo.find_by_id(op_id, user_id).await.unwrap();
+        let dates: Vec<_> = op.splits.iter().map(|s| s.effective_date).collect();
+        assert_eq!(dates, [None, Some(april_5)]);
+
+        let month = |m| {
+            (
+                NaiveDate::from_ymd_opt(2024, m, 1).unwrap(),
+                last_day_of_month(2024, m).unwrap(),
+            )
+        };
+        let summary = |m| {
+            let (from, to) = month(m);
+            let repo = &repo;
+            async move {
+                repo.list_for_summary(user_id, from, to)
+                    .await
+                    .unwrap()
+                    .into_iter()
+                    .map(|r| (r.amount, r.date))
+                    .collect::<Vec<_>>()
+            }
+        };
+        assert_eq!(
+            summary(3).await,
+            [(dec!(-60), NaiveDate::from_ymd_opt(2024, 3, 10).unwrap())]
+        );
+        assert_eq!(summary(4).await, [(dec!(-40), april_5)]);
+
+        let (from, to) = month(4);
+        assert_eq!(
+            repo.category_totals(user_id, from, to).await.unwrap(),
+            [CategoryTotal {
+                category_id: Some(food),
+                income: Decimal::ZERO,
+                expense: dec!(-40),
+            }]
+        );
+
+        for (m, expected) in [(3, vec![op_id]), (4, vec![op_id]), (5, vec![])] {
+            let (from, to) = month(m);
+            let params = ListOperationsParams {
+                date_from: Some(from),
+                date_to: Some(to),
+                limit: 10,
+                ..Default::default()
+            };
+            assert_eq!(listed_ids(&repo, user_id, params).await.0, expected);
+        }
     }
 
     #[sqlx::test(migrations = "./migrations")]

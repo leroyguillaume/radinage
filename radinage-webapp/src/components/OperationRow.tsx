@@ -6,10 +6,6 @@ import { balanceTextColor } from "@/lib/tones";
 import type { OperationResponse } from "@/lib/types";
 import { palette } from "@/theme";
 
-export function accountingDate(op: OperationResponse): string {
-	return op.effectiveDate ?? op.date;
-}
-
 /**
  * Fixed column tracks from `sm` up, so every row of a list lines its
  * columns up whatever their content.
@@ -21,6 +17,8 @@ interface OperationRowProps {
 	op: OperationResponse;
 	/** The amount shown: the whole operation's, or one of its parts'. */
 	amount: number;
+	/** The date shown (YYYY-MM-DD): the whole operation's, or one of its parts'. */
+	date: string;
 	category: ReactNode;
 	budget: string;
 	/** Shown after the label, before the ignored badge. */
@@ -32,6 +30,7 @@ interface OperationRowProps {
 export function OperationRow({
 	op,
 	amount,
+	date,
 	category,
 	budget,
 	badge,
@@ -80,7 +79,7 @@ export function OperationRow({
 						c="dimmed"
 						className="tabular-nums sm:[grid-area:date]"
 					>
-						{formatIsoDate(accountingDate(op), i18n.language)}
+						{formatIsoDate(date, i18n.language)}
 					</Text>
 					<Box miw={0} className="overflow-hidden sm:[grid-area:category]">
 						{category}

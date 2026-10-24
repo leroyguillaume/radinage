@@ -8,6 +8,8 @@ export interface OperationEntry {
 	key: string;
 	operation: OperationResponse;
 	amount: number;
+	/** Date the amount counts on (YYYY-MM-DD). */
+	date: string;
 	budgetId: string | null;
 	/** Category the amount counts towards: its own, else its budget's. */
 	categoryId: string | null;
@@ -21,6 +23,11 @@ export function isSplit(op: OperationResponse): boolean {
 	return op.splits.length > 0;
 }
 
+/** The date an operation counts on: its effective date, else its bank date. */
+export function accountingDate(op: OperationResponse): string {
+	return op.effectiveDate ?? op.date;
+}
+
 export function operationEntries(op: OperationResponse): OperationEntry[] {
 	if (!isSplit(op)) {
 		return [
@@ -28,6 +35,7 @@ export function operationEntries(op: OperationResponse): OperationEntry[] {
 				key: op.id,
 				operation: op,
 				amount: Number(op.amount),
+				date: accountingDate(op),
 				budgetId:
 					op.budgetLink.type === "unlinked" ? null : op.budgetLink.budgetId,
 				categoryId: op.effectiveCategoryId,
@@ -41,10 +49,21 @@ export function operationEntries(op: OperationResponse): OperationEntry[] {
 		key: `${op.id}:${split.id}`,
 		operation: op,
 		amount: Number(split.amount),
+		date: split.effectiveDate ?? accountingDate(op),
 		budgetId: split.budgetId,
 		categoryId: split.effectiveCategoryId,
 		categoryFromBudget:
 			split.categoryId === null && split.effectiveCategoryId !== null,
 		part: { index: i + 1, count: op.splits.length },
 	}));
+}
+
+/** The entries of `op` counting in the given month, its parts dated elsewhere left out. */
+export function entriesInMonth(
+	op: OperationResponse,
+	year: number,
+	month: number,
+): OperationEntry[] {
+	const prefix = `${year}-${String(month).padStart(2, "0")}-`;
+	return operationEntries(op).filter((entry) => entry.date.startsWith(prefix));
 }

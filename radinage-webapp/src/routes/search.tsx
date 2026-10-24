@@ -39,7 +39,7 @@ import { useEffect, useId, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { CategoryBadge, CategoryDot } from "@/components/CategoryBadge";
 import { useOperationActions } from "@/components/OperationActions";
-import { accountingDate, OperationRow } from "@/components/OperationRow";
+import { OperationRow } from "@/components/OperationRow";
 import { PageHeader } from "@/components/PageHeader";
 import { StatTile } from "@/components/StatTile";
 import {
@@ -49,7 +49,11 @@ import {
 	parseCents,
 } from "@/lib/format";
 import { useBudgets, useCategories, useOperationSearch } from "@/lib/hooks";
-import { isSplit, operationEntries } from "@/lib/operation-parts";
+import {
+	accountingDate,
+	isSplit,
+	operationEntries,
+} from "@/lib/operation-parts";
 import {
 	activeFilterCount,
 	defaultOrder,
@@ -575,6 +579,7 @@ function ResultRow({
 		<OperationRow
 			op={op}
 			amount={Number(op.amount)}
+			date={accountingDate(op)}
 			category={<OperationCategories op={op} categoryById={categoryById} />}
 			budget={budgetNames(op, budgetById)}
 			onOpen={onOpen}
