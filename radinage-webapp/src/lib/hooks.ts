@@ -292,6 +292,18 @@ export function useSetOperationCategory() {
 	});
 }
 
+export function useSetOperationAccount() {
+	const invalidate = useInvalidateOperationData();
+	return useMutation({
+		mutationFn: ({ opId, accountId }: { opId: string; accountId: string }) =>
+			apiFetch<OperationResponse>(`/operations/${opId}/account`, {
+				method: "PUT",
+				body: JSON.stringify({ accountId }),
+			}),
+		onSuccess: invalidate,
+	});
+}
+
 export function useSetOperationIgnored() {
 	const invalidate = useInvalidateOperationData();
 	return useMutation({

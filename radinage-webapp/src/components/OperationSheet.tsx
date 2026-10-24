@@ -14,6 +14,7 @@ import {
 import { DatePicker } from "@mantine/dates";
 import {
 	IconArrowRight,
+	IconBuildingBank,
 	IconCalendar,
 	IconChevronDown,
 	IconEye,
@@ -49,6 +50,7 @@ import {
 } from "@/lib/operation-parts";
 import { budgetTypeTones } from "@/lib/tones";
 import type {
+	AccountResponse,
 	BudgetResponse,
 	CategoryResponse,
 	IgnoreRuleResponse,
@@ -58,11 +60,14 @@ import { headingFont, palette } from "@/theme";
 
 /** What can be done to an operation, shared by every list that shows some. */
 export interface OperationHandlers {
+	/** The user's accounts, among which an operation can move to one receiving operations. */
+	accounts: AccountResponse[];
 	budgets: BudgetResponse[];
 	categories: CategoryResponse[];
 	/** The user's ignore rules, to name the one that ignored an operation. */
 	ignoreRules: IgnoreRuleResponse[];
 	onOpen: (op: OperationResponse) => void;
+	onSetAccount: (opId: string, accountId: string) => void;
 	onSetCategory: (opId: string, categoryId: string | null) => void;
 	onCreateBudget: (op: OperationResponse) => void;
 	onLink: (opId: string, budgetId: string) => void;
@@ -261,13 +266,16 @@ function SheetBody({
 			</Text>
 			{op.ignored && <IgnoredNotice op={op} handlers={handlers} />}
 			<Paper p={0} radius="lg" style={{ overflow: "hidden" }}>
+				<SheetRow first>
+					<AccountField op={op} handlers={handlers} />
+				</SheetRow>
 				{split ? (
-					<SheetRow first>
+					<SheetRow first={false}>
 						<SplitParts op={op} handlers={handlers} />
 					</SheetRow>
 				) : (
 					<>
-						<SheetRow first>
+						<SheetRow first={false}>
 							<CategoryField op={op} handlers={handlers} />
 						</SheetRow>
 						<SheetRow first={false}>
@@ -371,6 +379,35 @@ function IgnoredNotice({
 				)}
 			</Stack>
 		</Group>
+	);
+}
+
+/** The account the operation is on; it can move to another one receiving operations. */
+function AccountField({
+	op,
+	handlers,
+}: {
+	op: OperationResponse;
+	handlers: OperationHandlers;
+}) {
+	const { t } = useTranslation();
+	const options = handlers.accounts.filter(
+		(a) => a.receivesOperations || a.id === op.accountId,
+	);
+	return (
+		<Select
+			label={t("operations.sheet.account")}
+			data={options.map((a) => ({ value: a.id, label: a.name }))}
+			value={op.accountId}
+			onChange={(accountId) => {
+				if (accountId && accountId !== op.accountId) {
+					handlers.onSetAccount(op.id, accountId);
+				}
+			}}
+			allowDeselect={false}
+			leftSection={<IconBuildingBank size={18} />}
+			comboboxProps={{ withinPortal: true }}
+		/>
 	);
 }
 

@@ -97,6 +97,7 @@
 			"noneYet": "Create categories in the settings to sort your operations."
 		},
 		"sheet": {
+			"account": "Account",
 			"category": "Category",
 			"categoryPlaceholder": "Pick one",
 			"budget": "Budget",
