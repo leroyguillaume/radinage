@@ -1,7 +1,7 @@
 use crate::{
     AppState,
     auth::middleware::AuthUser,
-    domain::import_profile::{ImportProfile, ImportProfileFields},
+    domain::import_profile::{CsvDelimiter, ImportProfile, ImportProfileFields},
     error::{AppError, AppResult},
     repositories::ImportProfileRepository,
 };
@@ -31,7 +31,8 @@ const MAX_NAME_LEN: usize = 100;
     "amountCol": 3,
     "dateCol": 0,
     "dateFormat": "%d/%m/%Y",
-    "skipLines": 1
+    "skipLines": 1,
+    "csvDelimiter": "semicolon"
 })))]
 pub struct ImportProfileRequest {
     /// Name shown when picking a profile, unique per user (1 to 100 characters).
@@ -46,6 +47,9 @@ pub struct ImportProfileRequest {
     pub date_format: String,
     /// Number of leading rows to skip before the first data row, header included.
     pub skip_lines: usize,
+    /// Field separator of CSV files (default `comma`); spreadsheets ignore it.
+    #[serde(default)]
+    pub csv_delimiter: CsvDelimiter,
 }
 
 /// An import profile (omits `userId`).
@@ -59,6 +63,7 @@ pub struct ImportProfileResponse {
     pub date_col: usize,
     pub date_format: String,
     pub skip_lines: usize,
+    pub csv_delimiter: CsvDelimiter,
     /// When an import last used this profile, null if never.
     pub last_used_at: Option<DateTime<Utc>>,
     pub created_at: DateTime<Utc>,
@@ -74,6 +79,7 @@ impl From<ImportProfile> for ImportProfileResponse {
             date_col: p.fields.date_col,
             date_format: p.fields.date_format,
             skip_lines: p.fields.skip_lines,
+            csv_delimiter: p.fields.csv_delimiter,
             last_used_at: p.last_used_at,
             created_at: p.created_at,
         }
@@ -113,6 +119,7 @@ impl TryFrom<ImportProfileRequest> for ImportProfileFields {
             date_col: body.date_col,
             date_format: body.date_format,
             skip_lines: body.skip_lines,
+            csv_delimiter: body.csv_delimiter,
         })
     }
 }
@@ -201,6 +208,7 @@ mod tests {
             date_col: 0,
             date_format: "%d/%m/%Y".to_string(),
             skip_lines: 1,
+            csv_delimiter: CsvDelimiter::Semicolon,
         }
     }
 
@@ -232,6 +240,20 @@ mod tests {
         let fields = ImportProfileFields::try_from(request()).unwrap();
         assert_eq!(fields.name, "Bank");
         assert_eq!(fields.skip_lines, 1);
+    }
+
+    #[test]
+    fn missing_delimiter_defaults_to_comma() {
+        let req: ImportProfileRequest = serde_json::from_value(serde_json::json!({
+            "name": "Bank",
+            "labelCol": 1,
+            "amountCol": 3,
+            "dateCol": 0,
+            "dateFormat": "%d/%m/%Y",
+            "skipLines": 1
+        }))
+        .unwrap();
+        assert_eq!(req.csv_delimiter, CsvDelimiter::Comma);
     }
 
     #[test]
@@ -296,6 +318,7 @@ mod tests {
         let json: serde_json::Value = response_json(resp).await;
         assert_eq!(json[0]["name"], "Bank");
         assert_eq!(json[0]["dateFormat"], "%d/%m/%Y");
+        assert_eq!(json[0]["csvDelimiter"], "semicolon");
         assert!(json[0].get("userId").is_none());
     }
 

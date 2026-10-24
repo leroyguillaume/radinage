@@ -36,6 +36,7 @@ const existing: ImportProfileResponse = {
 	dateCol: 0,
 	dateFormat: "%d/%m/%Y",
 	skipLines: 1,
+	csvDelimiter: "comma",
 	lastUsedAt: null,
 	createdAt: "2026-01-01T10:00:00Z",
 };
@@ -149,6 +150,7 @@ describe("ImportProfileForm", () => {
 				dateCol: 0,
 				dateFormat: "%Y-%m-%d",
 				skipLines: 1,
+				csvDelimiter: "comma",
 			},
 		});
 	});
@@ -183,6 +185,38 @@ describe("ImportProfileForm", () => {
 			amountCol: 3,
 			dateCol: 0,
 		});
+	});
+
+	it("re-reads the sample with the chosen separator", async () => {
+		apiFetchMock.mockImplementation(async (path) => {
+			if (path === "/operations/import/preview") return { rows: previewRows };
+			return { ...existing, id: "new" };
+		});
+		const { onSaved } = renderForm();
+		const user = userEvent.setup();
+
+		await user.type(screen.getByLabelText(/Nom/), "Ma banque");
+		const input = document.querySelector("input[type='file']");
+		if (!(input instanceof HTMLInputElement)) throw new Error("no file input");
+		await user.upload(input, new File(["x"], "sample.csv"));
+		await screen.findByText("CB MONOPRIX");
+		await selectMantineOption("Séparateur", "Point-virgule ( ; )");
+
+		await screen.findByText("CB MONOPRIX");
+		const previews = apiFetchMock.mock.calls
+			.filter(([path]) => path === "/operations/import/preview")
+			.map(([, options]) => {
+				const body = options?.body;
+				return body instanceof FormData ? body.get("csvDelimiter") : null;
+			});
+		expect(previews).toEqual(["comma", "semicolon"]);
+
+		await assignRole("A", "Date");
+		await assignRole("B", "Libellé");
+		await assignRole("D", "Montant");
+		await user.click(screen.getByRole("button", { name: "Enregistrer" }));
+		await waitFor(() => expect(onSaved).toHaveBeenCalled());
+		expect(savedBody().body).toMatchObject({ csvDelimiter: "semicolon" });
 	});
 
 	it("reports a sample file the server cannot read", async () => {

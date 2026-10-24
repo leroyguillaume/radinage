@@ -4,7 +4,7 @@ use crate::{
     domain::{
         budget::{Budget, BudgetFields, BudgetKind, BudgetType, Rule},
         category::{Category, CategoryColor, CategoryFields, CategoryIcon},
-        import_profile::{ImportProfile, ImportProfileFields},
+        import_profile::{CsvDelimiter, ImportProfile, ImportProfileFields},
         operation::{BudgetLink, NewOperationSplit, Operation, OperationSplit, validate_splits},
         user::AccountBalance,
     },
@@ -190,6 +190,9 @@ pub struct ExportImportProfile {
     pub date_col: usize,
     pub date_format: String,
     pub skip_lines: usize,
+    /// Absent from exports made before profiles had a CSV delimiter.
+    #[serde(default)]
+    pub csv_delimiter: CsvDelimiter,
 }
 
 impl From<ImportProfile> for ExportImportProfile {
@@ -201,6 +204,7 @@ impl From<ImportProfile> for ExportImportProfile {
             date_col: p.fields.date_col,
             date_format: p.fields.date_format,
             skip_lines: p.fields.skip_lines,
+            csv_delimiter: p.fields.csv_delimiter,
         }
     }
 }
@@ -214,6 +218,7 @@ impl From<ExportImportProfile> for ImportProfileRequest {
             date_col: p.date_col,
             date_format: p.date_format,
             skip_lines: p.skip_lines,
+            csv_delimiter: p.csv_delimiter,
         }
     }
 }
@@ -1427,6 +1432,7 @@ mod tests {
             date_col: 0,
             date_format: "%d/%m/%Y".to_string(),
             skip_lines: 1,
+            csv_delimiter: CsvDelimiter::Comma,
         }
     }
 
@@ -1447,8 +1453,17 @@ mod tests {
             "amountCol": 3,
             "dateCol": date_col,
             "dateFormat": "%d/%m/%Y",
-            "skipLines": 1
+            "skipLines": 1,
+            "csvDelimiter": "comma"
         })
+    }
+
+    #[test]
+    fn exported_profile_without_delimiter_reads_as_comma() {
+        let mut json = profile_json("Bank", 0);
+        json.as_object_mut().unwrap().remove("csvDelimiter");
+        let profile: ExportImportProfile = serde_json::from_value(json).unwrap();
+        assert_eq!(profile.csv_delimiter, CsvDelimiter::Comma);
     }
 
     async fn import_profiles_payload(

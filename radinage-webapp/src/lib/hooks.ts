@@ -20,6 +20,7 @@ import type {
 	CategoryResponse,
 	CategorySummaryResponse,
 	CreateUserResponse,
+	CsvDelimiter,
 	ExportDataResponse,
 	ForecastMonthBreakdown,
 	ForecastResponse,
@@ -476,9 +477,16 @@ export function useDeleteImportProfile() {
 
 export function useImportPreview() {
 	return useMutation({
-		mutationFn: (file: File) => {
+		mutationFn: ({
+			file,
+			csvDelimiter,
+		}: {
+			file: File;
+			csvDelimiter: CsvDelimiter;
+		}) => {
 			const body = new FormData();
 			body.append("file", file);
+			body.append("csvDelimiter", csvDelimiter);
 			return apiFetch<ImportPreviewResponse>("/operations/import/preview", {
 				method: "POST",
 				body,
@@ -505,6 +513,7 @@ export function useImportOperations() {
 			body.append("dateCol", String(profile.dateCol));
 			body.append("dateFormat", profile.dateFormat);
 			body.append("skipLines", String(profile.skipLines));
+			body.append("csvDelimiter", profile.csvDelimiter);
 			body.append("profileId", profile.id);
 			return apiFetch<ImportResult>("/operations/import", {
 				method: "POST",

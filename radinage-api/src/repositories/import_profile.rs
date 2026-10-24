@@ -6,7 +6,7 @@ use sqlx::{PgPool, Row, postgres::PgRow};
 use uuid::Uuid;
 
 const COLUMNS: &str = "id, user_id, name, label_col, amount_col, date_col, date_format, skip_lines, \
-     last_used_at, created_at";
+     csv_delimiter, last_used_at, created_at";
 
 /// Data access interface for import profiles.
 #[cfg_attr(test, mockall::automock)]
@@ -83,6 +83,10 @@ fn row_to_profile(row: &PgRow) -> AppResult<ImportProfile> {
             date_col: from_db(row, "date_col")?,
             date_format: row.try_get("date_format")?,
             skip_lines: from_db(row, "skip_lines")?,
+            csv_delimiter: row
+                .try_get::<&str, _>("csv_delimiter")?
+                .parse()
+                .map_err(AppError::Internal)?,
         },
         last_used_at: row.try_get("last_used_at")?,
         created_at: row.try_get("created_at")?,
@@ -127,8 +131,9 @@ impl ImportProfileRepository for PgImportProfileRepository {
     ) -> AppResult<ImportProfile> {
         let row = sqlx::query(&format!(
             "INSERT INTO import_profiles \
-             (user_id, name, label_col, amount_col, date_col, date_format, skip_lines) \
-             VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING {COLUMNS}"
+             (user_id, name, label_col, amount_col, date_col, date_format, skip_lines, \
+             csv_delimiter) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING {COLUMNS}"
         ))
         .bind(user_id)
         .bind(&fields.name)
@@ -137,6 +142,7 @@ impl ImportProfileRepository for PgImportProfileRepository {
         .bind(to_db(fields.date_col)?)
         .bind(&fields.date_format)
         .bind(to_db(fields.skip_lines)?)
+        .bind(fields.csv_delimiter.as_str())
         .fetch_one(&self.pool)
         .await
         .map_err(|e| map_name_conflict(e, &fields.name))?;
@@ -151,7 +157,7 @@ impl ImportProfileRepository for PgImportProfileRepository {
     ) -> AppResult<Option<ImportProfile>> {
         let row = sqlx::query(&format!(
             "UPDATE import_profiles SET name = $3, label_col = $4, amount_col = $5, \
-             date_col = $6, date_format = $7, skip_lines = $8 \
+             date_col = $6, date_format = $7, skip_lines = $8, csv_delimiter = $9 \
              WHERE id = $1 AND user_id = $2 RETURNING {COLUMNS}"
         ))
         .bind(id)
@@ -162,6 +168,7 @@ impl ImportProfileRepository for PgImportProfileRepository {
         .bind(to_db(fields.date_col)?)
         .bind(&fields.date_format)
         .bind(to_db(fields.skip_lines)?)
+        .bind(fields.csv_delimiter.as_str())
         .fetch_optional(&self.pool)
         .await
         .map_err(|e| map_name_conflict(e, &fields.name))?;
@@ -193,7 +200,7 @@ impl ImportProfileRepository for PgImportProfileRepository {
 mod tests {
     use super::*;
     use crate::{
-        domain::user::UserRole,
+        domain::{import_profile::CsvDelimiter, user::UserRole},
         repositories::{PgUserRepository, UserRepository},
     };
 
@@ -214,6 +221,7 @@ mod tests {
             date_col: 0,
             date_format: "%d/%m/%Y".to_string(),
             skip_lines: 1,
+            csv_delimiter: CsvDelimiter::Comma,
         }
     }
 
@@ -282,6 +290,7 @@ mod tests {
         let created = repo.create(alice, &fields("Bank")).await.unwrap();
         let changed = ImportProfileFields {
             skip_lines: 4,
+            csv_delimiter: CsvDelimiter::Semicolon,
             ..fields("Renamed")
         };
 

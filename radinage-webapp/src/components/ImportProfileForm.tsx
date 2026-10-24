@@ -29,7 +29,7 @@ import {
 	useImportPreview,
 	useSaveImportProfile,
 } from "@/lib/hooks";
-import type { ImportProfileResponse } from "@/lib/types";
+import type { CsvDelimiter, ImportProfileResponse } from "@/lib/types";
 
 export type ColumnRole = "label" | "amount" | "date";
 
@@ -59,6 +59,8 @@ const DATE_FORMATS: Record<string, string> = {
 };
 
 const DEFAULT_DATE_FORMAT = "%d/%m/%Y";
+
+const CSV_DELIMITERS: CsvDelimiter[] = ["comma", "semicolon", "tab", "pipe"];
 
 /**
  * Give `column` the `role` (or no role when null). A role already held by another column
@@ -125,6 +127,9 @@ export function ImportProfileForm({
 	const [dateFormat, setDateFormat] = useState(
 		profile?.dateFormat ?? DEFAULT_DATE_FORMAT,
 	);
+	const [csvDelimiter, setCsvDelimiter] = useState<CsvDelimiter>(
+		profile?.csvDelimiter ?? "comma",
+	);
 	const [sample, setSample] = useState<File | null>(null);
 	const [error, setError] = useState<string | null>(null);
 	const [confirmingDelete, setConfirmingDelete] = useState(false);
@@ -149,12 +154,21 @@ export function ImportProfileForm({
 		amountCol !== null &&
 		dateCol !== null;
 
-	function handleSample(file: File | null) {
-		setSample(file);
+	function loadPreview(file: File | null, delimiter: CsvDelimiter) {
 		preview.reset();
 		if (file) {
-			preview.mutate(file);
+			preview.mutate({ file, csvDelimiter: delimiter });
 		}
+	}
+
+	function handleSample(file: File | null) {
+		setSample(file);
+		loadPreview(file, csvDelimiter);
+	}
+
+	function handleDelimiter(delimiter: CsvDelimiter) {
+		setCsvDelimiter(delimiter);
+		loadPreview(sample, delimiter);
 	}
 
 	async function handleSave() {
@@ -170,6 +184,7 @@ export function ImportProfileForm({
 					dateCol,
 					dateFormat,
 					skipLines,
+					csvDelimiter,
 				},
 			});
 			onSaved(saved);
@@ -204,15 +219,31 @@ export function ImportProfileForm({
 				required
 			/>
 
-			<FileInput
-				label={t("importProfile.sample")}
-				placeholder={t("importProfile.samplePlaceholder")}
-				accept=".csv,.xls,.xlsx"
-				leftSection={<IconFileSpreadsheet size={16} />}
-				value={sample}
-				onChange={handleSample}
-				clearable
-			/>
+			<SimpleGrid cols={{ base: 1, sm: 2 }} spacing="sm">
+				<FileInput
+					label={t("importProfile.sample")}
+					placeholder={t("importProfile.samplePlaceholder")}
+					accept=".csv,.xls,.xlsx"
+					leftSection={<IconFileSpreadsheet size={16} />}
+					value={sample}
+					onChange={handleSample}
+					clearable
+				/>
+				<Select
+					label={t("importProfile.csvDelimiter")}
+					description={t("importProfile.csvDelimiterHint")}
+					data={CSV_DELIMITERS.map((value) => ({
+						value,
+						label: t(`importProfile.csvDelimiters.${value}`),
+					}))}
+					value={csvDelimiter}
+					onChange={(v) => {
+						const delimiter = CSV_DELIMITERS.find((d) => d === v);
+						if (delimiter) handleDelimiter(delimiter);
+					}}
+					allowDeselect={false}
+				/>
+			</SimpleGrid>
 
 			{preview.isError && (
 				<Alert color="tangerine" icon={<IconAlertCircle size={16} />}>

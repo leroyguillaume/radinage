@@ -1,7 +1,10 @@
 use crate::{
     AppState,
     auth::middleware::AuthUser,
-    domain::operation::{BudgetLink, Operation},
+    domain::{
+        import_profile::CsvDelimiter,
+        operation::{BudgetLink, Operation},
+    },
     error::{AppError, AppResult},
     handlers::operations::auto_match_operation,
     repositories::{BudgetRepository, ImportProfileRepository, OperationRepository},
@@ -71,6 +74,9 @@ pub struct ImportMultipartSchema {
     /// Number of leading rows to skip before the first data row, including the header (default 0)
     #[allow(dead_code)]
     skip_lines: Option<usize>,
+    /// Field separator of a CSV file (default `comma`); spreadsheets ignore it
+    #[allow(dead_code)]
+    csv_delimiter: Option<CsvDelimiter>,
     /// Import profile the parameters come from, recorded as its last use (optional)
     #[allow(dead_code)]
     profile_id: Option<Uuid>,
@@ -82,6 +88,9 @@ pub struct PreviewMultipartSchema {
     /// The file to preview (CSV or XLSX)
     #[allow(dead_code)]
     file: String,
+    /// Field separator of a CSV file (default `comma`); spreadsheets ignore it
+    #[allow(dead_code)]
+    csv_delimiter: Option<CsvDelimiter>,
 }
 
 /// The first rows of a file, read the way an import reads them.
@@ -126,6 +135,7 @@ pub async fn import_operations<
     let mut date_col: Option<usize> = None;
     let mut date_format: Option<String> = None;
     let mut skip_lines: Option<usize> = None;
+    let mut csv_delimiter = CsvDelimiter::default();
     let mut profile_id: Option<Uuid> = None;
 
     while let Some(field) = multipart
@@ -182,6 +192,7 @@ pub async fn import_operations<
                     "skipLines",
                 )?);
             }
+            "csvDelimiter" => csv_delimiter = read_delimiter_field(field).await?,
             "profileId" => {
                 let text = field
                     .text()
@@ -206,6 +217,7 @@ pub async fn import_operations<
         date_format: date_format
             .ok_or_else(|| AppError::BadRequest("missing dateFormat field".to_string()))?,
         skip_lines: skip_lines.unwrap_or(0),
+        csv_delimiter,
     };
     let name = file_name.unwrap_or_default();
 
@@ -321,20 +333,33 @@ pub async fn preview_import(
     _auth_user: AuthUser,
     MultipartBody(mut multipart, _): MultipartBody<PreviewMultipartSchema>,
 ) -> AppResult<Json<ImportPreviewResponse>> {
+    let mut file: Option<(Option<String>, Vec<u8>)> = None;
+    let mut csv_delimiter = CsvDelimiter::default();
     while let Some(field) = multipart
         .next_field()
         .await
         .map_err(|e| AppError::BadRequest(format!("multipart error: {e}")))?
     {
-        if field.name() == Some("file") {
-            let (name, bytes) = read_file_field(field).await?;
-            let spreadsheet = is_spreadsheet(&name.unwrap_or_default());
-            let rows =
-                preview_rows(&bytes, spreadsheet, PREVIEW_ROWS).map_err(AppError::BadRequest)?;
-            return Ok(Json(ImportPreviewResponse { rows }));
+        match field.name() {
+            Some("file") => file = Some(read_file_field(field).await?),
+            Some("csvDelimiter") => csv_delimiter = read_delimiter_field(field).await?,
+            _ => {}
         }
     }
-    Err(AppError::BadRequest("missing file field".to_string()))
+    let (name, bytes) =
+        file.ok_or_else(|| AppError::BadRequest("missing file field".to_string()))?;
+    let spreadsheet = is_spreadsheet(&name.unwrap_or_default());
+    let rows = preview_rows(&bytes, spreadsheet, csv_delimiter, PREVIEW_ROWS)
+        .map_err(AppError::BadRequest)?;
+    Ok(Json(ImportPreviewResponse { rows }))
+}
+
+async fn read_delimiter_field(field: Field<'_>) -> AppResult<CsvDelimiter> {
+    let text = field
+        .text()
+        .await
+        .map_err(|e| AppError::BadRequest(format!("csvDelimiter read error: {e}")))?;
+    text.trim().parse().map_err(AppError::BadRequest)
 }
 
 async fn read_file_field(field: Field<'_>) -> AppResult<(Option<String>, Vec<u8>)> {
@@ -437,6 +462,9 @@ mod tests {
         if params.skip_lines > 0 {
             add_text_field(&mut body, b, "skipLines", &params.skip_lines.to_string());
         }
+        if params.csv_delimiter != CsvDelimiter::Comma {
+            add_text_field(&mut body, b, "csvDelimiter", params.csv_delimiter.as_str());
+        }
 
         body.extend_from_slice(b"--");
         body.extend_from_slice(b);
@@ -485,6 +513,7 @@ mod tests {
             date_col: 2,
             date_format: "%d/%m/%Y".to_string(),
             skip_lines: 1, // skip header row
+            csv_delimiter: CsvDelimiter::Comma,
         }
     }
 
@@ -534,6 +563,31 @@ mod tests {
         assert_eq!(json.imported, 2);
         assert_eq!(json.skipped, 0);
         assert!(json.errors.is_empty());
+    }
+
+    #[tokio::test]
+    async fn import_csv_with_semicolon_delimiter() {
+        let (op_repo, budget_repo) = empty_import_repos();
+        let app = build_test_router(make_test_state(
+            MockUserRepository::new(),
+            op_repo,
+            budget_repo,
+        ));
+        let params = ImportParams {
+            csv_delimiter: CsvDelimiter::Semicolon,
+            ..default_import_params()
+        };
+        let auth = auth_header(Uuid::new_v4(), UserRole::User);
+        let csv = b"label;amount;date\nGroceries;-50,00;15/01/2024\n";
+        let resp = app
+            .oneshot(import_request("b", "ops.csv", csv, &params, &auth))
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        let json: ImportResponse = response_json(resp).await;
+        assert_eq!(json.duplicate_rows, [2]);
+        assert!(json.errors.is_empty(), "{:?}", json.errors);
     }
 
     #[tokio::test]
@@ -1076,6 +1130,52 @@ mod tests {
         assert_eq!(json.rows.len(), PREVIEW_ROWS);
         assert_eq!(json.rows[0], ["Date", "Label", "Amount"]);
         assert_eq!(json.rows[1], ["01/01/2024", "Op 0", "-1"]);
+    }
+
+    #[tokio::test]
+    async fn preview_splits_on_delimiter_sent_after_the_file() {
+        let body = with_text_field(
+            file_only_body("b", "ops.csv", b"Date;Label;Amount\n01/01/2024;Op;-1,50\n"),
+            "b",
+            "csvDelimiter",
+            "semicolon",
+        );
+        let auth = auth_header(Uuid::new_v4(), UserRole::User);
+        let resp = preview_app()
+            .oneshot(multipart_request(
+                "/operations/import/preview",
+                "b",
+                body,
+                &auth,
+            ))
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        let json: ImportPreviewResponse = response_json(resp).await;
+        assert_eq!(json.rows[1], ["01/01/2024", "Op", "-1,50"]);
+    }
+
+    #[tokio::test]
+    async fn unknown_delimiter_is_a_bad_request() {
+        let body = with_text_field(
+            file_only_body("b", "ops.csv", b"a,b\n"),
+            "b",
+            "csvDelimiter",
+            "colon",
+        );
+        let auth = auth_header(Uuid::new_v4(), UserRole::User);
+        let resp = preview_app()
+            .oneshot(multipart_request(
+                "/operations/import/preview",
+                "b",
+                body,
+                &auth,
+            ))
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
     }
 
     #[tokio::test]
