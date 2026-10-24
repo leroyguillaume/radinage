@@ -875,7 +875,7 @@ describe("BudgetModal", () => {
 		expect(callBody.accountId).toBeNull();
 	});
 
-	it("links to the settings while there is no savings account", async () => {
+	it("links to the accounts page while there is no savings account", async () => {
 		const { onClose } = renderModal(null, vi.fn(), [], [accounts[0]]);
 		await selectMantineOption("Type", "Épargne");
 
@@ -883,7 +883,7 @@ describe("BudgetModal", () => {
 			screen.getByRole("combobox", { name: "Compte épargne" }),
 		).toBeDisabled();
 		const link = screen.getByRole("link", { name: "Ajouter un compte" });
-		expect(link).toHaveAttribute("href", "/settings");
+		expect(link).toHaveAttribute("href", "/accounts");
 		await userEvent.setup().click(link);
 		expect(onClose).toHaveBeenCalled();
 	});

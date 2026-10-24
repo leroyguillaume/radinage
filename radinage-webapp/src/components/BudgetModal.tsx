@@ -650,7 +650,7 @@ export function BudgetModal({
 									{t("budgets.fields.accountEmpty")}{" "}
 									<Anchor
 										component={Link}
-										to="/settings"
+										to="/accounts"
 										onClick={onClose}
 										inherit
 									>

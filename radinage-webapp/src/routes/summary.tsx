@@ -1029,7 +1029,7 @@ function BalanceCard({
 				<BigAmount value="—" color="dimmed" fz={compact ? 22 : undefined} />
 				<Text size={compact ? "xs" : "sm"} c="dimmed">
 					{t("forecast.noBalanceHint")}{" "}
-					<Anchor component={Link} to="/settings" inherit>
+					<Anchor component={Link} to="/accounts" inherit>
 						{t("forecast.noBalanceLink")}
 					</Anchor>
 				</Text>

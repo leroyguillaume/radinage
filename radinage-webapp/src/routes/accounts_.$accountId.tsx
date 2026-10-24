@@ -47,7 +47,7 @@ import { feederNames, feedersOf } from "@/lib/transfers";
 import type { AccountResponse, BalanceReading } from "@/lib/types";
 import { headingFont, palette } from "@/theme";
 
-export const Route = createFileRoute("/accounts/$accountId")({
+export const Route = createFileRoute("/accounts_/$accountId")({
 	component: AccountPage,
 });
 
@@ -237,7 +237,7 @@ function AccountPage() {
 			>
 				<Group wrap="nowrap" gap="xs">
 					<AnchorLink
-						to="/settings"
+						to="/accounts"
 						aria-label={t("accounts.detail.back")}
 						c="inherit"
 						w={44}
