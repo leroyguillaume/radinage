@@ -237,9 +237,9 @@ pub struct ListOperationsQuery {
     /// Number of results per page (1–500, default: 100).
     #[schemars(range(min = 1, max = 500), default = "default_operations_page_size")]
     pub page_size: Option<u32>,
-    /// Include only ignored operations, instead of leaving them out (default: false).
-    #[serde(default)]
-    pub ignored: bool,
+    /// Keep the operations that are not ignored (`excluded`, default), the ignored ones alone
+    /// (`only`) or both (`included`).
+    pub ignored: Option<IgnoredFilter>,
     /// Include only operations counting towards one of these categories: an unsplit
     /// operation through its effective category, a split one through any of its parts.
     /// Repeat the parameter for several categories.
@@ -343,11 +343,7 @@ pub async fn list_operations<U, O: OperationRepository, B, P, C, R>(
         order: q.order.unwrap_or_default(),
         limit: page_size as i64,
         offset: ((page - 1) * page_size) as i64,
-        ignored: if q.ignored {
-            IgnoredFilter::Only
-        } else {
-            IgnoredFilter::Excluded
-        },
+        ignored: q.ignored.unwrap_or_default(),
         category: CategoryFilter {
             category_ids: q.category_id,
             uncategorized: q.uncategorized,
@@ -1828,12 +1824,15 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn list_operations_keeps_only_ignored_operations_when_asked() {
-        expect_list_params("", |params| params.ignored == IgnoredFilter::Excluded).await;
-        expect_list_params("ignored=true", |params| {
-            params.ignored == IgnoredFilter::Only
-        })
-        .await;
+    async fn list_operations_passes_the_ignored_filter() {
+        for (query, expected) in [
+            ("", IgnoredFilter::Excluded),
+            ("ignored=excluded", IgnoredFilter::Excluded),
+            ("ignored=only", IgnoredFilter::Only),
+            ("ignored=included", IgnoredFilter::Included),
+        ] {
+            expect_list_params(query, move |params| params.ignored == expected).await;
+        }
     }
 
     #[tokio::test]

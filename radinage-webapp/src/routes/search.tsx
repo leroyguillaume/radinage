@@ -4,7 +4,6 @@ import {
 	Badge,
 	Box,
 	Button,
-	Checkbox,
 	CloseButton,
 	Drawer,
 	Group,
@@ -57,6 +56,7 @@ import {
 import {
 	activeFilterCount,
 	defaultOrder,
+	IGNORED_FILTERS,
 	mergeFilters,
 	OPERATION_DIRECTIONS,
 	OPERATION_SORTS,
@@ -308,14 +308,22 @@ function FilterControls({
 				allowSingleDateInRange
 				size="md"
 			/>
-			<Box className="flex min-h-[44px] items-end sm:pb-2">
-				<Checkbox
+			<Input.Wrapper label={t("search.ignoredFilter.label")}>
+				<SegmentedControl
+					fullWidth
 					size="md"
-					label={t("search.onlyIgnored")}
-					checked={filters.ignored ?? false}
-					onChange={(e) => onChange({ ignored: e.currentTarget.checked })}
+					value={filters.ignored ?? "excluded"}
+					onChange={(value) =>
+						onChange({ ignored: IGNORED_FILTERS.find((f) => f === value) })
+					}
+					data={[
+						{ value: "excluded", label: t("search.ignoredFilter.excluded") },
+						{ value: "only", label: t("search.ignoredFilter.only") },
+						{ value: "included", label: t("search.ignoredFilter.included") },
+					]}
+					styles={{ label: { minHeight: 40, alignContent: "center" } }}
 				/>
-			</Box>
+			</Input.Wrapper>
 		</SimpleGrid>
 	);
 }
@@ -389,7 +397,7 @@ function useFilterChips(
 	if (filters.ignored) {
 		chips.push({
 			key: "ignored",
-			label: t("search.onlyIgnored"),
+			label: t(`search.ignoredFilter.${filters.ignored}Chip`),
 			patch: { ignored: undefined },
 		});
 	}

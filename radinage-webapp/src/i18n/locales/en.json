@@ -664,7 +664,14 @@
 		"allBudgets": "All budgets",
 		"dates": "Dates",
 		"allDates": "All dates",
-		"onlyIgnored": "Only ignored",
+		"ignoredFilter": {
+			"label": "Ignored operations",
+			"excluded": "Not ignored",
+			"only": "Ignored",
+			"included": "All",
+			"onlyChip": "Ignored only",
+			"includedChip": "With ignored"
+		},
 		"ignored": "Ignored",
 		"reset": "Reset",
 		"filters": "Filters",

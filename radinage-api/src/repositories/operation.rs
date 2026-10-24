@@ -64,13 +64,16 @@ pub struct ListOperationsParams {
 }
 
 /// Which operations a listing keeps by their ignored flag.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Deserialize, Clone, Copy, Default, PartialEq, Eq, JsonSchema)]
+#[schemars(transform = crate::schema::flatten_string_enum)]
+#[serde(rename_all = "camelCase")]
 pub enum IgnoredFilter {
-    /// Leaves the ignored operations out.
+    /// The operations that are not ignored.
     #[default]
     Excluded,
+    /// Every operation, ignored or not.
     Included,
-    /// Keeps the ignored operations alone.
+    /// The ignored operations alone.
     Only,
 }
 

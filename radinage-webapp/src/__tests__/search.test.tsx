@@ -294,16 +294,19 @@ describe("SearchPage", () => {
 		await waitFor(() => expect(lastSearch().get("direction")).toBe("expense"));
 	});
 
-	it("searches only the ignored operations when asked", async () => {
+	it("searches the non-ignored, ignored or all operations", async () => {
 		await renderSearchPage();
 		await screen.findByText("LOYER FEVRIER");
 		expect(lastSearch().has("ignored")).toBe(false);
 
-		fireEvent.click(
-			screen.getByRole("checkbox", { name: "Ignorées seulement" }),
-		);
+		fireEvent.click(screen.getByRole("radio", { name: "Ignorées" }));
+		await waitFor(() => expect(lastSearch().get("ignored")).toBe("only"));
 
-		await waitFor(() => expect(lastSearch().get("ignored")).toBe("true"));
+		fireEvent.click(screen.getByRole("radio", { name: "Toutes" }));
+		await waitFor(() => expect(lastSearch().get("ignored")).toBe("included"));
+
+		fireEvent.click(screen.getByRole("radio", { name: "Non ignorées" }));
+		await waitFor(() => expect(lastSearch().has("ignored")).toBe(false));
 	});
 
 	it("does not send an invalid amount", async () => {
@@ -320,13 +323,13 @@ describe("SearchPage", () => {
 
 	it("restores the filters of a shared link", async () => {
 		await renderSearchPage(
-			'/search?budgetIds=["b-rent"]&ignored=true&sort=amount&order=asc',
+			'/search?budgetIds=["b-rent"]&ignored=included&sort=amount&order=asc',
 		);
 		await screen.findByText("LOYER FEVRIER");
 
 		const params = lastSearch();
 		expect(params.getAll("budgetId")).toEqual(["b-rent"]);
-		expect(params.get("ignored")).toBe("true");
+		expect(params.get("ignored")).toBe("included");
 		expect(params.get("sort")).toBe("amount");
 		expect(params.get("order")).toBe("asc");
 	});
@@ -416,7 +419,7 @@ describe("SearchPage", () => {
 		setupMocks(() =>
 			page([operation({ label: "REMBOURSEMENT", ignored: true })]),
 		);
-		await renderSearchPage("/search?ignored=true");
+		await renderSearchPage("/search?ignored=only");
 
 		expect(await screen.findByText("REMBOURSEMENT")).toHaveStyle({
 			textDecoration: "line-through",
@@ -434,7 +437,7 @@ describe("SearchPage", () => {
 				}),
 			]),
 		);
-		await renderSearchPage("/search?ignored=true");
+		await renderSearchPage("/search?ignored=only");
 
 		fireEvent.click(
 			await screen.findByRole("button", { name: /REMBOURSEMENT/ }),
