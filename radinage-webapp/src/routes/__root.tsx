@@ -1,4 +1,5 @@
 import {
+	ActionIcon,
 	Box,
 	Drawer,
 	Image,
@@ -208,17 +209,43 @@ function SideButton({
 	);
 }
 
+function CollapseToggle({
+	collapsed,
+	onClick,
+}: {
+	collapsed: boolean;
+	onClick: () => void;
+}) {
+	const { t } = useTranslation();
+	const label = t(collapsed ? "nav.expand" : "nav.collapse");
+	const Icon = collapsed
+		? IconLayoutSidebarLeftExpand
+		: IconLayoutSidebarLeftCollapse;
+	return (
+		<Tooltip label={label} position="right" withArrow>
+			<ActionIcon
+				variant="subtle"
+				color="gray"
+				size={44}
+				radius="md"
+				aria-label={label}
+				onClick={onClick}
+			>
+				<Icon size={22} stroke={1.8} />
+			</ActionIcon>
+		</Tooltip>
+	);
+}
+
 /** The full menu, shared by the side bar and the mobile drawer. */
 function NavMenu({
 	collapsed,
 	onNavigate,
 	onLogout,
-	footer,
 }: {
 	collapsed: boolean;
 	onNavigate?: () => void;
 	onLogout: () => void;
-	footer?: ReactNode;
 }) {
 	const { t } = useTranslation();
 	const role = useAuthStore((s) => s.role);
@@ -267,7 +294,6 @@ function NavMenu({
 					collapsed={collapsed}
 					onClick={onLogout}
 				/>
-				{footer}
 			</Box>
 		</>
 	);
@@ -355,7 +381,11 @@ function RootLayout() {
 				>
 					<Box
 						px={collapsed ? 0 : 4}
-						className={collapsed ? "flex justify-center" : undefined}
+						className={
+							collapsed
+								? "flex flex-col items-center gap-1"
+								: "flex items-center justify-between"
+						}
 					>
 						<HomeLink>
 							{collapsed ? (
@@ -364,23 +394,9 @@ function RootLayout() {
 								<BrandLogo />
 							)}
 						</HomeLink>
+						<CollapseToggle collapsed={collapsed} onClick={toggleCollapsed} />
 					</Box>
-					<NavMenu
-						collapsed={collapsed}
-						onLogout={handleLogout}
-						footer={
-							<SideButton
-								icon={
-									collapsed
-										? IconLayoutSidebarLeftExpand
-										: IconLayoutSidebarLeftCollapse
-								}
-								label={t(collapsed ? "nav.expand" : "nav.collapse")}
-								collapsed={collapsed}
-								onClick={toggleCollapsed}
-							/>
-						}
-					/>
+					<NavMenu collapsed={collapsed} onLogout={handleLogout} />
 				</Box>
 			)}
 			<div className="flex min-w-0 flex-1 flex-col">
