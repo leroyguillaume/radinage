@@ -32,6 +32,7 @@ function makeProfile(
 		name: "Crédit Agricole",
 		accountId: "account-1",
 		labelCol: 1,
+		labelFallbackCol: null,
 		amountCol: 3,
 		dateCol: 0,
 		dateFormat: "%d/%m/%Y",
@@ -58,7 +59,7 @@ const account: AccountResponse = {
 /** Answer the profile list with `profiles`, the accounts with `account` and every import with `importResult`. */
 function mockApi(
 	profiles: ImportProfileResponse[],
-	importResult: unknown = { imported: 2, skipped: 0, errors: [] },
+	importResult: unknown = { imported: 2, skipped: 0, relabeled: 0, errors: [] },
 ) {
 	apiFetchMock.mockImplementation(async (path) => {
 		if (path === "/import-profiles") return profiles;
@@ -147,11 +148,16 @@ describe("ImportModal", () => {
 	});
 
 	it("imports with the selected profile's settings", async () => {
-		const result = { imported: 2, skipped: 1, errors: [] };
+		const result = { imported: 2, skipped: 1, relabeled: 0, errors: [] };
 		mockApi(
 			[
 				makeProfile(),
-				makeProfile({ id: "p2", name: "Boursorama", labelCol: 2 }),
+				makeProfile({
+					id: "p2",
+					name: "Boursorama",
+					labelCol: 2,
+					labelFallbackCol: 4,
+				}),
 			],
 			result,
 		);
@@ -173,6 +179,7 @@ describe("ImportModal", () => {
 		expect(body.get("profileId")).toBe("p2");
 		expect(body.get("accountId")).toBe("account-1");
 		expect(body.get("labelCol")).toBe("2");
+		expect(body.get("labelFallbackCol")).toBe("4");
 		expect(body.get("amountCol")).toBe("3");
 		expect(body.get("dateCol")).toBe("0");
 		expect(body.get("dateFormat")).toBe("%d/%m/%Y");

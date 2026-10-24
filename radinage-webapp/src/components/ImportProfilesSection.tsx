@@ -102,6 +102,11 @@ function ImportProfileRow({
 							<Chip color="forest">
 								{`${t("importProfile.roles.label")} ${columnLetter(profile.labelCol)}`}
 							</Chip>
+							{profile.labelFallbackCol !== null && (
+								<Chip color="leaf">
+									{`${t("importProfile.roles.labelFallback")} ${columnLetter(profile.labelFallbackCol)}`}
+								</Chip>
+							)}
 							<Chip color="tangerine">
 								{`${t("importProfile.roles.amount")} ${columnLetter(profile.amountCol)}`}
 							</Chip>

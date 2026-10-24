@@ -435,6 +435,8 @@ export interface ImportProfileResponse {
 	/** Account the profile imports operations on. */
 	accountId: string;
 	labelCol: number;
+	/** Column read when the label column is blank, null for none. */
+	labelFallbackCol: number | null;
 	amountCol: number;
 	dateCol: number;
 	dateFormat: string;
@@ -457,6 +459,8 @@ export interface ImportPreviewResponse {
 export interface ImportResult {
 	imported: number;
 	skipped: number;
+	/** Operations whose blank label was filled from the profile's fallback column. */
+	relabeled: number;
 	errors: { row: number; reason: string }[];
 }
 

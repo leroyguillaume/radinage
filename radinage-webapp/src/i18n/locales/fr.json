@@ -125,6 +125,7 @@
 		"error": "Erreur lors de l'import",
 		"resultImported": "{{count}} opération(s) importée(s)",
 		"resultSkipped": "{{count}} doublon(s) ignoré(s)",
+		"resultRelabeled": "{{count}} libellé(s) vide(s) complété(s)",
 		"resultErrors": "{{count}} erreur(s)"
 	},
 	"importProfile": {
@@ -135,15 +136,18 @@
 		"sample": "Fichier d'exemple",
 		"samplePlaceholder": "Pour choisir les colonnes visuellement",
 		"sampleError": "Impossible de lire ce fichier",
-		"columnHint": "Touchez un en-tête pour lui attribuer un rôle.",
+		"columnHint": "Touchez un en-tête pour lui attribuer un rôle. Le libellé de secours est lu quand le libellé est vide.",
 		"column": "Colonne {{column}}",
 		"roles": {
 			"label": "Libellé",
+			"labelFallback": "Libellé de secours",
 			"amount": "Montant",
 			"date": "Date",
 			"none": "Ignorer"
 		},
 		"labelCol": "Colonne du libellé",
+		"labelFallbackCol": "Libellé de secours",
+		"noColumn": "Aucune",
 		"amountCol": "Colonne du montant",
 		"dateCol": "Colonne de la date",
 		"skipLines": "Lignes ignorées",

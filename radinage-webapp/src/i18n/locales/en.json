@@ -125,6 +125,7 @@
 		"error": "Import failed",
 		"resultImported": "{{count}} operation(s) imported",
 		"resultSkipped": "{{count}} duplicate(s) skipped",
+		"resultRelabeled": "{{count}} blank label(s) filled in",
 		"resultErrors": "{{count}} error(s)"
 	},
 	"importProfile": {
@@ -135,15 +136,18 @@
 		"sample": "Sample file",
 		"samplePlaceholder": "To pick the columns visually",
 		"sampleError": "This file cannot be read",
-		"columnHint": "Tap a header to give the column a role.",
+		"columnHint": "Tap a header to give the column a role. The fallback label is read when the label is blank.",
 		"column": "Column {{column}}",
 		"roles": {
 			"label": "Label",
+			"labelFallback": "Fallback label",
 			"amount": "Amount",
 			"date": "Date",
 			"none": "Ignore"
 		},
 		"labelCol": "Label column",
+		"labelFallbackCol": "Fallback label",
+		"noColumn": "None",
 		"amountCol": "Amount column",
 		"dateCol": "Date column",
 		"skipLines": "Skipped lines",

@@ -39,6 +39,7 @@ const existing: ImportProfileResponse = {
 	name: "Crédit Agricole",
 	accountId: "account-1",
 	labelCol: 1,
+	labelFallbackCol: null,
 	amountCol: 3,
 	dateCol: 0,
 	dateFormat: "%d/%m/%Y",
@@ -130,27 +131,35 @@ afterEach(() => {
 });
 
 describe("assignColumn", () => {
-	const roles: ColumnRoles = { label: 1, amount: 3, date: 0 };
+	const roles: ColumnRoles = {
+		label: 1,
+		labelFallback: 2,
+		amount: 3,
+		date: 0,
+	};
 
 	it("swaps roles when the column already had one", () => {
 		expect(assignColumn(roles, 3, "label")).toEqual({
 			label: 3,
+			labelFallback: 2,
 			amount: 1,
 			date: 0,
 		});
 	});
 
 	it("moves a role to a column that had none", () => {
-		expect(assignColumn(roles, 2, "amount")).toEqual({
+		expect(assignColumn(roles, 4, "amount")).toEqual({
 			label: 1,
-			amount: 2,
+			labelFallback: 2,
+			amount: 4,
 			date: 0,
 		});
 	});
 
 	it("clears the role of an ignored column", () => {
-		expect(assignColumn(roles, 1, null)).toEqual({
-			label: null,
+		expect(assignColumn(roles, 2, null)).toEqual({
+			label: 1,
+			labelFallback: null,
 			amount: 3,
 			date: 0,
 		});
@@ -214,6 +223,7 @@ describe("ImportProfileForm", () => {
 				name: "Ma banque",
 				accountId: "account-1",
 				labelCol: 1,
+				labelFallbackCol: null,
 				amountCol: 3,
 				dateCol: 0,
 				dateFormat: "%Y-%m-%d",
@@ -239,6 +249,7 @@ describe("ImportProfileForm", () => {
 		expect(await screen.findByText("CB MONOPRIX")).toBeInTheDocument();
 		await assignRole("A", "Date");
 		await assignRole("B", "Libellé");
+		await assignRole("C", "Libellé de secours");
 		await assignRole("D", "Montant");
 		expect(
 			within(screen.getByRole("button", { name: "Colonne D" })).getByText(
@@ -250,6 +261,7 @@ describe("ImportProfileForm", () => {
 		await waitFor(() => expect(onSaved).toHaveBeenCalled());
 		expect(savedBody().body).toMatchObject({
 			labelCol: 1,
+			labelFallbackCol: 2,
 			amountCol: 3,
 			dateCol: 0,
 		});

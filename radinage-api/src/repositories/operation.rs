@@ -301,6 +301,17 @@ pub trait OperationRepository: Send + Sync + 'static {
         ignored: bool,
     ) -> impl std::future::Future<Output = AppResult<bool>> + Send;
 
+    /// Give `label` to one operation of the account with that date and amount and a blank
+    /// label. Returns `false` if there is none.
+    fn fill_blank_label(
+        &self,
+        user_id: Uuid,
+        account_id: Uuid,
+        amount: Decimal,
+        date: NaiveDate,
+        label: &str,
+    ) -> impl std::future::Future<Output = AppResult<bool>> + Send;
+
     /// Check whether an operation with the same date, label and amount already exists on the
     /// account.
     fn exists_by_fields(
@@ -891,6 +902,31 @@ impl OperationRepository for PgOperationRepository {
         .bind(ignored)
         .bind(id)
         .bind(user_id)
+        .execute(&self.pool)
+        .await?
+        .rows_affected();
+        Ok(affected > 0)
+    }
+
+    async fn fill_blank_label(
+        &self,
+        user_id: Uuid,
+        account_id: Uuid,
+        amount: Decimal,
+        date: NaiveDate,
+        label: &str,
+    ) -> AppResult<bool> {
+        let affected = sqlx::query(
+            "UPDATE operations SET label = $5 WHERE id = (\
+             SELECT id FROM operations WHERE user_id = $1 AND account_id = $2 \
+             AND amount = $3 AND date = $4 AND btrim(label) = '' \
+             ORDER BY id LIMIT 1 FOR UPDATE)",
+        )
+        .bind(user_id)
+        .bind(account_id)
+        .bind(amount)
+        .bind(date)
+        .bind(label)
         .execute(&self.pool)
         .await?
         .rows_affected();
@@ -2540,6 +2576,82 @@ mod integration_tests {
                     ..total(None)
                 },
             ]
+        );
+    }
+    async fn insert_labelled(
+        repo: &PgOperationRepository,
+        user_id: Uuid,
+        amount: Decimal,
+        label: &str,
+    ) -> Uuid {
+        let op_id = Uuid::new_v4();
+        repo.insert(
+            op_id,
+            user_id,
+            &NewOperation {
+                account_id: user_id,
+                amount,
+                date: NaiveDate::from_ymd_opt(2026, 10, 7).unwrap(),
+                effective_date: None,
+                label: label.to_string(),
+            },
+        )
+        .await
+        .unwrap();
+        op_id
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn fill_blank_label_fills_one_blank_operation_at_a_time(pool: PgPool) {
+        let repo = PgOperationRepository::new(pool.clone());
+        let user_id = setup_user(&pool).await;
+        let date = NaiveDate::from_ymd_opt(2026, 10, 7).unwrap();
+        let first = insert_labelled(&repo, user_id, dec!(-3.50), "").await;
+        let second = insert_labelled(&repo, user_id, dec!(-3.50), " ").await;
+        let named = insert_labelled(&repo, user_id, dec!(-3.50), "CB MONOPRIX").await;
+        let other_amount = insert_labelled(&repo, user_id, dec!(-4), "").await;
+
+        for _ in 0..2 {
+            assert!(
+                repo.fill_blank_label(user_id, user_id, dec!(-3.50), date, "COTIS CARTE VISA")
+                    .await
+                    .unwrap()
+            );
+        }
+        assert!(
+            !repo
+                .fill_blank_label(user_id, user_id, dec!(-3.50), date, "COTIS CARTE VISA")
+                .await
+                .unwrap()
+        );
+
+        for (id, label) in [
+            (first, "COTIS CARTE VISA"),
+            (second, "COTIS CARTE VISA"),
+            (named, "CB MONOPRIX"),
+            (other_amount, ""),
+        ] {
+            assert_eq!(repo.find_by_id(id, user_id).await.unwrap().label, label);
+        }
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn fill_blank_label_leaves_other_users_alone(pool: PgPool) {
+        let repo = PgOperationRepository::new(pool.clone());
+        let user_id = setup_user(&pool).await;
+        let other_user_id = setup_user(&pool).await;
+        let date = NaiveDate::from_ymd_opt(2026, 10, 7).unwrap();
+        let theirs = insert_labelled(&repo, other_user_id, dec!(-3.50), "").await;
+
+        assert!(
+            !repo
+                .fill_blank_label(user_id, other_user_id, dec!(-3.50), date, "COTIS")
+                .await
+                .unwrap()
+        );
+        assert_eq!(
+            repo.find_by_id(theirs, other_user_id).await.unwrap().label,
+            ""
         );
     }
 }
