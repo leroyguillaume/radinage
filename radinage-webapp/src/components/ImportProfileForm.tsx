@@ -103,11 +103,13 @@ export function ImportProfileForm({
 	onSaved,
 	onCancel,
 	onDeleted,
+	defaultAccountId,
 }: {
 	profile: ImportProfileResponse | null;
 	onSaved: (profile: ImportProfileResponse) => void;
 	onCancel: () => void;
 	onDeleted: () => void;
+	defaultAccountId?: string;
 }) {
 	const { t } = useTranslation();
 	const save = useSaveImportProfile();
@@ -117,7 +119,7 @@ export function ImportProfileForm({
 
 	const [name, setName] = useState(profile?.name ?? "");
 	const [accountChoice, setAccountChoice] = useState<string | null>(
-		profile?.accountId ?? null,
+		profile?.accountId ?? defaultAccountId ?? null,
 	);
 	const [roles, setRoles] = useState<ColumnRoles>({
 		label: profile?.labelCol ?? null,

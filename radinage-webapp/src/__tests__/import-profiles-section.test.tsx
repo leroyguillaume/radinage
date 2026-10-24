@@ -5,7 +5,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ImportProfilesSection } from "@/components/ImportProfilesSection";
 import { i18n } from "@/i18n";
-import type { ImportProfileResponse } from "@/lib/types";
+import type { AccountResponse, ImportProfileResponse } from "@/lib/types";
 import { theme } from "@/theme";
 
 vi.mock("@/lib/api", () => ({
@@ -42,26 +42,41 @@ function makeProfile(
 	};
 }
 
-/** Serve `profiles` on the list, one account receiving operations, and accept every write. */
+const account: AccountResponse = {
+	id: "account-1",
+	name: "Compte perso",
+	kind: "checking",
+	imported: true,
+	receivesOperations: true,
+	balance: null,
+	currentBalance: null,
+	transferredInto: false,
+	createdAt: "2026-01-01T10:00:00Z",
+};
+
+const joint: AccountResponse = {
+	...account,
+	id: "account-2",
+	name: "Compte joint",
+};
+
+const savings: AccountResponse = {
+	...account,
+	id: "account-3",
+	name: "Livret A",
+	kind: "savings",
+	imported: false,
+	receivesOperations: false,
+};
+
+/** Serve `profiles` on the list, two accounts receiving operations, and accept every write. */
 function mockApi(profiles: ImportProfileResponse[]) {
 	apiFetchMock.mockImplementation(async (path, init) => {
 		if (path === "/import-profiles" && init?.method === undefined) {
 			return profiles;
 		}
 		if (path === "/accounts") {
-			return [
-				{
-					id: "account-1",
-					name: "Compte perso",
-					kind: "checking",
-					imported: true,
-					receivesOperations: true,
-					balance: null,
-					currentBalance: null,
-					transferredInto: false,
-					createdAt: "2026-01-01T10:00:00Z",
-				},
-			];
+			return [joint, account, savings];
 		}
 		if (path.startsWith("/import-profiles")) return undefined;
 		throw new Error(`unexpected call to ${path}`);
@@ -72,14 +87,14 @@ function writes(method: string) {
 	return apiFetchMock.mock.calls.filter(([, init]) => init?.method === method);
 }
 
-function renderSection() {
+function renderSection(shown: AccountResponse = account) {
 	const queryClient = new QueryClient({
 		defaultOptions: { queries: { retry: false } },
 	});
 	render(
 		<QueryClientProvider client={queryClient}>
 			<MantineProvider theme={theme} env="test">
-				<ImportProfilesSection />
+				<ImportProfilesSection account={shown} />
 			</MantineProvider>
 		</QueryClientProvider>,
 	);
@@ -126,6 +141,46 @@ describe("ImportProfilesSection", () => {
 		expect(within(second).getByText("2026-12-31 14:30:00")).toBeInTheDocument();
 		expect(within(second).getByText("3 skipped lines")).toBeInTheDocument();
 		expect(within(second).getByText("Never used")).toBeInTheDocument();
+	});
+
+	it("lists only the profiles importing on the account", async () => {
+		mockApi([
+			makeProfile(),
+			makeProfile({ id: "p2", name: "Revolut", accountId: "account-2" }),
+		]);
+		renderSection();
+
+		expect(await screen.findByText("Crédit Agricole")).toBeInTheDocument();
+		expect(screen.queryByText("Revolut")).not.toBeInTheDocument();
+	});
+
+	it("starts a new profile on the account", async () => {
+		const user = userEvent.setup();
+		mockApi([]);
+		renderSection();
+
+		await user.click(
+			await screen.findByRole("button", { name: "New profile" }),
+		);
+
+		const dialog = await screen.findByRole("dialog", { name: "New profile" });
+		await waitFor(() =>
+			expect(
+				within(dialog).getByRole("combobox", { name: /^Account/ }),
+			).toHaveValue("Compte perso"),
+		);
+	});
+
+	it("renders nothing for an account without operations nor profiles", async () => {
+		mockApi([makeProfile()]);
+		renderSection(savings);
+
+		await waitFor(() =>
+			expect(
+				apiFetchMock.mock.calls.some(([path]) => path === "/import-profiles"),
+			).toBe(true),
+		);
+		expect(screen.queryByText("Import profiles")).not.toBeInTheDocument();
 	});
 
 	it("says so when there is no profile yet", async () => {
