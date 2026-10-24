@@ -569,6 +569,8 @@ export interface CategoryResponse {
 	color: CategoryColor;
 	/** Null shows the colour alone. */
 	icon: CategoryIcon | null;
+	/** Statistics count the net total, a refund offsetting the spending it refunds. */
+	netTotals: boolean;
 	/** Give the category to the new operations they match that have none of their own. */
 	rules: CategoryRule[];
 	createdAt: string;

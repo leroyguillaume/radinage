@@ -128,9 +128,9 @@ pub struct OperationTotals {
 pub struct CategoryTotal {
     /// `None` for amounts without a category.
     pub category_id: Option<Uuid>,
-    /// Sum of the positive amounts.
+    /// Sum of the positive amounts, or the net sum when positive for a category netting its totals.
     pub income: Decimal,
-    /// Sum of the negative amounts.
+    /// Sum of the negative amounts, or the net sum when negative for a category netting its totals.
     pub expense: Decimal,
 }
 
@@ -388,6 +388,7 @@ pub trait OperationRepository: Send + Sync + 'static {
     /// Totals per effective category of the non-ignored amounts whose accounting date falls in
     /// `[from, to]`, a split operation counting through its parts. Transfers and amounts linked
     /// to a savings budget are left out: they are neither income nor expenses.
+    /// A category that nets its totals reports its net sum, as income or expense by its sign.
     fn category_totals(
         &self,
         user_id: Uuid,
@@ -1193,11 +1194,16 @@ impl OperationRepository for PgOperationRepository {
                    AND o.ignored = FALSE
                    AND b.budget_type IS DISTINCT FROM 'savings'
              )
-             SELECT category_id,
-                    COALESCE(SUM(amount) FILTER (WHERE amount > 0), 0) AS income,
-                    COALESCE(SUM(amount) FILTER (WHERE amount < 0), 0) AS expense
-             FROM amounts
-             GROUP BY category_id
+             SELECT a.category_id,
+                    CASE WHEN c.net_totals THEN GREATEST(SUM(a.amount), 0)
+                         ELSE COALESCE(SUM(a.amount) FILTER (WHERE a.amount > 0), 0)
+                    END AS income,
+                    CASE WHEN c.net_totals THEN LEAST(SUM(a.amount), 0)
+                         ELSE COALESCE(SUM(a.amount) FILTER (WHERE a.amount < 0), 0)
+                    END AS expense
+             FROM amounts a
+             LEFT JOIN categories c ON c.id = a.category_id
+             GROUP BY a.category_id, c.net_totals
              ORDER BY expense, income DESC"
         ))
         .bind(user_id)
@@ -2484,6 +2490,56 @@ mod integration_tests {
         );
         let split = repo.find_by_id(split_id, user_id).await.unwrap();
         assert!(split.splits.iter().all(|s| s.category_id.is_none()));
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn category_totals_net_the_categories_netting_their_totals(pool: PgPool) {
+        let repo = PgOperationRepository::new(pool.clone());
+        let user_id = setup_user(&pool).await;
+        let outings = setup_category(&pool, user_id, "Outings").await;
+        let health = setup_category(&pool, user_id, "Health").await;
+        let gifts = setup_category(&pool, user_id, "Gifts").await;
+        sqlx::query("UPDATE categories SET net_totals = TRUE WHERE id = ANY($1)")
+            .bind([outings, health])
+            .execute(&pool)
+            .await
+            .unwrap();
+        for (amount, category) in [
+            (dec!(-50), outings),
+            (dec!(30), outings),
+            (dec!(-10), health),
+            (dec!(40), health),
+            (dec!(-20), gifts),
+            (dec!(50), gifts),
+        ] {
+            let id = insert_op(&repo, user_id, amount).await;
+            repo.set_category(id, user_id, Some(category))
+                .await
+                .unwrap();
+        }
+
+        let totals = repo
+            .category_totals(
+                user_id,
+                NaiveDate::from_ymd_opt(2024, 3, 1).unwrap(),
+                NaiveDate::from_ymd_opt(2024, 3, 31).unwrap(),
+            )
+            .await
+            .unwrap();
+
+        let total = |category_id, income, expense| CategoryTotal {
+            category_id: Some(category_id),
+            income,
+            expense,
+        };
+        assert_eq!(
+            totals,
+            [
+                total(gifts, dec!(50), dec!(-20)),
+                total(outings, Decimal::ZERO, dec!(-20)),
+                total(health, dec!(30), Decimal::ZERO),
+            ]
+        );
     }
 
     #[sqlx::test(migrations = "./migrations")]

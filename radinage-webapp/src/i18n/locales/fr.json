@@ -356,6 +356,8 @@
 		"errorColor": "La couleur doit être un code hexadécimal, par exemple #12b886",
 		"icon": "Icône",
 		"noIcon": "Sans icône",
+		"netTotals": "Compenser les remboursements",
+		"netTotalsHint": "Dans les statistiques, les entrées et sorties de cette catégorie se compensent : un remboursement réduit la dépense au lieu de compter comme un revenu.",
 		"icons": {
 			"cart": "Courses",
 			"bakery": "Boulangerie",

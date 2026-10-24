@@ -6,6 +6,7 @@ import {
 	Group,
 	Modal,
 	Stack,
+	Switch,
 	Text,
 	TextInput,
 	Title,
@@ -253,6 +254,7 @@ function CategoryForm({
 		() => category?.color ?? generateColor(others),
 	);
 	const [icon, setIcon] = useState<CategoryIcon | null>(category?.icon ?? null);
+	const [netTotals, setNetTotals] = useState(category?.netTotals ?? false);
 	const [rules, setRules] = useState<RuleForm[]>(() =>
 		(category?.rules ?? []).map((r) =>
 			createRule(r.labelPattern.type, r.labelPattern.value),
@@ -292,6 +294,7 @@ function CategoryForm({
 			name: trimmed,
 			color: color.toLowerCase(),
 			icon,
+			netTotals,
 			rules: ruleValues.map((r) => ({
 				labelPattern: { type: r.type, value: r.value },
 			})),
@@ -329,6 +332,13 @@ function CategoryForm({
 					value={icon}
 					color={isHexColor(color) ? color : PLACEHOLDER_COLOR}
 					onChange={setIcon}
+				/>
+				<Switch
+					size="md"
+					checked={netTotals}
+					onChange={(e) => setNetTotals(e.currentTarget.checked)}
+					label={t("categories.netTotals")}
+					description={t("categories.netTotalsHint")}
 				/>
 
 				<Stack gap={4}>

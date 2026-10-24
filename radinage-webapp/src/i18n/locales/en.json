@@ -356,6 +356,8 @@
 		"errorColor": "The colour must be a hex code, such as #12b886",
 		"icon": "Icon",
 		"noIcon": "No icon",
+		"netTotals": "Offset refunds",
+		"netTotalsHint": "In statistics, this category's income and expenses offset each other: a refund reduces the spending instead of counting as income.",
 		"icons": {
 			"cart": "Groceries",
 			"bakery": "Bakery",

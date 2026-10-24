@@ -28,6 +28,7 @@ const food: CategoryResponse = {
 	name: "Courses",
 	color: "#12b886",
 	icon: null,
+	netTotals: false,
 	rules: [],
 	createdAt: "2026-01-01T00:00:00Z",
 };
@@ -137,7 +138,13 @@ describe("CategoriesPage", () => {
 				{
 					path: "/categories",
 					method: "POST",
-					body: { name: "Loisirs", color: "#be4bdb", icon: null, rules: [] },
+					body: {
+						name: "Loisirs",
+						color: "#be4bdb",
+						icon: null,
+						netTotals: false,
+						rules: [],
+					},
 				},
 			]),
 		);
@@ -196,6 +203,7 @@ describe("CategoriesPage", () => {
 						name: "Resto",
 						color: expect.stringMatching(/^#[0-9a-f]{6}$/),
 						icon: "restaurant",
+						netTotals: false,
 						rules: [],
 					},
 				},
@@ -265,12 +273,37 @@ describe("CategoriesPage", () => {
 						name: "Carburant",
 						color: "#fd7e14",
 						icon: null,
+						netTotals: false,
 						rules: transport.rules,
 					},
 				},
 			]),
 		);
 		expect(screen.queryByText(/Garder les catégories/)).not.toBeInTheDocument();
+	});
+
+	it("turns on offsetting refunds, off by default", async () => {
+		mockApi([food]);
+		const user = renderPage();
+
+		await user.click(
+			await screen.findByRole("button", { name: "Modifier Courses" }),
+		);
+		const offset = screen.getByRole("switch", {
+			name: /Compenser les remboursements/,
+		});
+		expect(offset).not.toBeChecked();
+		await user.click(offset);
+		await user.click(screen.getByRole("button", { name: "Enregistrer" }));
+
+		await waitFor(() =>
+			expect(writes()).toEqual([
+				expect.objectContaining({
+					path: "/categories/c1",
+					body: expect.objectContaining({ netTotals: true }),
+				}),
+			]),
+		);
 	});
 
 	it("creates a category with a rule, trimmed, then applies it on demand", async () => {
@@ -315,6 +348,7 @@ describe("CategoriesPage", () => {
 						name: "Énergie",
 						color: expect.stringMatching(/^#[0-9a-f]{6}$/),
 						icon: null,
+						netTotals: false,
 						rules: created.rules,
 					},
 				},

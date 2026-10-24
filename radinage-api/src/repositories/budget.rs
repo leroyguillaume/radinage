@@ -658,6 +658,7 @@ mod tests {
             name: name.to_string(),
             color: "#12b886".parse().unwrap(),
             icon: None,
+            net_totals: false,
             rules: Vec::new(),
         };
         let food = categories.create(user_id, &category("Food")).await.unwrap();
