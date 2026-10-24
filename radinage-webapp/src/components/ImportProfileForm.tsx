@@ -265,6 +265,7 @@ export function ImportProfileForm({
 			<SimpleGrid cols={{ base: 1, sm: 2 }} spacing="sm">
 				<FileInput
 					label={t("importProfile.sample")}
+					description={t("importProfile.sampleHint")}
 					placeholder={t("importProfile.samplePlaceholder")}
 					accept=".csv,.xls,.xlsx"
 					leftSection={<IconFileSpreadsheet size={16} />}
@@ -345,7 +346,7 @@ export function ImportProfileForm({
 					</Text>
 				</Stack>
 			) : (
-				<SimpleGrid cols={{ base: 2, sm: 4 }} spacing="sm">
+				<SimpleGrid cols={2} spacing="sm">
 					{ROLES.map((role) => (
 						<Select
 							key={role}
@@ -360,6 +361,7 @@ export function ImportProfileForm({
 										: assignColumn(prev, Number(v), role),
 								)
 							}
+							required={!OPTIONAL_ROLES.includes(role)}
 							allowDeselect={OPTIONAL_ROLES.includes(role)}
 							clearable={OPTIONAL_ROLES.includes(role)}
 						/>

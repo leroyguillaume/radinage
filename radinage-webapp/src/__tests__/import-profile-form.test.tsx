@@ -207,6 +207,12 @@ describe("ImportProfileForm", () => {
 
 		const save = screen.getByRole("button", { name: "Enregistrer" });
 		expect(save).toBeDisabled();
+		expect(
+			screen.getByLabelText(/Colonne du libellé/, { selector: "input" }),
+		).toBeRequired();
+		expect(
+			screen.getByLabelText(/Libellé de secours/, { selector: "input" }),
+		).not.toBeRequired();
 
 		await user.type(screen.getByLabelText(/Nom/), "  Ma banque ");
 		await selectMantineOption("Colonne du libellé", "B");

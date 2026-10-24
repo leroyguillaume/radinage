@@ -134,7 +134,8 @@
 		"name": "Nom",
 		"namePlaceholder": "Ex. : Crédit Agricole — CSV",
 		"sample": "Fichier d'exemple",
-		"samplePlaceholder": "Pour choisir les colonnes visuellement",
+		"sampleHint": "Pour choisir les colonnes visuellement",
+		"samplePlaceholder": "Choisir un fichier",
 		"sampleError": "Impossible de lire ce fichier",
 		"columnHint": "Touchez un en-tête pour lui attribuer un rôle. Le libellé de secours est lu quand le libellé est vide.",
 		"column": "Colonne {{column}}",
@@ -146,7 +147,7 @@
 			"none": "Ignorer"
 		},
 		"labelCol": "Colonne du libellé",
-		"labelFallbackCol": "Libellé de secours",
+		"labelFallbackCol": "Libellé de secours (facultatif)",
 		"noColumn": "Aucune",
 		"amountCol": "Colonne du montant",
 		"dateCol": "Colonne de la date",
