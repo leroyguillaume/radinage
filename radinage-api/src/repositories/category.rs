@@ -7,7 +7,7 @@ use sqlx::{PgConnection, PgPool, Row, postgres::PgRow};
 use std::collections::HashMap;
 use uuid::Uuid;
 
-const COLUMNS: &str = "id, user_id, name, color, icon, created_at";
+const COLUMNS: &str = "id, user_id, name, color, icon, net_totals, created_at";
 
 /// Data access interface for categories.
 #[cfg_attr(test, mockall::automock)]
@@ -78,6 +78,7 @@ fn row_to_category(row: &PgRow, rules: Vec<CategoryRule>) -> AppResult<Category>
                 .map(str::parse::<CategoryIcon>)
                 .transpose()
                 .map_err(AppError::Internal)?,
+            net_totals: row.try_get("net_totals")?,
             rules,
         },
         created_at: row.try_get("created_at")?,
@@ -172,13 +173,14 @@ impl CategoryRepository for PgCategoryRepository {
     async fn create(&self, user_id: Uuid, fields: &CategoryFields) -> AppResult<Category> {
         let mut tx = self.pool.begin().await?;
         let row = sqlx::query(&format!(
-            "INSERT INTO categories (user_id, name, color, icon) VALUES ($1, $2, $3, $4) \
-             RETURNING {COLUMNS}"
+            "INSERT INTO categories (user_id, name, color, icon, net_totals) \
+             VALUES ($1, $2, $3, $4, $5) RETURNING {COLUMNS}"
         ))
         .bind(user_id)
         .bind(&fields.name)
         .bind(fields.color.as_str())
         .bind(fields.icon.as_ref().map(CategoryIcon::as_str))
+        .bind(fields.net_totals)
         .fetch_one(&mut *tx)
         .await
         .map_err(|e| map_name_conflict(e, &fields.name))?;
@@ -196,7 +198,7 @@ impl CategoryRepository for PgCategoryRepository {
     ) -> AppResult<Option<Category>> {
         let mut tx = self.pool.begin().await?;
         let row = sqlx::query(&format!(
-            "UPDATE categories SET name = $3, color = $4, icon = $5 \
+            "UPDATE categories SET name = $3, color = $4, icon = $5, net_totals = $6 \
              WHERE id = $1 AND user_id = $2 RETURNING {COLUMNS}"
         ))
         .bind(id)
@@ -204,6 +206,7 @@ impl CategoryRepository for PgCategoryRepository {
         .bind(&fields.name)
         .bind(fields.color.as_str())
         .bind(fields.icon.as_ref().map(CategoryIcon::as_str))
+        .bind(fields.net_totals)
         .fetch_optional(&mut *tx)
         .await
         .map_err(|e| map_name_conflict(e, &fields.name))?;
@@ -251,6 +254,7 @@ mod tests {
             name: name.to_string(),
             color: "#12b886".parse::<CategoryColor>().unwrap(),
             icon: None,
+            net_totals: false,
             rules: Vec::new(),
         }
     }
@@ -301,6 +305,7 @@ mod tests {
             name: "Groceries".to_string(),
             color: "#fd7e14".parse::<CategoryColor>().unwrap(),
             icon: Some(CategoryIcon::Cart),
+            net_totals: true,
             rules: Vec::new(),
         };
 

@@ -183,6 +183,9 @@ pub struct CategoryFields {
     pub color: CategoryColor,
     /// Shown inside the colour; without one, the colour alone identifies the category.
     pub icon: Option<CategoryIcon>,
+    /// Statistics count the category's net total, a refund offsetting the spending it refunds,
+    /// rather than its income and expenses apart.
+    pub net_totals: bool,
     /// Give the category to the operations they match that have none of their own.
     pub rules: Vec<CategoryRule>,
 }

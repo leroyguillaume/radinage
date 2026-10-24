@@ -270,6 +270,15 @@ splitting clears it and each part carries its own. The operations page filters
 the month it already holds by the same rule, per part, in
 [operation-parts.ts](radinage-webapp/src/lib/operation-parts.ts).
 
+**Each category says whether its totals net.** An amount of the opposite sign
+means a refund in a category like outings, which should offset the spending,
+but a flow of its own in one like gifts, given and received. The amounts alone
+cannot tell the two apart, so the category does: `GET /summary/categories`
+reports a category with `net_totals` as its net sum, on the income or expense
+side by its sign, and any other as its income and expenses summed apart. The
+amounts without a category are summed apart too, since they mix unrelated
+flows, a salary and a stray expense among them.
+
 **Search returns whole operations.** `GET /operations` filters across all
 dates, every filter optional, and returns the totals of every match with the
 page, computed by the same query as the count. A split operation matches a

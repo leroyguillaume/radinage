@@ -2212,6 +2212,7 @@ mod tests {
                 name: "Energy".to_string(),
                 color: "#12b886".parse().unwrap(),
                 icon: None,
+                net_totals: false,
                 rules: vec![CategoryRule {
                     label_pattern: LabelPattern::Contains(pattern.to_string()),
                 }],

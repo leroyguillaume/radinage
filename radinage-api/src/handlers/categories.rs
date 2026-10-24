@@ -32,6 +32,7 @@ const MAX_PATTERN_LEN: usize = 100;
     "name": "Groceries",
     "color": "#12b886",
     "icon": "cart",
+    "netTotals": true,
     "rules": [{ "labelPattern": { "type": "contains", "value": "CARREFOUR" } }],
 })))]
 pub struct CategoryRequest {
@@ -42,6 +43,11 @@ pub struct CategoryRequest {
     /// Icon shown inside the colour; omitted or null for none.
     #[serde(default)]
     pub icon: Option<CategoryIcon>,
+    /// When true, statistics count the category's net total, a refund offsetting the spending
+    /// it refunds; otherwise its income and expenses apart. Default: false.
+    #[serde(default)]
+    #[schemars(default)]
+    pub net_totals: bool,
     /// Rules giving the category to the operations they match that have none of their own,
     /// at most 20, each value trimmed and 1 to 100 characters long; omitted for none.
     #[serde(default)]
@@ -56,6 +62,7 @@ pub struct CategoryResponse {
     pub name: String,
     pub color: CategoryColor,
     pub icon: Option<CategoryIcon>,
+    pub net_totals: bool,
     pub rules: Vec<CategoryRule>,
     pub created_at: DateTime<Utc>,
 }
@@ -67,6 +74,7 @@ impl From<Category> for CategoryResponse {
             name: c.fields.name,
             color: c.fields.color,
             icon: c.fields.icon,
+            net_totals: c.fields.net_totals,
             rules: c.fields.rules,
             created_at: c.created_at,
         }
@@ -97,6 +105,7 @@ impl TryFrom<CategoryRequest> for CategoryFields {
             name,
             color: body.color,
             icon: body.icon,
+            net_totals: body.net_totals,
             rules,
         })
     }
@@ -262,6 +271,7 @@ mod tests {
             name: name.to_string(),
             color: "#12b886".parse::<CategoryColor>().unwrap(),
             icon: None,
+            net_totals: false,
             rules: Vec::new(),
         }
     }
@@ -646,6 +656,7 @@ mod tests {
             name: "Groceries".to_string(),
             color: "#fd7e14".parse::<CategoryColor>().unwrap(),
             icon: Some(CategoryIcon::Cart),
+            net_totals: true,
             rules: Vec::new(),
         };
         let resp = app(repo)
@@ -663,6 +674,7 @@ mod tests {
         assert_eq!(json.id, id);
         assert_eq!(json.color, "#fd7e14".parse::<CategoryColor>().unwrap());
         assert_eq!(json.icon, Some(CategoryIcon::Cart));
+        assert!(json.net_totals);
     }
 
     #[tokio::test]

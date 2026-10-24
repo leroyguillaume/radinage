@@ -563,6 +563,7 @@ mod tests {
                 name: name.to_string(),
                 color: "#12b886".parse().unwrap(),
                 icon: None,
+                net_totals: false,
                 rules: patterns
                     .into_iter()
                     .map(|label_pattern| CategoryRule { label_pattern })

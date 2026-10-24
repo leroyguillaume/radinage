@@ -81,6 +81,9 @@ pub struct ExportCategory {
     pub color: CategoryColor,
     #[serde(default)]
     pub icon: Option<CategoryIcon>,
+    /// Absent from exports made before categories could net their totals.
+    #[serde(default)]
+    pub net_totals: bool,
     /// Absent from exports made before categories had rules.
     #[serde(default)]
     pub rules: Vec<CategoryRule>,
@@ -93,6 +96,7 @@ impl From<Category> for ExportCategory {
             name: c.fields.name,
             color: c.fields.color,
             icon: c.fields.icon,
+            net_totals: c.fields.net_totals,
             rules: c.fields.rules,
         }
     }
@@ -550,6 +554,7 @@ pub async fn import_data<
                 name: c.name.clone(),
                 color: c.color.clone(),
                 icon: c.icon,
+                net_totals: c.net_totals,
                 rules: c.rules.clone(),
             };
             CategoryFields::try_from(request)
@@ -3017,6 +3022,7 @@ mod tests {
                 name: name.to_string(),
                 color: "#12b886".parse::<CategoryColor>().unwrap(),
                 icon: None,
+                net_totals: false,
                 rules: Vec::new(),
             },
             created_at: Utc::now(),
