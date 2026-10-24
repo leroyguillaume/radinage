@@ -13,6 +13,7 @@ function makeOperation(
 		label: "ASSURANCE",
 		budgetLink: { type: "unlinked" },
 		ignored: false,
+		ignoreRuleId: null,
 		categoryId: null,
 		effectiveCategoryId: null,
 		splits: [],
