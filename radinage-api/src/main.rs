@@ -778,7 +778,7 @@ where
             get_with(handlers::summary::get_summary, |op| {
                 op.tag("Summary")
                     .summary("Get financial summary over a month range")
-                    .description("Compute monthly expense and income totals for each month in the given range (inclusive). Ignored operations are excluded. A split operation counts through its parts, each under its own budget.")
+                    .description("Compute monthly expense and income totals for each month in the given range (inclusive). Ignored operations are excluded. A split operation counts through its parts, each under its own budget. Unbudgeted amounts are summed by sign, so an unlinked refund never offsets an unlinked expense.")
                     .id("getSummary")
             }),
         )

@@ -105,10 +105,17 @@ export interface TransferTotals {
 	internal: string;
 }
 
+/** Operations not linked to a budget, summed by sign. */
+export interface UnbudgetedTotals {
+	income: string;
+	/** Zero or negative. */
+	expense: string;
+}
+
 export interface MonthlySummary {
 	year: number;
 	month: number;
-	unbudgeted: string;
+	unbudgeted: UnbudgetedTotals;
 	budgeted: BudgetedTotals;
 	transfers: TransferTotals;
 }
