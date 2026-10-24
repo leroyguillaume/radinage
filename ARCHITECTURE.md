@@ -287,12 +287,15 @@ Savings accounts and checking accounts whose statements are not imported are
 left out: their money is not what the operations and budgets move. Bringing the balance to the horizon start rather
 than starting the horizon at the balance date keeps every month of the horizon
 computed the same way, whatever the balance date. The response also carries
-`dailyBudget`: the end balance before the
-unbudgeted forecast, shared over `daysLeft`, the days from today (or from the
-start of a horizon not begun yet) to its last day, today included. It is what
-can still be spent per day outside any budget without ending the horizon below
-zero: the unbudgeted forecast is added back because that spending is what the
-amount pays for. It stays negative when the budgets alone end in the red and is
+`dailyBudget`: the horizon's net flows (`totals`
+balance, without `startingBalance`) before the unbudgeted forecast, shared over
+`daysLeft`, the days from today (or from the start of a horizon not begun yet)
+to its last day, today included. It is what can still be spent per day outside
+any budget without the horizon's flows ending below zero: the unbudgeted
+forecast is added back because that spending is what the amount pays for. The
+starting balance is left out so that the amount reflects what the period
+plans, and recording a balance does not turn money set aside into daily
+spending. It stays negative when the budgets alone end in the red and is
 null once the horizon is over. `firstNegativeMonth` is the
 first current or future month whose running balance is below zero: it is a
 warning about what is ahead, so a past month that dipped into the red and

@@ -159,9 +159,9 @@ pub struct ForecastResponse {
     /// Days from today (server date) to the last day of the horizon, both included; counted
     /// from the first day of the horizon when it has not started yet, zero once it is over.
     pub days_left: u32,
-    /// What can still be spent per day on things outside any budget without ending the
-    /// horizon below zero: (`endBalance` minus the summed `unbudgetedForecast`) / `daysLeft`,
-    /// rounded to the cent. Negative when the budgets alone already end in the red; null when
+    /// What can still be spent per day on things outside any budget without the horizon's
+    /// flows ending below zero: (`totals` balance minus the summed `unbudgetedForecast`) /
+    /// `daysLeft`, rounded to the cent; `startingBalance` is not counted. Negative when the budgets alone already end in the red; null when
     /// the horizon is over (`daysLeft` is zero).
     #[schemars(with = "Option<String>")]
     pub daily_budget: Option<Decimal>,
@@ -1008,9 +1008,9 @@ mod tests {
         let json: serde_json::Value = response_json(resp).await;
         assert_eq!(json["startingBalance"], "310");
         assert_eq!(json["endBalance"], "310");
-        // 310 over the 31 days of January 2099.
+        // The balance is not shared out: nothing is planned over January 2099.
         let daily_budget: Decimal = json["dailyBudget"].as_str().unwrap().parse().unwrap();
-        assert_eq!(daily_budget, dec!(10));
+        assert_eq!(daily_budget, Decimal::ZERO);
     }
 
     async fn get_month(

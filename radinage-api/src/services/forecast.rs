@@ -101,8 +101,9 @@ pub struct Forecast {
     /// Days from today, or from the horizon start when it is still ahead, to the last day of
     /// the horizon, both included; zero once the horizon is over.
     pub days_left: u32,
-    /// What can be spent per day outside any budget over `days_left` days without ending the
-    /// horizon below zero; `None` when no day is left. Negative when the budgets alone already
+    /// What can be spent per day outside any budget over `days_left` days without the horizon's
+    /// flows ending below zero; the starting balance is left out, so it only shares what the
+    /// horizon itself plans. `None` when no day is left. Negative when the budgets alone already
     /// end in the red.
     pub daily_budget: Option<Decimal>,
     /// First current or future month whose cumulative balance is below zero (see
@@ -202,16 +203,16 @@ pub fn days_left(from: YearMonth, months: usize, today: NaiveDate) -> u32 {
     u32::try_from(days).unwrap_or(0)
 }
 
-/// What is left per day for unbudgeted spending: the end balance before the unbudgeted
+/// What is left per day for unbudgeted spending: the horizon's net flows before the unbudgeted
 /// forecast (which already spends the expected unbudgeted amounts) shared over `days_left`,
 /// rounded to the cent.
 pub fn daily_budget(
-    end_balance: Decimal,
+    net_flows: Decimal,
     unbudgeted_forecast: Decimal,
     days_left: u32,
 ) -> Option<Decimal> {
     (days_left > 0).then(|| {
-        ((end_balance - unbudgeted_forecast) / Decimal::from(days_left))
+        ((net_flows - unbudgeted_forecast) / Decimal::from(days_left))
             .round_dp_with_strategy(2, RoundingStrategy::MidpointAwayFromZero)
     })
 }
@@ -316,7 +317,7 @@ pub fn compute_forecast(input: &ForecastInput<'_>) -> Forecast {
         .starting_balance
         .and_then(|_| first_negative_month(&months));
     Forecast {
-        daily_budget: daily_budget(cumulative, unbudgeted_total, days_left),
+        daily_budget: daily_budget(totals.balance(), unbudgeted_total, days_left),
         months,
         totals,
         starting_balance: input.starting_balance,
@@ -1427,7 +1428,7 @@ mod tests {
     }
 
     #[test]
-    fn starting_balance_seeds_cumulative_daily_budget_and_first_negative_month() {
+    fn starting_balance_seeds_cumulative_and_first_negative_month_but_not_daily_budget() {
         let budgets = [monthly_budget(BudgetType::Expense, dec!(-1000))];
         let input = |starting_balance| ForecastInput {
             from: YearMonth::new(2099, 1),
@@ -1451,9 +1452,10 @@ mod tests {
         assert_eq!(with.totals, without.totals);
         assert_eq!(with.end_balance, dec!(-500));
         assert_eq!(with.first_negative_month, Some(YearMonth::new(2099, 2)));
-        // -500 over January and February 2099 (59 days).
+        // The balance is left out: -2000 over January and February 2099 (59 days).
         assert_eq!(with.days_left, 59);
-        assert_eq!(with.daily_budget, Some(dec!(-8.47)));
+        assert_eq!(with.daily_budget, without.daily_budget);
+        assert_eq!(with.daily_budget, Some(dec!(-33.90)));
     }
 
     #[test]

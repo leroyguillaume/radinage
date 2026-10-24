@@ -224,132 +224,6 @@ function redFromMarch(month: number) {
 		: { income: 0, expenses: -250, savings: 0 };
 }
 
-describe("SummaryPage period mode", () => {
-	beforeEach(() => {
-		vi.useFakeTimers({ toFake: ["Date"] });
-		vi.setSystemTime(new Date(2026, 9, 15));
-	});
-
-	it("keeps old ?year= links on the calendar year", async () => {
-		await renderSummaryPage("?year=2025");
-
-		expect(
-			await screen.findByRole("radio", { name: "Année 2025" }),
-		).toBeChecked();
-		expect(
-			screen.getByRole("radio", { name: "12 prochains mois" }),
-		).not.toBeChecked();
-		expect(
-			screen.getByRole("button", { name: "Année suivante" }),
-		).toBeInTheDocument();
-		await waitFor(() => {
-			expect(apiFetchMock).toHaveBeenCalledWith(
-				"/forecast?fromYear=2025&fromMonth=1&months=12",
-			);
-		});
-		const rows = within(await screen.findByRole("table")).getAllByRole("row");
-		expect(rows[1]?.textContent).toMatch(/janvier/i);
-		expect(rows[1]?.textContent).not.toMatch(/2025/);
-	});
-
-	it("switches to the next 12 months and back through the URL", async () => {
-		const user = userEvent.setup();
-		const { router } = await renderSummaryPage("?year=2025");
-		await screen.findByRole("table");
-
-		await user.click(screen.getByRole("radio", { name: "12 prochains mois" }));
-
-		await waitFor(() => {
-			expect(router.state.location.search).toEqual({
-				year: 2025,
-				mode: "rolling",
-			});
-		});
-		await waitFor(() => {
-			expect(apiFetchMock).toHaveBeenCalledWith(
-				"/forecast?fromYear=2026&fromMonth=10&months=12",
-			);
-		});
-		expect(
-			screen.queryByRole("button", { name: "Année suivante" }),
-		).not.toBeInTheDocument();
-
-		await user.click(screen.getByRole("radio", { name: "Année 2025" }));
-
-		await waitFor(() => {
-			expect(router.state.location.search).toEqual({ year: 2025 });
-		});
-		expect(
-			await screen.findByRole("button", { name: "Année suivante" }),
-		).toBeInTheDocument();
-	});
-
-	it("labels months with their year across January", async () => {
-		await renderSummaryPage("?mode=rolling");
-
-		const table = await screen.findByRole("table");
-		const rows = within(table).getAllByRole("row");
-		expect(rows).toHaveLength(13);
-		expect(rows[1]?.textContent).toMatch(/octobre 2026/i);
-		expect(rows[4]?.textContent).toMatch(/janvier 2027/i);
-		expect(rows[12]?.textContent).toMatch(/septembre 2027/i);
-
-		const chart = screen.getByRole("heading", {
-			name: "Balance mois par mois",
-		});
-		const section = chart.closest("section") as HTMLElement;
-		expect(within(section).getAllByText("2026")).toHaveLength(3);
-		expect(within(section).getAllByText("2027")).toHaveLength(9);
-	});
-
-	it("titles the cards after the rolling period", async () => {
-		await renderSummaryPage("?mode=rolling");
-
-		const card = await screen.findByRole("region", {
-			name: "Excédent sur 12 mois",
-		});
-		expect(compact(card)).toMatch(/Épargnéd'icile30septembre20273600,00/);
-		expect(
-			screen.getByRole("region", { name: "Totaux sur 12 mois" }),
-		).toBeInTheDocument();
-		expect(screen.getByText(/Progression de la période/)).toBeInTheDocument();
-		expect(
-			screen.queryByRole("region", { name: "Excédent 2026" }),
-		).not.toBeInTheDocument();
-	});
-
-	it("shows the projected balance at the end of the rolling period", async () => {
-		setupMocks((year, month, count) =>
-			makeForecastFrom({ year, month }, count, typicalMonth, {
-				startingBalance: "1000.00",
-			}),
-		);
-
-		await renderSummaryPage("?mode=rolling");
-
-		const card = await screen.findByRole("region", {
-			name: "Solde prévu au 30 septembre 2027",
-		});
-		expect(compact(card)).toMatch(/Soldeau1octobre2026:1000,00/);
-	});
-
-	it("titles the rolling period in English too", async () => {
-		await i18n.changeLanguage("en");
-
-		await renderSummaryPage("?mode=rolling");
-
-		expect(
-			await screen.findByRole("region", {
-				name: "12-month surplus",
-			}),
-		).toBeInTheDocument();
-		expect(
-			screen.getByRole("region", { name: "12-month totals" }),
-		).toBeInTheDocument();
-		expect(screen.getByRole("radio", { name: "Next 12 months" })).toBeChecked();
-	});
-});
-
 describe("SummaryPage", () => {
 	it("renders the page title", async () => {
 		await renderSummaryPage();
@@ -459,6 +333,17 @@ describe("SummaryPage", () => {
 		});
 	});
 
+	it("ignores the former rolling mode in old links", async () => {
+		await renderSummaryPage("?year=2025&mode=rolling");
+
+		await waitFor(() => {
+			expect(apiFetchMock).toHaveBeenCalledWith(
+				"/forecast?fromYear=2025&fromMonth=1&months=12",
+			);
+		});
+		expect(screen.queryByRole("radio")).not.toBeInTheDocument();
+	});
+
 	it("requests the forecast of January to December of the selected year", async () => {
 		await renderSummaryPage("?year=2025");
 
@@ -511,11 +396,10 @@ describe("SummaryPage", () => {
 		const card = await screen.findByRole("region", {
 			name: "Excédent 2025",
 		});
-		expect(compact(card)).toMatch(/\+667,00/);
-		const totals = screen.getByRole("region", { name: /Totaux/ });
-		const totalsText = (totals.textContent ?? "").replace(/\s/g, "");
-		expect(totalsText).toMatch(/1234,00/);
-		expect(totalsText).toMatch(/-567,00/);
+		const cardText = compact(card);
+		expect(cardText).toMatch(/\+667,00/);
+		expect(cardText).toMatch(/Revenus1234,00€/);
+		expect(cardText).toMatch(/Dépenses-567,00€/);
 		const january = within(screen.getByRole("table")).getAllByRole("row")[1];
 		expect(january).toBeDefined();
 		const januaryText = (january?.textContent ?? "").replace(/\s/g, "");
@@ -523,42 +407,7 @@ describe("SummaryPage", () => {
 		expect(januaryText).toMatch(/-567,00/);
 	});
 
-	it("shows the projected balance at the end of the horizon from the recorded balance", async () => {
-		setupMocks((year) =>
-			makeForecast(
-				year,
-				(month) =>
-					month === 1
-						? { income: 1234, expenses: -567, savings: 0 }
-						: { income: 0, expenses: 0, savings: 0 },
-				{ startingBalance: "1000.00" },
-			),
-		);
-
-		await renderSummaryPage("?year=2025");
-
-		const card = await screen.findByRole("region", {
-			name: "Solde prévu au 31 décembre 2025",
-		});
-		const text = (card.textContent ?? "").replace(/\s/g, "");
-		expect(text).toMatch(/\+1667,00/);
-		expect(text).toMatch(/Soldeau1janvier2025:1000,00/);
-		expect(
-			screen.queryByRole("region", { name: /^Excédent/ }),
-		).not.toBeInTheDocument();
-	});
-
-	it("splits the surplus between savings and what is left on the account", async () => {
-		await renderSummaryPage("?year=2025");
-
-		const card = await screen.findByRole("region", { name: "Excédent 2025" });
-		const text = compact(card);
-		expect(text).toMatch(/\+19200,00€Cequireste/);
-		expect(text).toMatch(/Épargnéd'icile31décembre20253600,00/);
-		expect(text).toMatch(/Restantsurlecompte\+15600,00/);
-	});
-
-	it("shows the period's savings next to the projected balance without adding them", async () => {
+	it("shows the projected balance next to the surplus from the recorded balance", async () => {
 		setupMocks((year) =>
 			makeForecast(year, typicalMonth, { startingBalance: "1000.00" }),
 		);
@@ -570,9 +419,30 @@ describe("SummaryPage", () => {
 		});
 		const text = compact(card);
 		expect(text).toMatch(/\+16600,00/);
-		expect(text).toMatch(/Épargnéd'icile31décembre20253600,00/);
-		expect(text).not.toMatch(/Restantsurlecompte/);
-		expect(text).not.toMatch(/20200,00/);
+		expect(text).toMatch(/Soldeau1janvier2025:1000,00/);
+		expect(
+			within(card).getByRole("img", {
+				name: "Évolution du cumulé sur la période",
+			}),
+		).toBeInTheDocument();
+		const surplus = screen.getByRole("region", { name: "Excédent 2025" });
+		expect(compact(surplus)).toMatch(/\+19200,00/);
+	});
+
+	it("asks for a balance instead of projecting one from zero", async () => {
+		await renderSummaryPage("?year=2025");
+
+		const card = await screen.findByRole("region", {
+			name: "Solde prévu au 31 décembre 2025",
+		});
+		expect(within(card).getByText("—")).toBeInTheDocument();
+		expect(
+			within(card).getByRole("link", { name: "Ajouter un solde" }),
+		).toHaveAttribute("href", "/settings");
+		const surplus = screen.getByRole("region", { name: "Excédent 2025" });
+		const text = compact(surplus);
+		expect(text).toMatch(/\+19200,00€Cequireste/);
+		expect(text).toMatch(/Épargne-3600,00€/);
 	});
 
 	it("shows the projected balance title in English too", async () => {
@@ -583,10 +453,11 @@ describe("SummaryPage", () => {
 
 		await renderSummaryPage("?year=2025");
 
-		const card = await screen.findByRole("region", {
-			name: "Projected balance on December 31, 2025",
-		});
-		expect(compact(card)).toMatch(/SavedbyDecember31,20253600,00/);
+		expect(
+			await screen.findByRole("region", {
+				name: "Projected balance on December 31, 2025",
+			}),
+		).toBeInTheDocument();
 	});
 
 	it("shows what the budgets still expect in the current month's row", async () => {
@@ -645,7 +516,7 @@ describe("SummaryPage", () => {
 		expect((notes[1]?.textContent ?? "").replace(/\s/g, "")).toMatch(
 			/dont-280,00€horsbudgetestimés/,
 		);
-		const totals = screen.getByRole("region", { name: /Totaux/ });
+		const totals = screen.getByRole("region", { name: /^Excédent/ });
 		expect((totals.textContent ?? "").replace(/\s/g, "")).toMatch(
 			/estiméesà10,00€parjour/,
 		);
@@ -660,7 +531,7 @@ describe("SummaryPage", () => {
 
 		const table = await screen.findByRole("table");
 		expect(within(table).queryByText(/hors budget/)).not.toBeInTheDocument();
-		const totals = screen.getByRole("region", { name: /Totaux/ });
+		const totals = screen.getByRole("region", { name: /^Excédent/ });
 		expect(totals.textContent ?? "").not.toMatch(/par jour/);
 	});
 
@@ -676,9 +547,10 @@ describe("SummaryPage", () => {
 		expect(text).toMatch(/35,16/);
 		expect(within(card).getByText("42 jours restants")).toBeInTheDocument();
 		expect(
-			within(card).getByText(
-				/hors budgets sans finir la période dans le rouge/,
-			),
+			within(card).getByText(/hors budgets sans finir en déficit/),
+		).toBeInTheDocument();
+		expect(
+			within(card).getByText(/Ton solde n'entre pas en compte/),
 		).toBeInTheDocument();
 	});
 
@@ -705,7 +577,7 @@ describe("SummaryPage", () => {
 
 		const card = await screen.findByRole("region", { name: "Budget / jour" });
 		expect(within(card).getByText("—")).toBeInTheDocument();
-		expect(within(card).getByText(/Période terminée/)).toBeInTheDocument();
+		expect(within(card).getByText(/Année terminée/)).toBeInTheDocument();
 		expect(within(card).getByText("0 jour restant")).toBeInTheDocument();
 	});
 
@@ -982,38 +854,21 @@ describe("SummaryPage on a phone", () => {
 		).toBeInTheDocument();
 	});
 
-	it("shortens the period switch and keeps the year stepper", async () => {
-		const user = userEvent.setup();
-		const { router } = await renderSummaryPage("?year=2026");
-
-		expect(await screen.findByRole("radio", { name: "Année" })).toBeChecked();
-		expect(
-			screen.getByRole("button", { name: "Année suivante" }),
-		).toBeInTheDocument();
-
-		await user.click(screen.getByRole("radio", { name: "12 mois" }));
-
-		await waitFor(() => {
-			expect(router.state.location.search).toEqual({
-				year: 2026,
-				mode: "rolling",
-			});
-		});
-	});
-
-	it("leads with the headline amount and the period totals", async () => {
+	it("leads with the daily budget, then the surplus and the balance side by side", async () => {
 		await renderSummaryPage("?year=2025");
 
-		const hero = await screen.findByRole("region", { name: "Excédent 2025" });
-		const text = compact(hero);
-		expect(text).toMatch(/\+19200,00/);
-		expect(text).toMatch(/Revenus30000,00€/);
-		expect(text).toMatch(/Dépenses-10800,00€/);
-		expect(text).toMatch(/Épargne-3600,00€/);
+		const daily = await screen.findByRole("region", { name: "Budget / jour" });
+		expect(compact(daily)).toMatch(/12,34/);
+		const surplus = screen.getByRole("region", { name: "Excédent 2025" });
+		expect(compact(surplus)).toMatch(/\+19200,00€Revenusmoinsdépenses/);
+		const balance = screen.getByRole("region", {
+			name: "Solde prévu au 31 décembre 2025",
+		});
 		expect(
-			within(hero).getByRole("img", {
-				name: "Évolution du cumulé sur la période",
-			}),
+			within(balance).getByRole("link", { name: "Ajouter un solde" }),
+		).toBeInTheDocument();
+		expect(
+			screen.getByRole("button", { name: "Année suivante" }),
 		).toBeInTheDocument();
 	});
 
@@ -1024,7 +879,9 @@ describe("SummaryPage on a phone", () => {
 		expect(screen.queryByRole("table")).not.toBeInTheDocument();
 		const months = within(monthList()).getAllByRole("button");
 		expect(months).toHaveLength(12);
-		expect(compact(months[0] as HTMLElement)).toBe("janv.Réel+1300,00€");
+		expect(compact(months[0] as HTMLElement)).toBe(
+			"janv.Réel+1300,00€+1300,00€",
+		);
 		expect(months[9]).toHaveAttribute("aria-current", "date");
 		expect(compact(months[9] as HTMLElement)).toMatch(/^oct\.Encours/);
 		expect(compact(months[11] as HTMLElement)).toMatch(/^déc\.Prévision/);
