@@ -1803,4 +1803,63 @@ describe("transfers", () => {
 			"VIR INTERNE VERS LIVRET A",
 		);
 	});
+
+	it("proposes the likely other side of a transfer to link by hand", async () => {
+		setupMocks({ budgets: [], operations });
+		const fallback = apiFetchMock.getMockImplementation();
+		const refund = op("j1", "REMBOURSEMENT RESTO", "-450.00", null);
+		const paired = op("j2", "VIR DEJA LIE", "-450.00", {
+			accountId: "account-1",
+			ruleId: null,
+			operationId: "elsewhere",
+		});
+		apiFetchMock.mockImplementation((path: string, options?: RequestInit) => {
+			if (path.startsWith("/operations?accountId=account-2")) {
+				expect(path).toContain("amount=-450");
+				expect(path).toContain("dateFrom=2026-04-05&dateTo=2026-04-15");
+				return Promise.resolve({
+					data: [
+						{ ...refund, accountId: "account-2" },
+						{ ...paired, accountId: "account-2" },
+					],
+					total: 2,
+					page: 1,
+					pageSize: 10,
+					maxPage: 1,
+					totals: {
+						income: "0",
+						expense: "-900.00",
+						firstDate: null,
+						lastDate: null,
+					},
+				});
+			}
+			return fallback
+				? fallback(path, options)
+				: Promise.reject(new Error(path));
+		});
+		await renderOperationsPage();
+		const user = userEvent.setup();
+		await user.click(
+			await screen.findByRole("button", { name: /VIR SEPA COMPTE JOINT/ }),
+		);
+		const sheet = within(await screen.findByRole("dialog"));
+
+		await user.click(
+			await sheet.findByRole("button", { name: "Lier à REMBOURSEMENT RESTO" }),
+		);
+
+		expect(
+			sheet.queryByRole("button", { name: "Lier à VIR DEJA LIE" }),
+		).not.toBeInTheDocument();
+		await waitFor(() =>
+			expect(apiCalls).toContainEqual({
+				path: "/operations/t2/transfer",
+				options: {
+					method: "PUT",
+					body: JSON.stringify({ accountId: "account-2", counterpartId: "j1" }),
+				},
+			}),
+		);
+	});
 });

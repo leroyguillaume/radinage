@@ -465,7 +465,7 @@ mod tests {
         test_util::{
             auth_header, build_test_router, main_accounts, make_test_state,
             make_test_state_with_all, make_test_state_with_profiles, no_categories,
-            no_ignore_rules, no_import_profiles, no_waiting_transfers, response_json,
+            no_ignore_rules, no_import_profiles, response_json,
         },
     };
     use axum::body::Body;
@@ -600,8 +600,6 @@ mod tests {
         let budget = make_budget(user_id);
 
         let mut op_repo = MockOperationRepository::new();
-
-        no_waiting_transfers(&mut op_repo);
         let mut budget_repo = MockBudgetRepository::new();
 
         op_repo
@@ -674,8 +672,6 @@ mod tests {
         let user_id = Uuid::new_v4();
 
         let mut op_repo = MockOperationRepository::new();
-
-        no_waiting_transfers(&mut op_repo);
         let mut budget_repo = MockBudgetRepository::new();
 
         op_repo
@@ -720,8 +716,6 @@ mod tests {
         let user_id = Uuid::new_v4();
 
         let mut op_repo = MockOperationRepository::new();
-
-        no_waiting_transfers(&mut op_repo);
         let mut budget_repo = MockBudgetRepository::new();
 
         // Second file row (file row 3) is flagged as a duplicate.
@@ -773,8 +767,6 @@ mod tests {
         let user_id = Uuid::new_v4();
 
         let mut op_repo = MockOperationRepository::new();
-
-        no_waiting_transfers(&mut op_repo);
         let mut budget_repo = MockBudgetRepository::new();
 
         // File rows 2, 4, 5 are duplicates (calls 1, 3, 4). Rows 3 and 6 are fresh.
@@ -831,8 +823,6 @@ mod tests {
         let user_id = Uuid::new_v4();
 
         let mut op_repo = MockOperationRepository::new();
-
-        no_waiting_transfers(&mut op_repo);
         let mut budget_repo = MockBudgetRepository::new();
 
         // First row: exists_by_fields fails → error with row=2.
@@ -893,8 +883,6 @@ mod tests {
         let user_id = Uuid::new_v4();
 
         let mut op_repo = MockOperationRepository::new();
-
-        no_waiting_transfers(&mut op_repo);
         let mut budget_repo = MockBudgetRepository::new();
 
         op_repo
@@ -949,8 +937,6 @@ mod tests {
         let user_id = Uuid::new_v4();
 
         let mut op_repo = MockOperationRepository::new();
-
-        no_waiting_transfers(&mut op_repo);
         let budget_repo = MockBudgetRepository::new();
 
         op_repo
@@ -990,8 +976,6 @@ mod tests {
         let user_id = Uuid::new_v4();
 
         let mut op_repo = MockOperationRepository::new();
-
-        no_waiting_transfers(&mut op_repo);
         let mut budget_repo = MockBudgetRepository::new();
 
         // Both duplicate checks run before any insert, so DB state stays empty
@@ -1041,8 +1025,6 @@ mod tests {
         let user_id = Uuid::new_v4();
 
         let mut op_repo = MockOperationRepository::new();
-
-        no_waiting_transfers(&mut op_repo);
         let budget_repo = MockBudgetRepository::new();
 
         // The key already exists in DB → every matching file row is a duplicate.
@@ -1099,7 +1081,6 @@ mod tests {
 
     fn empty_import_repos() -> (MockOperationRepository, MockBudgetRepository) {
         let mut op_repo = MockOperationRepository::new();
-        no_waiting_transfers(&mut op_repo);
         op_repo
             .expect_exists_by_fields()
             .returning(|_, _, _, _, _| Box::pin(async { Ok(true) }));
@@ -1176,7 +1157,6 @@ mod tests {
     async fn import_checks_duplicates_and_inserts_on_the_requested_account() {
         let user_id = Uuid::new_v4();
         let mut op_repo = MockOperationRepository::new();
-        no_waiting_transfers(&mut op_repo);
         op_repo
             .expect_exists_by_fields()
             .withf(|_, account, _, _, _| *account == IMPORT_ACCOUNT)

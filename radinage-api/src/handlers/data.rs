@@ -126,11 +126,15 @@ impl From<IgnoreRule> for ExportIgnoreRule {
 pub struct ExportTransferRule {
     /// Identifier the payload's operations refer to it by.
     pub id: Uuid,
-    /// Payload account whose operations the rule applies to.
+    /// Payload account whose operations `labelPattern` recognizes.
     pub account_id: Uuid,
-    /// Payload account the operations it matches are transfers with.
+    /// Payload account the transfers are with.
     pub counterpart_account_id: Uuid,
     pub label_pattern: LabelPattern,
+    /// Label of the other side on `counterpartAccountId`, when that account receives
+    /// operations.
+    #[serde(default)]
+    pub counterpart_label_pattern: Option<LabelPattern>,
     pub created_at: DateTime<Utc>,
 }
 
@@ -141,6 +145,7 @@ impl From<TransferRule> for ExportTransferRule {
             account_id: rule.fields.account_id,
             counterpart_account_id: rule.fields.counterpart_account_id,
             label_pattern: rule.fields.label_pattern,
+            counterpart_label_pattern: rule.fields.counterpart_label_pattern,
             created_at: rule.created_at,
         }
     }
@@ -566,15 +571,21 @@ pub async fn import_data<
         .transfer_rules
         .iter()
         .map(|r| {
-            let label_pattern =
-                super::trimmed_label_pattern(r.label_pattern.clone(), MAX_VALUE_LEN)
-                    .map_err(|e| AppError::BadRequest(format!("transfer rule {}: {e}", r.id)))?;
+            let trimmed = |pattern: &LabelPattern| {
+                super::trimmed_label_pattern(pattern.clone(), MAX_VALUE_LEN)
+                    .map_err(|e| AppError::BadRequest(format!("transfer rule {}: {e}", r.id)))
+            };
             Ok((
                 r.id,
                 TransferRuleFields {
                     account_id: r.account_id,
                     counterpart_account_id: r.counterpart_account_id,
-                    label_pattern,
+                    label_pattern: trimmed(&r.label_pattern)?,
+                    counterpart_label_pattern: r
+                        .counterpart_label_pattern
+                        .as_ref()
+                        .map(trimmed)
+                        .transpose()?,
                 },
             ))
         })
@@ -1120,6 +1131,7 @@ fn map_transfer_rules(
                         account_id,
                         counterpart_account_id,
                         label_pattern: fields.label_pattern.clone(),
+                        counterpart_label_pattern: fields.counterpart_label_pattern.clone(),
                     },
                 )
             })
@@ -2351,6 +2363,7 @@ mod tests {
                 account_id,
                 counterpart_account_id: counterpart,
                 label_pattern: LabelPattern::Contains(value.to_string()),
+                counterpart_label_pattern: None,
             },
             created_at: Utc::now(),
         }

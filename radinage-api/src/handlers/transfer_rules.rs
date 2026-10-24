@@ -28,15 +28,21 @@ use uuid::Uuid;
 #[schemars(extend("example" = serde_json::json!({
     "accountId": "0b6f1f5e-8c1a-4f3e-9d2a-1c7e5b9a4d10",
     "counterpartAccountId": "5d2c8e4a-3b7f-4a1e-8c6d-9f0b2a7e1c35",
-    "labelPattern": { "type": "contains", "value": "VIR INTERNE VERS LIVRET A" }
+    "labelPattern": { "type": "contains", "value": "VIR SEPA VERS BOURSO" },
+    "counterpartLabelPattern": { "type": "contains", "value": "VIR SEPA DE M LEROY" }
 })))]
 pub struct TransferRuleRequest {
-    /// Imported checking account whose operations the rule applies to.
+    /// Imported checking account whose operations `labelPattern` recognizes.
     pub account_id: Uuid,
-    /// Another of the caller's accounts, which the operations matched are transfers with.
+    /// Another of the caller's accounts, the other account of the transfers.
     pub counterpart_account_id: Uuid,
-    /// Pattern the operation label must match; its value is trimmed and 1 to 200 characters.
+    /// Pattern the label of an operation of `accountId` must match; its value is trimmed and
+    /// 1 to 200 characters.
     pub label_pattern: LabelPattern,
+    /// Pattern the label of the other side must match on `counterpartAccountId`: required when
+    /// that account receives operations, absent otherwise. Same constraints.
+    #[serde(default)]
+    pub counterpart_label_pattern: Option<LabelPattern>,
 }
 
 /// A transfer rule (omits `userId`).
@@ -47,6 +53,8 @@ pub struct TransferRuleResponse {
     pub account_id: Uuid,
     pub counterpart_account_id: Uuid,
     pub label_pattern: LabelPattern,
+    /// Null when the other account does not receive operations.
+    pub counterpart_label_pattern: Option<LabelPattern>,
     pub created_at: DateTime<Utc>,
 }
 
@@ -57,6 +65,7 @@ impl From<TransferRule> for TransferRuleResponse {
             account_id: rule.fields.account_id,
             counterpart_account_id: rule.fields.counterpart_account_id,
             label_pattern: rule.fields.label_pattern,
+            counterpart_label_pattern: rule.fields.counterpart_label_pattern,
             created_at: rule.created_at,
         }
     }
@@ -73,7 +82,8 @@ pub struct ApplyTransferRuleResponse {
 }
 
 /// The fields of `body`, checked against the user's accounts: the rule applies to an account
-/// receiving operations and names another of the user's accounts.
+/// receiving operations and names another of the user's accounts, with a pattern for the other
+/// side exactly when that account receives operations too.
 pub async fn transfer_rule_fields(
     repo: &impl AccountRepository,
     user_id: Uuid,
@@ -86,50 +96,55 @@ pub async fn transfer_rule_fields(
         ));
     }
     account_receiving_operations(repo, body.account_id, user_id).await?;
-    if repo
+    let counterpart = repo
         .find(body.counterpart_account_id, user_id)
         .await?
-        .is_none()
-    {
-        return Err(AppError::BadRequest(format!(
-            "unknown account {}",
-            body.counterpart_account_id
-        )));
-    }
+        .ok_or_else(|| {
+            AppError::BadRequest(format!("unknown account {}", body.counterpart_account_id))
+        })?;
+    let counterpart_label_pattern = match (
+        counterpart.fields.receives_operations(),
+        body.counterpart_label_pattern,
+    ) {
+        (true, Some(pattern)) => Some(super::trimmed_label_pattern(pattern, MAX_VALUE_LEN)?),
+        (false, None) => None,
+        (true, None) => {
+            return Err(AppError::BadRequest(format!(
+                "account '{}' receives operations: the rule needs the label of the other side",
+                counterpart.fields.name
+            )));
+        }
+        (false, Some(_)) => {
+            return Err(AppError::BadRequest(format!(
+                "account '{}' does not receive operations: there is no other side to recognize",
+                counterpart.fields.name
+            )));
+        }
+    };
     Ok(TransferRuleFields {
         account_id: body.account_id,
         counterpart_account_id: body.counterpart_account_id,
         label_pattern,
+        counterpart_label_pattern,
     })
 }
 
-/// Make a new operation a transfer when one of `rules` matches it, paired with the other side
-/// when found; otherwise make it the other side of a transfer waiting for it. Returns the
-/// operation as it now stands.
+/// Make a new operation a transfer when one of `rules` recognizes it, on either of its
+/// accounts, paired with the other side when that one is already in. Returns the operation as
+/// it now stands.
 pub async fn auto_transfer_operation(
     op_repo: &impl OperationRepository,
     rules: &[TransferRule],
     op: Operation,
 ) -> AppResult<Operation> {
-    let changed = if let Some(rule) = transfer::first_match(rules, &op) {
-        op_repo
-            .set_transfer(
-                op.id,
-                op.user_id,
-                rule.fields.counterpart_account_id,
-                Some(rule.id),
-            )
-            .await?;
-        op_repo.pair_transfer(op.id, op.user_id, None).await?;
-        true
-    } else {
-        op_repo.pair_with_waiting_transfer(op.id).await?.is_some()
+    let Some((rule, other)) = transfer::first_match(rules, &op) else {
+        return Ok(op);
     };
-    if changed {
-        op_repo.find_by_id(op.id, op.user_id).await
-    } else {
-        Ok(op)
-    }
+    op_repo
+        .set_transfer(op.id, op.user_id, other, Some(rule.id))
+        .await?;
+    op_repo.pair_transfer(op.id, op.user_id, None).await?;
+    op_repo.find_by_id(op.id, op.user_id).await
 }
 
 // ── Handlers ─────────────────────────────────────────────────────────────────
@@ -213,26 +228,32 @@ pub async fn apply_transfer_rule<U, O: OperationRepository, B, P, C, R, A: Accou
         transferred: 0,
         skipped: 0,
     };
-    for op in ops.iter().filter(|op| rule.fields.matches(op)) {
-        if op.is_split() || op.transfer.is_some() {
-            result.skipped += 1;
-            continue;
-        }
+    let matched: Vec<(Uuid, Uuid)> = ops
+        .iter()
+        .filter_map(|op| rule.fields.other_account_of(op).map(|other| (op, other)))
+        .filter_map(|(op, other)| {
+            if op.is_split() || op.transfer.is_some() {
+                result.skipped += 1;
+                None
+            } else {
+                Some((op.id, other))
+            }
+        })
+        .collect();
+    // Every side is marked before any pairing, so each finds the other already recognized.
+    for &(id, other) in &matched {
         state
             .operation_repo
-            .set_transfer(
-                op.id,
-                user_id,
-                rule.fields.counterpart_account_id,
-                Some(rule.id),
-            )
+            .set_transfer(id, user_id, other, Some(rule.id))
             .await?;
-        state
-            .operation_repo
-            .pair_transfer(op.id, user_id, None)
-            .await?;
-        result.transferred += 1;
     }
+    for &(id, _) in &matched {
+        state
+            .operation_repo
+            .pair_transfer(id, user_id, None)
+            .await?;
+    }
+    result.transferred = matched.len();
     Ok(Json(result))
 }
 
@@ -261,13 +282,15 @@ mod tests {
 
     const MAIN: Uuid = Uuid::from_u128(1);
     const LIVRET: Uuid = Uuid::from_u128(2);
+    const JOINT: Uuid = Uuid::from_u128(3);
 
-    /// Finds the imported checking account `MAIN` and the savings account `LIVRET`, nothing else.
+    /// Finds the imported checking accounts `MAIN` and `JOINT` and the savings account
+    /// `LIVRET`, nothing else.
     fn accounts() -> MockAccountRepository {
         let mut repo = MockAccountRepository::new();
         repo.expect_find().returning(|id, user_id| {
             let found = match id {
-                MAIN => Some(main_account(id, user_id)),
+                MAIN | JOINT => Some(main_account(id, user_id)),
                 LIVRET => Some(Account {
                     fields: AccountFields {
                         name: "Livret A".to_string(),
@@ -303,6 +326,7 @@ mod tests {
                 account_id: MAIN,
                 counterpart_account_id: LIVRET,
                 label_pattern: LabelPattern::Contains(value.to_string()),
+                counterpart_label_pattern: None,
             },
             created_at: Utc::now(),
         }
@@ -384,13 +408,22 @@ mod tests {
         assert!(json.get("userId").is_none());
     }
 
+    fn with_other_side(mut body: serde_json::Value, value: &str) -> serde_json::Value {
+        body["counterpartLabelPattern"] = serde_json::json!({"type": "contains", "value": value});
+        body
+    }
+
     #[tokio::test]
-    async fn create_rejects_bad_accounts_and_a_blank_pattern() {
+    async fn create_rejects_bad_accounts_and_patterns() {
         let cases = [
             body(MAIN, MAIN, "VIR"),
             body(LIVRET, MAIN, "VIR"),
             body(MAIN, Uuid::new_v4(), "VIR"),
             body(MAIN, LIVRET, "   "),
+            // The other side's label exactly when the other account receives operations.
+            body(MAIN, JOINT, "VIR"),
+            with_other_side(body(MAIN, LIVRET, "VIR"), "VIR"),
+            with_other_side(body(MAIN, JOINT, "VIR"), "  "),
         ];
         for case in cases {
             let resp = post(
@@ -402,6 +435,40 @@ mod tests {
             .await;
             assert_eq!(resp.status(), StatusCode::BAD_REQUEST, "{case}");
         }
+    }
+
+    #[tokio::test]
+    async fn create_keeps_the_label_of_the_other_side_between_imported_accounts() {
+        let mut repo = accounts();
+        repo.expect_count_transfer_rules()
+            .returning(|_| Box::pin(async { Ok(0) }));
+        repo.expect_create_transfer_rule()
+            .withf(|_, f| {
+                f.counterpart_label_pattern
+                    == Some(LabelPattern::Contains("VIR DE M LEROY".to_string()))
+            })
+            .times(1)
+            .returning(|user_id, f| {
+                let created = TransferRule {
+                    id: Uuid::new_v4(),
+                    user_id,
+                    fields: f.clone(),
+                    created_at: Utc::now(),
+                };
+                Box::pin(async move { Ok(created) })
+            });
+
+        let resp = post(
+            app(MockOperationRepository::new(), repo),
+            "/transfer-rules",
+            with_other_side(body(MAIN, JOINT, "VIR VERS JOINT"), " VIR DE M LEROY"),
+            Uuid::new_v4(),
+        )
+        .await;
+
+        assert_eq!(resp.status(), StatusCode::CREATED);
+        let json: serde_json::Value = response_json(resp).await;
+        assert_eq!(json["counterpartLabelPattern"]["value"], "VIR DE M LEROY");
     }
 
     #[tokio::test]
@@ -482,7 +549,69 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_new_operation_follows_the_first_matching_rule_else_pairs_with_a_waiting_one() {
+    async fn apply_marks_both_sides_before_pairing_them() {
+        let user_id = Uuid::new_v4();
+        let mut existing = rule(user_id, "VIR VERS JOINT");
+        existing.fields.counterpart_account_id = JOINT;
+        existing.fields.counterpart_label_pattern =
+            Some(LabelPattern::Contains("VIR DE".to_string()));
+        let rule_id = existing.id;
+        let out = op(user_id, "VIR VERS JOINT");
+        let incoming = Operation {
+            account_id: JOINT,
+            amount: dec!(300),
+            ..op(user_id, "VIR DE M LEROY")
+        };
+        let refund = Operation {
+            account_id: JOINT,
+            amount: dec!(300),
+            ..op(user_id, "REMBOURSEMENT")
+        };
+        let marked = [(out.id, JOINT), (incoming.id, MAIN)];
+        let ops = vec![out, incoming, refund];
+
+        let mut account_repo = accounts();
+        account_repo
+            .expect_find_transfer_rule()
+            .returning(move |_, _| {
+                let existing = existing.clone();
+                Box::pin(async move { Ok(Some(existing)) })
+            });
+        let mut op_repo = MockOperationRepository::new();
+        op_repo.expect_list_all_for_user().returning(move |_| {
+            let ops = ops.clone();
+            Box::pin(async move { Ok(ops) })
+        });
+        let mut sequence = mockall::Sequence::new();
+        for (id, other) in marked {
+            op_repo
+                .expect_set_transfer()
+                .withf(move |i, _, a, r| *i == id && *a == other && *r == Some(rule_id))
+                .times(1)
+                .in_sequence(&mut sequence)
+                .returning(|_, _, _, _| Box::pin(async { Ok(true) }));
+        }
+        op_repo
+            .expect_pair_transfer()
+            .times(2)
+            .in_sequence(&mut sequence)
+            .returning(|_, _, _| Box::pin(async { Ok(None) }));
+
+        let resp = post(
+            app(op_repo, account_repo),
+            &format!("/transfer-rules/{rule_id}/apply"),
+            serde_json::json!({}),
+            user_id,
+        )
+        .await;
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        let json: serde_json::Value = response_json(resp).await;
+        assert_eq!(json, serde_json::json!({"transferred": 2, "skipped": 0}));
+    }
+
+    #[tokio::test]
+    async fn a_new_operation_follows_the_first_matching_rule_and_no_other() {
         let user_id = Uuid::new_v4();
         let rules = [rule(user_id, "amazon"), rule(user_id, "livret")];
         let matched = op(user_id, "VIR LIVRET A");
@@ -511,10 +640,6 @@ mod tests {
                 };
                 Box::pin(async move { Ok(reloaded) })
             });
-        op_repo
-            .expect_pair_with_waiting_transfer()
-            .times(1)
-            .returning(|_| Box::pin(async { Ok(None) }));
 
         let reloaded = auto_transfer_operation(&op_repo, &rules, matched)
             .await

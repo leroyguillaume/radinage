@@ -50,22 +50,39 @@ pub struct TransferRule {
 /// What a user chooses for a transfer rule, as written on creation or update.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TransferRuleFields {
-    /// Account whose operations the rule applies to.
+    /// Account whose operations `label_pattern` recognizes.
     pub account_id: Uuid,
-    /// Account the operations it matches are transfers with.
+    /// The other account of the transfers.
     pub counterpart_account_id: Uuid,
     pub label_pattern: LabelPattern,
+    /// What the other side of the transfers is called on the other account, when that account
+    /// receives operations too; its operations matching it are the other side.
+    pub counterpart_label_pattern: Option<LabelPattern>,
 }
 
 impl TransferRuleFields {
-    pub fn matches(&self, op: &Operation) -> bool {
-        op.account_id == self.account_id && self.label_pattern.matches(&op.label)
+    /// The account the operation is a transfer with when the rule recognizes it, on either of
+    /// its two accounts.
+    pub fn other_account_of(&self, op: &Operation) -> Option<Uuid> {
+        if op.account_id == self.account_id && self.label_pattern.matches(&op.label) {
+            return Some(self.counterpart_account_id);
+        }
+        let other_side = self
+            .counterpart_label_pattern
+            .as_ref()
+            .is_some_and(|p| p.matches(&op.label));
+        (op.account_id == self.counterpart_account_id && other_side).then_some(self.account_id)
     }
 }
 
-/// The first of `rules` that matches the operation.
-pub fn first_match<'a>(rules: &'a [TransferRule], op: &Operation) -> Option<&'a TransferRule> {
-    rules.iter().find(|rule| rule.fields.matches(op))
+/// The first of `rules` that recognizes the operation, with the account it is a transfer with.
+pub fn first_match<'a>(
+    rules: &'a [TransferRule],
+    op: &Operation,
+) -> Option<(&'a TransferRule, Uuid)> {
+    rules
+        .iter()
+        .find_map(|rule| rule.fields.other_account_of(op).map(|other| (rule, other)))
 }
 
 #[cfg(test)]
@@ -102,6 +119,7 @@ mod tests {
                 account_id,
                 counterpart_account_id: Uuid::new_v4(),
                 label_pattern: LabelPattern::Contains(value.to_string()),
+                counterpart_label_pattern: None,
             },
             created_at: Utc::now(),
         }
@@ -132,7 +150,37 @@ mod tests {
         let checking = Uuid::new_v4();
         let rules = [rule(Uuid::new_v4(), "livret a"), rule(checking, "livret a")];
         let matched = first_match(&rules, &op(checking, "VIR INTERNE VERS LIVRET A"));
-        assert_eq!(matched.map(|r| r.id), Some(rules[1].id));
+        assert_eq!(
+            matched.map(|(r, other)| (r.id, other)),
+            Some((rules[1].id, rules[1].fields.counterpart_account_id))
+        );
         assert!(first_match(&rules, &op(checking, "CB CARREFOUR")).is_none());
+    }
+
+    #[test]
+    fn a_rule_recognizes_the_other_side_by_its_own_label() {
+        let bnp = Uuid::new_v4();
+        let mut both_sides = rule(bnp, "VIR VERS BOURSO");
+        both_sides.fields.counterpart_label_pattern =
+            Some(LabelPattern::Contains("VIR DE M LEROY".to_string()));
+        let bourso = both_sides.fields.counterpart_account_id;
+        let fields = &both_sides.fields;
+
+        assert_eq!(
+            fields.other_account_of(&op(bourso, "VIR DE M LEROY 12/10")),
+            Some(bnp)
+        );
+        assert_eq!(fields.other_account_of(&op(bourso, "REMBOURSEMENT")), None);
+        // Each label belongs to its own account.
+        assert_eq!(
+            fields.other_account_of(&op(bourso, "VIR VERS BOURSO")),
+            None
+        );
+        assert_eq!(fields.other_account_of(&op(bnp, "VIR DE M LEROY")), None);
+        let one_sided = rule(bnp, "VIR VERS BOURSO").fields;
+        assert_eq!(
+            one_sided.other_account_of(&op(one_sided.counterpart_account_id, "VIR DE M LEROY")),
+            None
+        );
     }
 }

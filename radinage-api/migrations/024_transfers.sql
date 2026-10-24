@@ -1,5 +1,7 @@
--- Rules that make the operations of an account whose label they match transfers with another
--- account of the same user, tried oldest first. They go with either account.
+-- Rules that make transfers between two accounts of the same user, tried oldest first: the
+-- operations of the account whose label matches the pattern, and, when the other account
+-- receives operations too, those of the other account whose label matches its own pattern.
+-- They go with either account.
 CREATE TABLE transfer_rules (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id UUID NOT NULL REFERENCES users (id) ON DELETE CASCADE,
@@ -7,7 +9,14 @@ CREATE TABLE transfer_rules (
     counterpart_account_id UUID NOT NULL,
     pattern_type TEXT NOT NULL CHECK (pattern_type IN ('starts_with', 'ends_with', 'contains')),
     pattern_value TEXT NOT NULL,
+    counterpart_pattern_type TEXT CHECK (
+        counterpart_pattern_type IN ('starts_with', 'ends_with', 'contains')
+    ),
+    counterpart_pattern_value TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT transfer_rules_counterpart_pattern_check CHECK (
+        (counterpart_pattern_type IS NULL) = (counterpart_pattern_value IS NULL)
+    ),
     CONSTRAINT transfer_rules_account_fkey FOREIGN KEY (account_id, user_id)
     REFERENCES accounts (id, user_id) ON DELETE CASCADE,
     CONSTRAINT transfer_rules_counterpart_fkey FOREIGN KEY (counterpart_account_id, user_id)

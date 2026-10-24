@@ -883,7 +883,7 @@
 		"savingsBudgetHint": "Optional. Only the savings budgets paying into this account are offered.",
 		"counterpart": "Other side on {{account}}",
 		"linked": "Linked",
-		"waiting": "No other side yet: it will be linked when the statement of {{account}} is imported.",
+		"waiting": "No other side yet: it will be linked once a rule recognizes it in the statement of {{account}}, or once you link it here.",
 		"badgeTo": "To {{account}}",
 		"badgeFrom": "From {{account}}",
 		"always": "Always for this label",
@@ -894,16 +894,13 @@
 		"fedBy": "{{accounts}} (transfers)",
 		"rules": {
 			"title": "Transfer rules",
-			"description": "An operation imported on this account whose label matches becomes a transfer with the other account.",
-			"incomingTitle": "Rules transferring here",
-			"on": "on {{account}}",
-			"with": "Transfer with {{account}}",
+			"description": "A rule recognizes a transfer by its label, on this account and, when the other account is imported, on the other account. Both sides are then linked.",
 			"otherAccount": "Other account",
 			"empty": "No rule for this account.",
 			"add": "Add a rule",
 			"createTitle": "New transfer rule",
 			"create": "Create the rule",
-			"hint": "Debit: transfer to the other account. Credit: transfer from the other account.",
+			"hint": "The other account is not imported: only this side of the transfer is in your statements. Debit: transfer to the other account. Credit: transfer from the other account.",
 			"errorValue": "The value is required",
 			"errorAccount": "Pick the other account",
 			"errorLimit": "You have reached the maximum number of transfer rules",
@@ -917,7 +914,10 @@
 			"applyResult": "{{transferred}} operation(s) marked as transfers, {{skipped}} left as they were",
 			"applyError": "Error applying the rule",
 			"later": "Later",
-			"apply": "Apply"
+			"apply": "Apply",
+			"labelOn": "Label on {{account}}",
+			"descriptionOther": "The rules of imported accounts making transfers with this account.",
+			"twoSidedHint": "Both accounts are imported: each side is recognized by its own label, and only two recognized sides are linked."
 		},
 		"account": {
 			"title": "Transfers",
@@ -926,6 +926,9 @@
 			"total_other": "{{count}} transfers in all",
 			"from": "from {{account}}",
 			"to": "to {{account}}"
-		}
+		},
+		"candidates": "Likely other side: link it if it is the right one.",
+		"link": "Link",
+		"linkTo": "Link to {{label}}"
 	}
 }

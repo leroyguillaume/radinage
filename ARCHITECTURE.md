@@ -127,10 +127,8 @@ sequenceDiagram
     H->>A: list_transfer_rules(user)
     loop each non-duplicate row
         H->>R: insert
-        alt a transfer rule matches
+        opt a transfer rule recognizes it, on either of its accounts
             H->>R: set_transfer, then pair_transfer
-        else
-            H->>R: pair_with_waiting_transfer
         end
         H->>M: match_operation(op, budgets the op accepts)
         H->>R: set_auto_link (when a budget matches)
@@ -173,14 +171,16 @@ that are not ignored yet; none of these paths ever changes how an already
 ignored operation was ignored. A failure to list or apply the rules during an
 import is logged and leaves the operations counted.
 
-Transfer rules use the same label patterns, each on one imported checking
-account and naming the other account. Every operation created by hand or by an
-import becomes, before any budget or category matching, a transfer with the
-other account of the first of the user's rules, oldest first, that matches its
-account and label; one that no rule matches becomes the other side of a
-transfer waiting for it (see *A transfer says where the money went*). Applying
-a rule (`POST /transfer-rules/{id}/apply`) makes the existing operations it
-matches transfers, leaving those already transfers. A failure to list the rules
+Transfer rules use the same label patterns. A rule names an imported checking
+account with a pattern for its operations and the other account, with a second
+pattern for that account's operations when it receives operations too. Every
+operation created by hand or by an import becomes, before any budget or
+category matching, a transfer with the other account of the first of the
+user's rules, oldest first, that recognizes it on either of its two accounts,
+and is paired with the other side if that one is already in (see *A transfer
+says where the money went*). Applying a rule (`POST /transfer-rules/{id}/apply`)
+makes the existing operations it recognizes transfers, leaving those already
+transfers, then pairs them. A failure to list the rules
 or to make a transfer during an import is logged and leaves the operation an
 ordinary one.
 
@@ -378,15 +378,21 @@ its money to that account or to none in particular, which then tracks a goal: it
 counts as that budget's savings, not twice. A transfer
 has no category, so the statistics per category leave it out. Between two
 accounts receiving operations, both sides are on a statement, so they are
-paired: the operation on the other account of opposite amount, closest by date
-within `TRANSFER_PAIRING_DAYS` days, becomes the transfer back, whichever of the
-two statements is imported first, and the two are marked and unmarked together.
+paired, whichever of the two statements is imported first: with the transfer of
+the other account back to this one, of opposite amount and closest by date
+within `TRANSFER_PAIRING_DAYS` days. Only an operation recognized as a transfer
+on its own side is paired automatically, by its own label in a rule or by hand:
+an amount and a date alone would take a refund of the same amount for the other
+side, and silently move it out of income. Any other operation of opposite
+amount is only offered on the operation's sheet, to link by hand. The two sides
+are marked and unmarked together; an operation unpaired by another pairing
+stays a transfer, waiting for another side, when a rule made it one.
 Changing a transfer's amount makes it a transfer again, so that its pairing and
 budget link follow the new amount; unmarking one runs the budget and category
 matching again on both sides, since marking cleared their category and budget.
-The rules live with the account whose operations they match rather than with
-the user's other rules, because they say something about that account: what its
-statement calls a transfer to each of the others.
+The rules live with the accounts whose operations they match rather than with
+the user's other rules, because they say something about those accounts: what
+their statements call a transfer to each other.
 
 **A balance read replaces the estimate, and keeps it.** The same movements
 (an account's operations when it receives them, what landed on it otherwise) rebuild an account's balance day by day: the latest balance read on

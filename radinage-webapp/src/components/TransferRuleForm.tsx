@@ -28,23 +28,50 @@ import type {
 	TransferRuleResponse,
 } from "@/lib/types";
 
-/** "Contains “VIR LIVRET A”", as shown wherever a transfer rule is named. */
-export function useDescribeTransferRule(): (
-	rule: TransferRuleResponse,
-) => string {
+/** "Contains “VIR LIVRET A”", as shown wherever a side of a transfer rule is named. */
+export function useDescribePattern(): (pattern: LabelPattern) => string {
 	const { t } = useTranslation();
-	return (rule) =>
+	return (pattern) =>
 		t("ignoreRules.pattern", {
-			type: t(`rules.patterns.${rule.labelPattern.type}`),
-			value: rule.labelPattern.value,
+			type: t(`rules.patterns.${pattern.type}`),
+			value: pattern.value,
 		});
 }
 
-/** What a new transfer rule starts from: its account, and possibly a pattern and the other account. */
+/** What a new transfer rule starts from: its account, and possibly patterns and the other account. */
 export interface TransferRuleDraft {
 	accountId: string;
 	counterpartAccountId?: string;
 	labelPattern?: LabelPattern;
+	counterpartLabelPattern?: LabelPattern;
+}
+
+/** The criterion and value of one side's label, under the name of its account. */
+function SidePattern({
+	account,
+	pattern,
+	onChange,
+}: {
+	account: string;
+	pattern: LabelPattern;
+	onChange: (pattern: LabelPattern) => void;
+}) {
+	const { t } = useTranslation();
+	return (
+		<Stack gap={4}>
+			<Text size="sm" fw={600}>
+				{t("transfers.rules.labelOn", { account })}
+			</Text>
+			<Group gap="sm" align="flex-end" wrap="wrap">
+				<LabelPatternFields
+					type={pattern.type}
+					value={pattern.value}
+					onTypeChange={(type) => onChange({ ...pattern, type })}
+					onValueChange={(value) => onChange({ ...pattern, value })}
+				/>
+			</Group>
+		</Stack>
+	);
 }
 
 /** Creates a rule on `draft.accountId`, or edits `rule`. */
@@ -63,21 +90,28 @@ export function TransferRuleForm({
 	const save = useSaveTransferRule();
 	const accounts = useAccounts().data ?? [];
 	const accountId = rule?.accountId ?? draft.accountId;
-	const start = rule?.labelPattern ?? draft.labelPattern;
-	const [patternType, setPatternType] = useState<LabelPattern["type"]>(
-		start?.type ?? "contains",
+	const [pattern, setPattern] = useState<LabelPattern>(
+		rule?.labelPattern ?? draft.labelPattern ?? { type: "contains", value: "" },
 	);
-	const [value, setValue] = useState(start?.value ?? "");
+	const [counterpartPattern, setCounterpartPattern] = useState<LabelPattern>(
+		rule?.counterpartLabelPattern ??
+			draft.counterpartLabelPattern ?? { type: "contains", value: "" },
+	);
 	const [counterpart, setCounterpart] = useState<string | null>(
 		rule?.counterpartAccountId ?? draft.counterpartAccountId ?? null,
 	);
 	const [error, setError] = useState<string | null>(null);
+	const account = accounts.find((a) => a.id === accountId);
+	const other = accounts.find((a) => a.id === counterpart);
+	// Only an account whose statements are imported has another side to recognize.
+	const twoSided = other?.receivesOperations ?? false;
 
 	async function handleSubmit(e: FormEvent) {
 		e.preventDefault();
 		setError(null);
-		const trimmed = value.trim();
-		if (trimmed === "") {
+		const value = pattern.value.trim();
+		const counterpartValue = counterpartPattern.value.trim();
+		if (value === "" || (twoSided && counterpartValue === "")) {
 			setError(t("transfers.rules.errorValue"));
 			return;
 		}
@@ -91,7 +125,10 @@ export function TransferRuleForm({
 				body: {
 					accountId,
 					counterpartAccountId: counterpart,
-					labelPattern: { type: patternType, value: trimmed },
+					labelPattern: { ...pattern, value },
+					counterpartLabelPattern: twoSided
+						? { ...counterpartPattern, value: counterpartValue }
+						: null,
 				},
 			});
 			onSaved(saved, rule === null);
@@ -107,14 +144,11 @@ export function TransferRuleForm({
 	return (
 		<form onSubmit={handleSubmit}>
 			<Stack gap="sm">
-				<Group gap="sm" align="flex-end" wrap="wrap">
-					<LabelPatternFields
-						type={patternType}
-						value={value}
-						onTypeChange={setPatternType}
-						onValueChange={setValue}
-					/>
-				</Group>
+				<SidePattern
+					account={account?.name ?? ""}
+					pattern={pattern}
+					onChange={setPattern}
+				/>
 				<Select
 					label={t("transfers.rules.otherAccount")}
 					placeholder={t("transfers.accountPlaceholder")}
@@ -126,9 +160,22 @@ export function TransferRuleForm({
 					leftSection={<IconArrowsExchange size={18} />}
 					comboboxProps={{ withinPortal: true }}
 				/>
+				{other && twoSided && (
+					<SidePattern
+						account={other.name}
+						pattern={counterpartPattern}
+						onChange={setCounterpartPattern}
+					/>
+				)}
 				<Group gap={8} wrap="nowrap" align="flex-start" c="dimmed">
 					<IconInfoCircle size={16} style={{ flexShrink: 0, marginTop: 2 }} />
-					<Text size="sm">{t("transfers.rules.hint")}</Text>
+					<Text size="sm">
+						{t(
+							twoSided
+								? "transfers.rules.twoSidedHint"
+								: "transfers.rules.hint",
+						)}
+					</Text>
 				</Group>
 				{error && (
 					<Alert color="tangerine" icon={<IconAlertCircle size={16} />}>
@@ -157,7 +204,7 @@ export function ApplyTransferRulePrompt({
 	onDone: () => void;
 }) {
 	const { t } = useTranslation();
-	const describe = useDescribeTransferRule();
+	const describe = useDescribePattern();
 	const apply = useApplyTransferRule();
 	const [result, setResult] = useState<ApplyTransferRuleResponse | null>(null);
 	const [failed, setFailed] = useState(false);
@@ -174,7 +221,7 @@ export function ApplyTransferRulePrompt({
 	return (
 		<Stack gap="sm">
 			<Text size="sm" fw={600} c="forest.8">
-				{describe(rule)}
+				{describe(rule.labelPattern)}
 			</Text>
 			{result ? (
 				<>

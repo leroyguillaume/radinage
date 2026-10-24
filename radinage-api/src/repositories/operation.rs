@@ -331,8 +331,8 @@ pub trait OperationRepository: Send + Sync + 'static {
 
     /// Make an unsplit operation of the user a transfer with `account_id`, made by `rule_id`
     /// when given. Its category is cleared and its budget link kept only when the operation
-    /// still accepts that budget; the operation it was paired with, if any, stops being a
-    /// transfer. Returns `false` if not found.
+    /// still accepts that budget; the operation it was paired with, if any, is unpaired, and
+    /// stops being a transfer unless a rule made it one. Returns `false` if not found.
     fn set_transfer(
         &self,
         id: Uuid,
@@ -350,25 +350,18 @@ pub trait OperationRepository: Send + Sync + 'static {
     ) -> impl std::future::Future<Output = AppResult<bool>> + Send;
 
     /// Pair a transfer of the user with the operation on the other side, when the other
-    /// account receives operations: `counterpart_id` when given, else the closest by date
-    /// among the operations of the other account of opposite amount within
-    /// [`TRANSFER_PAIRING_DAYS`] days, not split, not paired, and not a transfer with any
-    /// other account. Both become each other's transfer, without category nor budget link,
-    /// and a previous pairing is undone. Returns the counterpart, `None` when there is none.
+    /// account receives operations: `counterpart_id` when given, an operation of the other
+    /// account of opposite amount and not split; else the closest by date among the transfers
+    /// of the other account with this one, of opposite amount within
+    /// [`TRANSFER_PAIRING_DAYS`] days and not paired yet, so that only what was recognized as a
+    /// transfer on both sides is paired. Both become each other's transfer, without category
+    /// nor budget link, and a previous pairing is undone. Returns the counterpart, `None` when
+    /// there is none.
     fn pair_transfer(
         &self,
         id: Uuid,
         user_id: Uuid,
         counterpart_id: Option<Uuid>,
-    ) -> impl std::future::Future<Output = AppResult<Option<Uuid>>> + Send;
-
-    /// Make an operation that is not a transfer the other side of a transfer waiting for it:
-    /// the closest by date, on another account, of opposite amount within
-    /// [`TRANSFER_PAIRING_DAYS`] days, that is a transfer with the operation's account and
-    /// not paired yet. Returns the transfer paired with, `None` when none waits.
-    fn pair_with_waiting_transfer(
-        &self,
-        id: Uuid,
     ) -> impl std::future::Future<Output = AppResult<Option<Uuid>>> + Send;
 
     /// Fetch the non-ignored amounts whose accounting date falls in `[month_start, month_end]`,
@@ -440,6 +433,13 @@ const SAVINGS_BUDGET_OF_TRANSFER: &str = "b.budget_type = 'savings' \
 /// Makes the operations `o` its `WHERE` clause appended to it selects stop being transfers.
 const CLEAR_TRANSFERS: &str = "UPDATE operations o \
      SET transfer_account_id = NULL, transfer_rule_id = NULL, transfer_operation_id = NULL";
+
+/// Unpairs the operations `o` its `WHERE` clause appended to it selects: a transfer a rule
+/// recognized stays one, waiting for another other side; any other stops being a transfer.
+const UNPAIR_TRANSFERS: &str = "UPDATE operations o \
+     SET transfer_operation_id = NULL, \
+         transfer_account_id = CASE WHEN o.transfer_rule_id IS NULL THEN NULL \
+                                    ELSE o.transfer_account_id END";
 
 /// `AND` clause keeping an unsplit operation `o` whose `operation_test` holds, and a split one
 /// with a part `s` whose `split_test` holds.
@@ -615,7 +615,7 @@ async fn attach_splits(pool: &PgPool, ops: &mut [Operation]) -> AppResult<()> {
 /// undoing the pairings either had before.
 async fn link_halves(conn: &mut sqlx::PgConnection, a: Uuid, b: Uuid) -> AppResult<()> {
     sqlx::query(&format!(
-        "{CLEAR_TRANSFERS} WHERE o.transfer_operation_id IN ($1, $2) AND o.id NOT IN ($1, $2)"
+        "{UNPAIR_TRANSFERS} WHERE o.transfer_operation_id IN ($1, $2) AND o.id NOT IN ($1, $2)"
     ))
     .bind(a)
     .bind(b)
@@ -811,8 +811,15 @@ impl OperationRepository for PgOperationRepository {
         let mut tx = self.pool.begin().await?;
         // A transfer moved to another account no longer says where the money went.
         sqlx::query(&format!(
-            "{CLEAR_TRANSFERS} WHERE o.user_id = $2
-               AND (o.id = ANY($1) OR o.transfer_operation_id = ANY($1))"
+            "{UNPAIR_TRANSFERS} WHERE o.user_id = $2
+               AND o.transfer_operation_id = ANY($1) AND o.id <> ALL($1)"
+        ))
+        .bind(ids)
+        .bind(user_id)
+        .execute(&mut *tx)
+        .await?;
+        sqlx::query(&format!(
+            "{CLEAR_TRANSFERS} WHERE o.user_id = $2 AND o.id = ANY($1)"
         ))
         .bind(ids)
         .bind(user_id)
@@ -989,7 +996,7 @@ impl OperationRepository for PgOperationRepository {
                          AND (b.account_id IS NULL OR b.account_id = $3))";
         let mut tx = self.pool.begin().await?;
         sqlx::query(&format!(
-            "{CLEAR_TRANSFERS} WHERE o.transfer_operation_id = $1 AND o.user_id = $2"
+            "{UNPAIR_TRANSFERS} WHERE o.transfer_operation_id = $1 AND o.user_id = $2"
         ))
         .bind(id)
         .bind(user_id)
@@ -1050,7 +1057,8 @@ impl OperationRepository for PgOperationRepository {
              WHERE o.id = $1 AND o.user_id = $2
                AND ($3::uuid IS NULL OR c.id = $3)
                AND ($3::uuid IS NOT NULL OR ABS(c.date - o.date) <= $4)
-               AND (c.transfer_account_id IS NULL OR c.transfer_account_id = o.account_id)
+               AND (c.transfer_account_id IS NULL AND $3::uuid IS NOT NULL
+                    OR c.transfer_account_id = o.account_id)
                AND ($3::uuid IS NOT NULL OR c.transfer_operation_id IS NULL
                     OR c.transfer_operation_id = o.id)
                AND NOT EXISTS (SELECT 1 FROM operation_splits s WHERE s.operation_id = c.id)
@@ -1070,31 +1078,6 @@ impl OperationRepository for PgOperationRepository {
         link_halves(&mut tx, id, counterpart).await?;
         tx.commit().await?;
         Ok(Some(counterpart))
-    }
-
-    async fn pair_with_waiting_transfer(&self, id: Uuid) -> AppResult<Option<Uuid>> {
-        let mut tx = self.pool.begin().await?;
-        let row = sqlx::query(
-            "SELECT p.id FROM operations o
-             JOIN operations p ON p.user_id = o.user_id AND p.transfer_account_id = o.account_id
-                              AND p.transfer_operation_id IS NULL AND p.amount = -o.amount
-                              AND ABS(p.date - o.date) <= $2
-             WHERE o.id = $1 AND o.transfer_account_id IS NULL
-               AND NOT EXISTS (SELECT 1 FROM operation_splits s WHERE s.operation_id = o.id)
-             ORDER BY ABS(p.date - o.date), p.id
-             LIMIT 1",
-        )
-        .bind(id)
-        .bind(TRANSFER_PAIRING_DAYS)
-        .fetch_optional(&mut *tx)
-        .await?;
-        let Some(row) = row else {
-            return Ok(None);
-        };
-        let waiting: Uuid = row.try_get("id")?;
-        link_halves(&mut tx, id, waiting).await?;
-        tx.commit().await?;
-        Ok(Some(waiting))
     }
 
     async fn list_for_summary(

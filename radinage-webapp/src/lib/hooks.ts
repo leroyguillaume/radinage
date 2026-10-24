@@ -13,6 +13,7 @@ import {
 	type OperationFilters,
 	operationSearchQuery,
 } from "@/lib/operation-search";
+import { canPair, pairingWindow } from "@/lib/transfers";
 import type {
 	AccountBalance,
 	AccountRequest,
@@ -377,6 +378,25 @@ export function useOperation(id: string | null) {
 		queryKey: ["operation-search", "operation", id],
 		queryFn: () => apiFetch<OperationResponse>(`/operations/${id}`),
 		enabled: id !== null,
+	});
+}
+
+/** Operations of `accountId` that could be the other side of the transfer `op`. */
+export function useTransferCandidates(
+	op: OperationResponse,
+	accountId: string,
+	enabled: boolean,
+) {
+	const { from, to } = pairingWindow(op.date);
+	const amount = String(-Number(op.amount));
+	return useQuery({
+		queryKey: ["operation-search", "transfer-candidates", op.id, accountId],
+		queryFn: () =>
+			apiFetch<OperationSearchResponse>(
+				`/operations?accountId=${accountId}&amount=${amount}&dateFrom=${from}&dateTo=${to}&ignored=included&pageSize=10`,
+			),
+		select: (page) => page.data.filter((c) => canPair(op, c)),
+		enabled,
 	});
 }
 

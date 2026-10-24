@@ -154,6 +154,13 @@ async fn a_transfer_pairs_with_the_closest_opposite_operation_and_clears_with_it
     let near = insert(&repo, a.user_id, a.joint, dec!(450), day(11)).await;
     let same_sign = insert(&repo, a.user_id, a.joint, dec!(-450), day(10)).await;
     let too_late = insert(&repo, a.user_id, a.joint, dec!(450), day(16)).await;
+    // The closest of all, but nothing recognized it as a transfer: a refund, say.
+    let refund = insert(&repo, a.user_id, a.joint, dec!(450), day(10)).await;
+    for recognized in [far, near, same_sign, too_late] {
+        repo.set_transfer(recognized, a.user_id, a.main, None)
+            .await
+            .unwrap();
+    }
 
     repo.set_transfer(out, a.user_id, a.joint, None)
         .await
@@ -170,8 +177,10 @@ async fn a_transfer_pairs_with_the_closest_opposite_operation_and_clears_with_it
     let other_side = transfer_of(&repo, &a, near).await.unwrap();
     assert_eq!(other_side.account_id, a.main);
     assert_eq!(other_side.operation_id, Some(out));
-    for untouched in [far, same_sign, too_late] {
-        assert_eq!(transfer_of(&repo, &a, untouched).await, None);
+    assert_eq!(transfer_of(&repo, &a, refund).await, None);
+    for unpaired in [far, same_sign, too_late] {
+        let transfer = transfer_of(&repo, &a, unpaired).await.unwrap();
+        assert_eq!(transfer.operation_id, None);
     }
 
     // Pairing with another operation by hand undoes the first pairing.
@@ -212,37 +221,57 @@ async fn a_transfer_with_an_account_not_receiving_operations_waits_for_nothing(p
 }
 
 #[sqlx::test(migrations = "./migrations")]
-async fn an_operation_imported_later_becomes_the_other_side_of_a_waiting_transfer(pool: PgPool) {
+async fn only_the_other_side_recognized_as_a_transfer_is_paired_and_a_rule_keeps_it(pool: PgPool) {
     let repo = PgOperationRepository::new(pool.clone());
+    let accounts = PgAccountRepository::new(pool.clone());
     let a = setup(&pool).await;
-    let out = insert(&repo, a.user_id, a.main, dec!(-450), day(10)).await;
-    repo.set_transfer(out, a.user_id, a.joint, None)
+    let rule = accounts
+        .create_transfer_rule(
+            a.user_id,
+            &TransferRuleFields {
+                account_id: a.main,
+                counterpart_account_id: a.joint,
+                label_pattern: LabelPattern::Contains("VIR VERS JOINT".to_string()),
+                counterpart_label_pattern: Some(LabelPattern::Contains("VIR DE".to_string())),
+            },
+        )
         .await
         .unwrap();
+    let out = insert(&repo, a.user_id, a.main, dec!(-450), day(10)).await;
+    repo.set_transfer(out, a.user_id, a.joint, Some(rule.id))
+        .await
+        .unwrap();
+    let refund = insert(&repo, a.user_id, a.joint, dec!(450), day(11)).await;
     assert_eq!(
         repo.pair_transfer(out, a.user_id, None).await.unwrap(),
         None
     );
+    assert_eq!(transfer_of(&repo, &a, refund).await, None);
 
-    let unrelated = insert(&repo, a.user_id, a.joint, dec!(80), day(12)).await;
     let incoming = insert(&repo, a.user_id, a.joint, dec!(450), day(12)).await;
-
+    repo.set_transfer(incoming, a.user_id, a.main, Some(rule.id))
+        .await
+        .unwrap();
     assert_eq!(
-        repo.pair_with_waiting_transfer(unrelated).await.unwrap(),
-        None
-    );
-    assert_eq!(
-        repo.pair_with_waiting_transfer(incoming).await.unwrap(),
+        repo.pair_transfer(incoming, a.user_id, None).await.unwrap(),
         Some(out)
     );
     let other_side = transfer_of(&repo, &a, incoming).await.unwrap();
     assert_eq!(
-        (other_side.account_id, other_side.operation_id),
-        (a.main, Some(out))
+        (
+            other_side.account_id,
+            other_side.rule_id,
+            other_side.operation_id
+        ),
+        (a.main, Some(rule.id), Some(out))
     );
-    // Already paired: nothing waits any more.
-    let again = insert(&repo, a.user_id, a.joint, dec!(450), day(12)).await;
-    assert_eq!(repo.pair_with_waiting_transfer(again).await.unwrap(), None);
+
+    // Linked to the refund by hand instead, the operation the rule recognized waits again.
+    repo.pair_transfer(out, a.user_id, Some(refund))
+        .await
+        .unwrap();
+    let waiting = transfer_of(&repo, &a, incoming).await.unwrap();
+    assert_eq!((waiting.account_id, waiting.operation_id), (a.main, None));
 }
 
 #[sqlx::test(migrations = "./migrations")]
@@ -251,6 +280,9 @@ async fn moving_an_operation_ends_its_transfer_on_both_sides(pool: PgPool) {
     let a = setup(&pool).await;
     let out = insert(&repo, a.user_id, a.main, dec!(-450), day(10)).await;
     let incoming = insert(&repo, a.user_id, a.joint, dec!(450), day(10)).await;
+    repo.set_transfer(incoming, a.user_id, a.main, None)
+        .await
+        .unwrap();
     repo.set_transfer(out, a.user_id, a.joint, None)
         .await
         .unwrap();
@@ -436,6 +468,7 @@ async fn deleting_a_transfer_rule_undoes_its_transfers(pool: PgPool) {
         account_id,
         counterpart_account_id,
         label_pattern: LabelPattern::Contains("VIR".to_string()),
+        counterpart_label_pattern: None,
     };
     let main_rule = accounts
         .create_transfer_rule(a.user_id, &rule(a.main, a.joint))
@@ -459,6 +492,9 @@ async fn deleting_a_transfer_rule_undoes_its_transfers(pool: PgPool) {
     // A pair whose other side is a transfer only through the pairing.
     let out = insert(&repo, a.user_id, a.main, dec!(-450), day(10)).await;
     let incoming = insert(&repo, a.user_id, a.joint, dec!(450), day(10)).await;
+    repo.set_transfer(incoming, a.user_id, a.main, None)
+        .await
+        .unwrap();
     repo.set_transfer(out, a.user_id, a.joint, Some(main_rule.id))
         .await
         .unwrap();

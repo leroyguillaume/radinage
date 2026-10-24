@@ -18,21 +18,49 @@ import {
 	IconPlus,
 	IconTrash,
 } from "@tabler/icons-react";
-import { Link } from "@tanstack/react-router";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
 	ApplyTransferRulePrompt,
 	TransferRuleForm,
-	useDescribeTransferRule,
+	useDescribePattern,
 } from "@/components/TransferRuleForm";
 import { useDeleteTransferRule, useTransferRules } from "@/lib/hooks";
 import { transferFlowOf, transferTone } from "@/lib/transfers";
-import type { AccountResponse, TransferRuleResponse } from "@/lib/types";
+import type {
+	AccountResponse,
+	LabelPattern,
+	TransferRuleResponse,
+} from "@/lib/types";
 import { palette } from "@/theme";
 
-/** The other account of a rule, coloured like the transfers it makes out of the account. */
-function CounterpartBadge({ account }: { account: AccountResponse }) {
+/** A rule seen from one of its accounts: the label on that account, and the other side. */
+interface RuleSides {
+	own: LabelPattern | null;
+	other: AccountResponse | undefined;
+	otherPattern: LabelPattern | null;
+}
+
+function sidesOf(
+	rule: TransferRuleResponse,
+	accountId: string,
+	byId: Map<string, AccountResponse>,
+): RuleSides {
+	return rule.accountId === accountId
+		? {
+				own: rule.labelPattern,
+				other: byId.get(rule.counterpartAccountId),
+				otherPattern: rule.counterpartLabelPattern,
+			}
+		: {
+				own: rule.counterpartLabelPattern,
+				other: byId.get(rule.accountId),
+				otherPattern: rule.labelPattern,
+			};
+}
+
+/** The other account of a rule, coloured like the transfers it makes to it. */
+function OtherAccountBadge({ account }: { account: AccountResponse }) {
 	const tone = transferTone(transferFlowOf(account.kind, -1));
 	return (
 		<Badge size="sm" color={tone.color} c={tone.text} tt="none">
@@ -41,20 +69,20 @@ function CounterpartBadge({ account }: { account: AccountResponse }) {
 	);
 }
 
-function OwnRuleRow({
+function RuleRow({
 	rule,
-	counterpart,
+	sides,
 	onEdit,
 }: {
 	rule: TransferRuleResponse;
-	counterpart: AccountResponse | undefined;
+	sides: RuleSides;
 	onEdit: () => void;
 }) {
 	const { t } = useTranslation();
-	const describe = useDescribeTransferRule();
+	const describe = useDescribePattern();
 	const remove = useDeleteTransferRule();
 	const [confirming, setConfirming] = useState(false);
-	const description = describe(rule);
+	const description = describe(sides.own ?? rule.labelPattern);
 	const editLabel = t("transfers.rules.edit", { rule: description });
 	const deleteLabel = t("transfers.rules.delete", { rule: description });
 
@@ -85,13 +113,24 @@ function OwnRuleRow({
 			) : (
 				<Group justify="space-between" wrap="nowrap" gap="xs">
 					<Stack gap={4} miw={0}>
-						<Text size="sm" fw={600} className="[overflow-wrap:anywhere]">
-							{description}
-						</Text>
-						{counterpart && (
+						{sides.own && (
+							<Text size="sm" fw={600} className="[overflow-wrap:anywhere]">
+								{describe(sides.own)}
+							</Text>
+						)}
+						{sides.other && (
 							<Group gap={6} wrap="wrap" c="dimmed">
 								<IconArrowsExchange size={14} aria-hidden />
-								<CounterpartBadge account={counterpart} />
+								<OtherAccountBadge account={sides.other} />
+								{sides.otherPattern && (
+									<Text
+										size="sm"
+										c="dimmed"
+										className="[overflow-wrap:anywhere]"
+									>
+										{describe(sides.otherPattern)}
+									</Text>
+								)}
 							</Group>
 						)}
 					</Stack>
@@ -133,8 +172,8 @@ type Editing =
 	| { kind: "apply"; rule: TransferRuleResponse };
 
 /**
- * The transfer rules of an account receiving operations, and the rules of other accounts
- * that make transfers to it. Renders nothing when there is neither.
+ * Every transfer rule with an account, on either side, editable from here. A new rule starts
+ * from an account receiving operations. Renders nothing for another account without rules.
  */
 export function TransferRulesCard({
 	account,
@@ -144,124 +183,82 @@ export function TransferRulesCard({
 	accounts: AccountResponse[];
 }) {
 	const { t } = useTranslation();
-	const describe = useDescribeTransferRule();
 	const rulesQuery = useTransferRules();
 	const [editing, setEditing] = useState<Editing>({ kind: "none" });
-	const rules = rulesQuery.data ?? [];
-	const own = rules.filter((r) => r.accountId === account.id);
-	const incoming = rules.filter((r) => r.counterpartAccountId === account.id);
+	const rules = (rulesQuery.data ?? []).filter(
+		(r) => r.accountId === account.id || r.counterpartAccountId === account.id,
+	);
 	const byId = new Map(accounts.map((a) => [a.id, a]));
 	const stopEditing = () => setEditing({ kind: "none" });
 	const afterSave = (rule: TransferRuleResponse, created: boolean) =>
 		setEditing(created ? { kind: "apply", rule } : { kind: "none" });
 
-	if (!account.receivesOperations && incoming.length === 0) return null;
+	if (!account.receivesOperations && rules.length === 0) return null;
 
 	return (
 		<Paper>
 			<Stack gap="sm">
+				<Title order={2} fz="md" fw={700}>
+					{t("transfers.rules.title")}
+				</Title>
+				<Text size="sm" c="dimmed">
+					{t(
+						account.receivesOperations
+							? "transfers.rules.description"
+							: "transfers.rules.descriptionOther",
+					)}
+				</Text>
 				{rulesQuery.isError && (
 					<Alert color="tangerine" icon={<IconAlertCircle size={16} />}>
 						{t("transfers.rules.fetchError")}
 					</Alert>
 				)}
-				{account.receivesOperations && (
-					<>
-						<Title order={2} fz="md" fw={700}>
-							{t("transfers.rules.title")}
-						</Title>
-						<Text size="sm" c="dimmed">
-							{t("transfers.rules.description")}
-						</Text>
-						{own.length === 0 && editing.kind !== "new" && (
-							<Text size="sm" c="dimmed">
-								{t("transfers.rules.empty")}
-							</Text>
-						)}
-						<Box component="ul" m={0} p={0} className="list-none">
-							{own.map((rule) =>
-								editing.kind === "edit" && editing.id === rule.id ? (
-									<Box component="li" key={rule.id} py="xs">
-										<TransferRuleForm
-											rule={rule}
-											draft={{ accountId: account.id }}
-											onSaved={afterSave}
-											onCancel={stopEditing}
-										/>
-									</Box>
-								) : (
-									<OwnRuleRow
-										key={rule.id}
-										rule={rule}
-										counterpart={byId.get(rule.counterpartAccountId)}
-										onEdit={() => setEditing({ kind: "edit", id: rule.id })}
-									/>
-								),
-							)}
-						</Box>
-						{editing.kind === "new" && (
-							<TransferRuleForm
-								rule={null}
-								draft={{ accountId: account.id }}
-								onSaved={afterSave}
-								onCancel={stopEditing}
-							/>
-						)}
-						{editing.kind === "apply" && (
-							<ApplyTransferRulePrompt
-								rule={editing.rule}
-								onDone={stopEditing}
-							/>
-						)}
-						{editing.kind === "none" && (
-							<Button
-								variant="light"
-								leftSection={<IconPlus size={18} />}
-								onClick={() => setEditing({ kind: "new" })}
-								className="self-start"
-							>
-								{t("transfers.rules.add")}
-							</Button>
-						)}
-					</>
+				{rules.length === 0 && editing.kind !== "new" && (
+					<Text size="sm" c="dimmed">
+						{t("transfers.rules.empty")}
+					</Text>
 				)}
-				{incoming.length > 0 && (
-					<>
-						<Title order={2} fz="md" fw={700}>
-							{t("transfers.rules.incomingTitle")}
-						</Title>
-						<Box component="ul" m={0} p={0} className="list-none">
-							{incoming.map((rule) => {
-								const source = byId.get(rule.accountId);
-								return (
-									<Box
-										component="li"
-										key={rule.id}
-										py={6}
-										style={{ borderBottom: `1px dashed ${palette.border}` }}
-									>
-										<Text
-											size="sm"
-											fw={600}
-											className="[overflow-wrap:anywhere]"
-										>
-											{describe(rule)}
-										</Text>
-										{source && (
-											<Link
-												to="/accounts/$accountId"
-												params={{ accountId: source.id }}
-												className="text-sm font-semibold"
-												style={{ color: "var(--mantine-color-forest-7)" }}
-											>
-												{t("transfers.rules.on", { account: source.name })}
-											</Link>
-										)}
-									</Box>
-								);
-							})}
-						</Box>
-					</>
+				<Box component="ul" m={0} p={0} className="list-none">
+					{rules.map((rule) =>
+						editing.kind === "edit" && editing.id === rule.id ? (
+							<Box component="li" key={rule.id} py="xs">
+								<TransferRuleForm
+									rule={rule}
+									draft={{ accountId: rule.accountId }}
+									onSaved={afterSave}
+									onCancel={stopEditing}
+								/>
+							</Box>
+						) : (
+							<RuleRow
+								key={rule.id}
+								rule={rule}
+								sides={sidesOf(rule, account.id, byId)}
+								onEdit={() => setEditing({ kind: "edit", id: rule.id })}
+							/>
+						),
+					)}
+				</Box>
+				{editing.kind === "new" && (
+					<TransferRuleForm
+						rule={null}
+						draft={{ accountId: account.id }}
+						onSaved={afterSave}
+						onCancel={stopEditing}
+					/>
+				)}
+				{editing.kind === "apply" && (
+					<ApplyTransferRulePrompt rule={editing.rule} onDone={stopEditing} />
+				)}
+				{editing.kind === "none" && account.receivesOperations && (
+					<Button
+						variant="light"
+						leftSection={<IconPlus size={18} />}
+						onClick={() => setEditing({ kind: "new" })}
+						className="self-start"
+					>
+						{t("transfers.rules.add")}
+					</Button>
 				)}
 			</Stack>
 		</Paper>

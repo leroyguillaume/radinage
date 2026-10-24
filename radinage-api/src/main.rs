@@ -240,7 +240,7 @@ where
             },
             Tag {
                 name: "Transfer rules".to_string(),
-                description: Some("Manage the rules that make operations transfers between two of a user's accounts automatically. A rule belongs to an imported checking account and matches the label of its operations by prefix, suffix or substring, case-insensitively. An operation created by hand or by a statement import becomes a transfer through the first of the user's rules, oldest first, that matches it, before budget and category matching; one no rule matches becomes the other side of a transfer of opposite amount waiting for it on another account within 5 days. Applying a rule makes the existing operations it matches transfers.".to_string()),
+                description: Some("Manage the rules that make operations transfers between two of a user's accounts automatically. A rule names an imported checking account and a label pattern for its operations, the other account, and, when that account receives operations too, a label pattern for the other side there; patterns match by prefix, suffix or substring, case-insensitively. An operation created by hand or by a statement import becomes, before budget and category matching, a transfer through the first of the user's rules, oldest first, that recognizes it on either account, and is paired with the transfer of opposite amount the rule recognized on the other account within 5 days, if already there. Applying a rule makes the existing operations it recognizes transfers, then pairs them.".to_string()),
                 ..Tag::default()
             },
             Tag {
@@ -551,7 +551,7 @@ where
             put_with(handlers::operations::set_transfer, |op| {
                 op.tag("Operations")
                     .summary("Make an operation a transfer")
-                    .description("Make the operation a transfer with another of the caller's accounts, by hand: where the money went for a debit, where it came from for a credit. A transfer is neither income nor expense; with a savings account, a debit counts as savings and a credit is deducted from them, and the savings account's balance follows. The operation loses its category, and its budget link unless it puts money on a savings account under a savings budget. When the other account receives operations, the operation is paired with the one on the other side: `counterpartId` when given, else the closest by date of opposite amount within 5 days, if any; both are then each other's transfer. Sending the account of the current transfer keeps its rule and its other side. Returns 400 if the account is the operation's own or not one of the caller's, or `counterpartId` cannot be the other side, 409 if the operation is split, 404 if it does not exist or belongs to another user.")
+                    .description("Make the operation a transfer with another of the caller's accounts, by hand: where the money went for a debit, where it came from for a credit. A transfer is neither income nor expense; with a savings account, a debit counts as savings and a credit is deducted from them, and the savings account's balance follows. The operation loses its category, and its budget link unless it puts money on a savings account under a savings budget sending its money there or to no account in particular. When the other account receives operations, the operation is paired with the one on the other side: `counterpartId` when given, any operation of the other account of opposite amount; else the closest by date among the transfers of the other account with this one, of opposite amount within 5 days and not paired yet. Both are then each other's transfer, and an operation unpaired by it stays a transfer only when a rule made it one. Sending the account of the current transfer keeps its rule and its other side. Returns 400 if the account is the operation's own or not one of the caller's, or `counterpartId` cannot be the other side, writing nothing; 409 if the operation is split; 404 if it does not exist or belongs to another user.")
                     .id("setOperationTransfer")
             })
             .delete_with(handlers::operations::clear_transfer, |op| {
@@ -701,7 +701,7 @@ where
             .post_with(handlers::transfer_rules::create_transfer_rule, |op| {
                 op.tag("Transfer rules")
                     .summary("Create a transfer rule")
-                    .description("Create a rule that makes the operations created from now on on `accountId` whose label it matches transfers with `counterpartAccountId`. `accountId` must be one of the caller's imported checking accounts and `counterpartAccountId` another of the caller's accounts; the pattern value is trimmed and 1 to 200 characters long (400 otherwise). Existing operations are left as they are until the rule is applied. Returns 409 once the user has MAX_TRANSFER_RULES_PER_USER rules.")
+                    .description("Create a rule making transfers between `accountId`, one of the caller's imported checking accounts, and `counterpartAccountId`, another of the caller's accounts: the operations created from now on on `accountId` whose label matches `labelPattern` and, when `counterpartAccountId` receives operations, those on it whose label matches `counterpartLabelPattern`, which is required then and refused otherwise. Pattern values are trimmed and 1 to 200 characters long (400 otherwise). Existing operations are left as they are until the rule is applied. Returns 409 once the user has MAX_TRANSFER_RULES_PER_USER rules.")
                     .id("createTransferRule")
                     .response::<201, Json<handlers::transfer_rules::TransferRuleResponse>>()
             }),
@@ -726,7 +726,7 @@ where
             post_with(handlers::transfer_rules::apply_transfer_rule, |op| {
                 op.tag("Transfer rules")
                     .summary("Apply a transfer rule to existing operations")
-                    .description("Make every operation of the rule's account that it matches a transfer with its other account, paired with the operation on the other side when found. Operations already transfers and split ones are left as they are. Returns how many it made transfers and how many it skipped, 404 if the rule does not exist or belongs to another user.")
+                    .description("Make every operation the rule recognizes, on either of its accounts, a transfer with the other account, then pair the two sides where both are there. Operations already transfers and split ones are left as they are. Returns how many it made transfers and how many it skipped, 404 if the rule does not exist or belongs to another user.")
                     .id("applyTransferRule")
             }),
         )
@@ -1060,13 +1060,6 @@ pub(crate) mod test_util {
         repo.expect_list_transfer_rules()
             .returning(|_| Box::pin(async { Ok(Vec::new()) }));
         repo
-    }
-
-    /// Let `op_repo` find no transfer waiting for the operations it creates.
-    pub fn no_waiting_transfers(op_repo: &mut MockOperationRepository) {
-        op_repo
-            .expect_pair_with_waiting_transfer()
-            .returning(|_| Box::pin(async { Ok(None) }));
     }
 
     /// Build a test state from mock repositories, accounts only.

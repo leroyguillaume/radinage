@@ -883,7 +883,7 @@
 		"savingsBudgetHint": "Facultatif. Seuls les budgets d'épargne qui versent sur ce compte sont proposés.",
 		"counterpart": "Contrepartie sur {{account}}",
 		"linked": "Liée",
-		"waiting": "Pas encore de contrepartie : elle sera liée à l'import du relevé de {{account}}.",
+		"waiting": "Pas encore de contrepartie : elle sera liée quand une règle la reconnaîtra dans le relevé de {{account}}, ou quand tu la lieras ici.",
 		"badgeTo": "Vers {{account}}",
 		"badgeFrom": "Depuis {{account}}",
 		"always": "Toujours pour ce libellé",
@@ -894,16 +894,13 @@
 		"fedBy": "{{accounts}} (virements)",
 		"rules": {
 			"title": "Règles de virement",
-			"description": "Une opération importée sur ce compte dont le libellé correspond devient un virement avec l'autre compte.",
-			"incomingTitle": "Règles qui virent ici",
-			"on": "sur {{account}}",
-			"with": "Virement avec {{account}}",
+			"description": "Une règle reconnaît un virement par son libellé, sur ce compte et, si l'autre compte est importé, sur l'autre compte. Les deux côtés sont alors liés.",
 			"otherAccount": "Autre compte",
 			"empty": "Aucune règle pour ce compte.",
 			"add": "Ajouter une règle",
 			"createTitle": "Nouvelle règle de virement",
 			"create": "Créer la règle",
-			"hint": "Débit : virement vers l'autre compte. Crédit : virement depuis l'autre compte.",
+			"hint": "L'autre compte n'est pas importé : seul ce côté du virement est dans tes relevés. Débit : virement vers l'autre compte. Crédit : virement depuis l'autre compte.",
 			"errorValue": "La valeur est obligatoire",
 			"errorAccount": "Choisis l'autre compte",
 			"errorLimit": "Tu as atteint le nombre maximal de règles de virement",
@@ -917,7 +914,10 @@
 			"applyResult": "{{transferred}} opération(s) marquée(s) comme virement, {{skipped}} laissée(s) telle(s) quelle(s)",
 			"applyError": "Erreur lors de l'application de la règle",
 			"later": "Plus tard",
-			"apply": "Appliquer"
+			"apply": "Appliquer",
+			"labelOn": "Libellé sur {{account}}",
+			"descriptionOther": "Les règles des comptes importés qui font des virements avec ce compte.",
+			"twoSidedHint": "Les deux comptes sont importés : chaque côté est reconnu par son propre libellé, et seuls deux côtés reconnus sont liés."
 		},
 		"account": {
 			"title": "Virements",
@@ -926,6 +926,9 @@
 			"total_other": "{{count}} virements au total",
 			"from": "depuis {{account}}",
 			"to": "vers {{account}}"
-		}
+		},
+		"candidates": "Contrepartie probable : lie-la si c'est bien l'autre côté.",
+		"link": "Lier",
+		"linkTo": "Lier à {{label}}"
 	}
 }

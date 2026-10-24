@@ -1,5 +1,6 @@
 import {
 	Badge,
+	Button,
 	Group,
 	SegmentedControl,
 	Select,
@@ -15,9 +16,9 @@ import {
 import { Link } from "@tanstack/react-router";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useDescribeTransferRule } from "@/components/TransferRuleForm";
+import { useDescribePattern } from "@/components/TransferRuleForm";
 import { formatAmount, formatIsoDate, formatSignedAmount } from "@/lib/format";
-import { useOperation } from "@/lib/hooks";
+import { useOperation, useTransferCandidates } from "@/lib/hooks";
 import { transferFlowOf, transferTone } from "@/lib/transfers";
 import type {
 	AccountResponse,
@@ -105,6 +106,9 @@ export function TransferField({
 							op={op}
 							other={other}
 							transferRules={transferRules}
+							onLink={(counterpartId) =>
+								onChange({ accountId: other.id, counterpartId })
+							}
 						/>
 					)}
 				</>
@@ -118,17 +122,24 @@ function TransferDetails({
 	op,
 	other,
 	transferRules,
+	onLink,
 }: {
 	op: OperationResponse;
 	other: AccountResponse;
 	transferRules: TransferRuleResponse[];
+	onLink: (counterpartId: string) => void;
 }) {
 	const { t } = useTranslation();
-	const describe = useDescribeTransferRule();
+	const describe = useDescribePattern();
 	const amount = Number(op.amount);
 	const flow = transferFlowOf(other.kind, amount);
 	const tone = transferTone(flow);
 	const rule = transferRules.find((r) => r.id === op.transfer?.ruleId);
+	// The rule is named by the label it recognized on this operation's side.
+	const recognized =
+		rule && rule.accountId !== op.accountId
+			? (rule.counterpartLabelPattern ?? rule.labelPattern)
+			: rule?.labelPattern;
 
 	return (
 		<Stack gap="sm">
@@ -154,16 +165,16 @@ function TransferDetails({
 					})}
 				</Text>
 			</Group>
-			{rule && (
+			{recognized && (
 				<Group gap={8} wrap="nowrap" c="dimmed" align="flex-start">
 					<IconInfoCircle size={16} style={{ flexShrink: 0, marginTop: 2 }} />
 					<Stack gap={2}>
 						<Text size="sm">
-							{t("transfers.byRule", { rule: describe(rule) })}
+							{t("transfers.byRule", { rule: describe(recognized) })}
 						</Text>
 						<Link
 							to="/accounts/$accountId"
-							params={{ accountId: rule.accountId }}
+							params={{ accountId: op.accountId }}
 							className="text-sm font-semibold"
 							style={{ color: "var(--mantine-color-forest-7)" }}
 						>
@@ -173,22 +184,27 @@ function TransferDetails({
 				</Group>
 			)}
 			{other.receivesOperations && (
-				<Counterpart id={op.transfer?.operationId ?? null} account={other} />
+				<Counterpart op={op} account={other} onLink={onLink} />
 			)}
 		</Stack>
 	);
 }
 
-/** The operation on the other account, or why there is none yet. */
+/** The operation on the other account; without one, those that could be it, to link by hand. */
 function Counterpart({
-	id,
+	op,
 	account,
+	onLink,
 }: {
-	id: string | null;
+	op: OperationResponse;
 	account: AccountResponse;
+	onLink: (counterpartId: string) => void;
 }) {
 	const { t, i18n } = useTranslation();
+	const id = op.transfer?.operationId ?? null;
 	const counterpart = useOperation(id).data;
+	const candidates =
+		useTransferCandidates(op, account.id, id === null).data ?? [];
 
 	return (
 		<Stack gap={4}>
@@ -196,9 +212,50 @@ function Counterpart({
 				{t("transfers.counterpart", { account: account.name })}
 			</Text>
 			{id === null ? (
-				<Text size="sm" c="dimmed">
-					{t("transfers.waiting", { account: account.name })}
-				</Text>
+				candidates.length === 0 ? (
+					<Text size="sm" c="dimmed">
+						{t("transfers.waiting", { account: account.name })}
+					</Text>
+				) : (
+					<Stack gap={6}>
+						<Text size="sm" c="dimmed">
+							{t("transfers.candidates")}
+						</Text>
+						{candidates.map((candidate) => (
+							<Group
+								key={candidate.id}
+								justify="space-between"
+								wrap="nowrap"
+								gap="sm"
+								px="sm"
+								py={6}
+								style={{
+									border: `1px solid ${palette.border}`,
+									borderRadius: 12,
+								}}
+							>
+								<Stack gap={0} miw={0}>
+									<Text size="sm" fw={600} truncate>
+										{candidate.label}
+									</Text>
+									<Text size="xs" c="dimmed" className="tabular-nums">
+										{formatIsoDate(candidate.date, i18n.language)} ·{" "}
+										{formatSignedAmount(Number(candidate.amount))}
+									</Text>
+								</Stack>
+								<Button
+									variant="light"
+									h={44}
+									leftSection={<IconLink size={16} />}
+									onClick={() => onLink(candidate.id)}
+									aria-label={t("transfers.linkTo", { label: candidate.label })}
+								>
+									{t("transfers.link")}
+								</Button>
+							</Group>
+						))}
+					</Stack>
+				)
 			) : (
 				counterpart && (
 					<Stack

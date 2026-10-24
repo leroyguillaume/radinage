@@ -42,6 +42,39 @@ export function feederNames(
 		: [...feeders.budgets, fedByTransfers(feeders.accounts.join(", "))];
 }
 
+/** Days between the two sides of a transfer for them to be paired, as the API pairs them. */
+export const TRANSFER_PAIRING_DAYS = 5;
+
+/** First and last day (YYYY-MM-DD) the other side of a transfer dated `date` can be on. */
+export function pairingWindow(date: string): { from: string; to: string } {
+	const shift = (days: number) => {
+		const day = new Date(`${date}T00:00:00Z`);
+		day.setUTCDate(day.getUTCDate() + days);
+		return day.toISOString().slice(0, 10);
+	};
+	return {
+		from: shift(-TRANSFER_PAIRING_DAYS),
+		to: shift(TRANSFER_PAIRING_DAYS),
+	};
+}
+
+/**
+ * Whether `candidate` can be the other side of the transfer `op` with its account: of opposite
+ * amount, whole, and not a transfer with any other account nor already paired.
+ */
+export function canPair(
+	op: OperationResponse,
+	candidate: OperationResponse,
+): boolean {
+	return (
+		Number(candidate.amount) === -Number(op.amount) &&
+		candidate.splits.length === 0 &&
+		(candidate.transfer === null ||
+			(candidate.transfer.accountId === op.accountId &&
+				candidate.transfer.operationId === null))
+	);
+}
+
 /** How a transfer counts, from the side of the account the operation is on. */
 export type TransferFlow = "toSavings" | "fromSavings" | "internal";
 

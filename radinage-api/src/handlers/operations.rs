@@ -1327,7 +1327,6 @@ mod tests {
     async fn create_operation_inserts_and_returns_created() {
         let user_id = Uuid::new_v4();
         let mut op_repo = MockOperationRepository::new();
-        crate::test_util::no_waiting_transfers(&mut op_repo);
         let mut budget_repo = MockBudgetRepository::new();
 
         op_repo
@@ -1456,7 +1455,6 @@ mod tests {
             .expect_list_all_for_user()
             .returning(|_| Box::pin(async { Ok(vec![]) }));
         let mut op_repo = MockOperationRepository::new();
-        crate::test_util::no_waiting_transfers(&mut op_repo);
         op_repo
             .expect_insert()
             .returning(|_, _, _| Box::pin(async { Ok(()) }));

@@ -86,6 +86,7 @@ describe("feeders", () => {
 			accountId: "bnp",
 			counterpartAccountId: "livret",
 			labelPattern: { type: "contains", value: "LIVRET" },
+			counterpartLabelPattern: null,
 			createdAt: "2026-01-01T00:00:00Z",
 		};
 		const feeders = feedersOf(

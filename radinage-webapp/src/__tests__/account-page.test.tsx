@@ -319,11 +319,19 @@ describe("transfers", () => {
 		transferredInto: true,
 		createdAt: "2026-01-01T10:00:00Z",
 	};
+	const joint: AccountResponse = {
+		...bnp,
+		id: "joint",
+		name: "Compte joint",
+		balance: null,
+		currentBalance: null,
+	};
 	const rule: TransferRuleResponse = {
 		id: "rule1",
 		accountId: "bnp",
 		counterpartAccountId: "livret",
 		labelPattern: { type: "contains", value: "VIR INTERNE VERS LIVRET A" },
+		counterpartLabelPattern: null,
 		createdAt: "2026-01-01T10:00:00Z",
 	};
 	const transfers: OperationSearchResponse = {
@@ -361,7 +369,7 @@ describe("transfers", () => {
 	) {
 		apiFetchMock.mockImplementation((path: string, init?: RequestInit) => {
 			if (init?.method) return onWrite(path);
-			if (path === "/accounts") return Promise.resolve([bnp, livret]);
+			if (path === "/accounts") return Promise.resolve([bnp, livret, joint]);
 			if (path.startsWith("/budgets")) return Promise.resolve([]);
 			if (path === "/transfer-rules") return Promise.resolve([rule]);
 			if (path.startsWith("/operations?transferAccountId=livret")) {
@@ -390,12 +398,17 @@ describe("transfers", () => {
 		expect(normalised(card.getByText(/300,00/).textContent ?? "")).toBe(
 			"+300,00 €",
 		);
+		const rules = screen.getByRole("heading", { name: "Règles de virement" });
+		const rulesCard = within(
+			rules.closest(".mantine-Paper-root") as HTMLElement,
+		);
+		expect(rulesCard.getByText("Courant BNP")).toBeInTheDocument();
 		expect(
-			screen.getByRole("heading", { name: "Règles qui virent ici" }),
+			rulesCard.getByText("Contient « VIR INTERNE VERS LIVRET A »"),
 		).toBeInTheDocument();
 		expect(
-			screen.getByRole("link", { name: "sur Courant BNP" }),
-		).toBeInTheDocument();
+			rulesCard.queryByRole("button", { name: "Ajouter une règle" }),
+		).not.toBeInTheDocument();
 	});
 
 	it("manages the rules of an account receiving operations", async () => {
@@ -419,6 +432,7 @@ describe("transfers", () => {
 					accountId: "bnp",
 					counterpartAccountId: "livret",
 					labelPattern: { type: "contains", value: "PEL" },
+					counterpartLabelPattern: null,
 				},
 			}),
 		);
@@ -427,5 +441,38 @@ describe("transfers", () => {
 				/marquer comme virements les opérations existantes/,
 			),
 		).toBeInTheDocument();
+	});
+
+	it("asks how the other side is labelled when both accounts are imported", async () => {
+		mockTransfers();
+		await renderPage("bnp");
+		const user = userEvent.setup();
+
+		await user.click(
+			await screen.findByRole("button", { name: "Ajouter une règle" }),
+		);
+		await selectMantineOption("Autre compte", "Compte joint");
+		expect(screen.getByText("Libellé sur Compte joint")).toBeInTheDocument();
+		const [own, other] = screen.getAllByRole("textbox", { name: /Valeur/ });
+		if (!own || !other) throw new Error("expected a label on each side");
+		await user.type(own, "VIR VERS JOINT");
+		await user.type(other, "VIR DE M LEROY");
+		await user.click(screen.getByRole("button", { name: "Créer la règle" }));
+
+		await waitFor(() =>
+			expect(writes()).toContainEqual({
+				path: "/transfer-rules",
+				method: "POST",
+				body: {
+					accountId: "bnp",
+					counterpartAccountId: "joint",
+					labelPattern: { type: "contains", value: "VIR VERS JOINT" },
+					counterpartLabelPattern: {
+						type: "contains",
+						value: "VIR DE M LEROY",
+					},
+				},
+			}),
+		);
 	});
 });

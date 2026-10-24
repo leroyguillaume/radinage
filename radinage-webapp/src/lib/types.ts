@@ -298,17 +298,22 @@ export type IgnoreRuleRequest = Pick<
 
 export interface TransferRuleResponse {
 	id: string;
-	/** Imported checking account whose operations the rule applies to. */
+	/** Imported checking account whose operations `labelPattern` recognizes. */
 	accountId: string;
-	/** The account the operations it matches are transfers with. */
+	/** The other account of the transfers. */
 	counterpartAccountId: string;
 	labelPattern: LabelPattern;
+	/** How the other side is labelled on the other account; null when it does not receive operations. */
+	counterpartLabelPattern: LabelPattern | null;
 	createdAt: string;
 }
 
 export type TransferRuleRequest = Pick<
 	TransferRuleResponse,
-	"accountId" | "counterpartAccountId" | "labelPattern"
+	| "accountId"
+	| "counterpartAccountId"
+	| "labelPattern"
+	| "counterpartLabelPattern"
 >;
 
 export interface ApplyTransferRuleResponse {
