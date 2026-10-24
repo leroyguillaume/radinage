@@ -3,13 +3,16 @@ use crate::{
     auth::middleware::AuthUser,
     domain::{
         import_profile::CsvDelimiter,
-        operation::{BudgetLink, Operation},
+        operation::{BudgetLink, NewOperation, Operation},
     },
     error::{AppError, AppResult},
-    handlers::{ignore_rules::auto_ignore_operation, operations::auto_match_operation},
+    handlers::{
+        accounts::account_receiving_operations, ignore_rules::auto_ignore_operation,
+        operations::auto_match_operation,
+    },
     repositories::{
-        BudgetRepository, CategoryRepository, IgnoreRuleRepository, ImportProfileRepository,
-        OperationRepository,
+        AccountRepository, BudgetRepository, CategoryRepository, IgnoreRuleRepository,
+        ImportProfileRepository, OperationRepository,
     },
     services::importer::{
         ImportParams, ParsedRow, RowError, is_spreadsheet, parse_csv, parse_xlsx, preview_rows,
@@ -83,6 +86,9 @@ pub struct ImportMultipartSchema {
     /// Import profile the parameters come from, recorded as its last use (optional)
     #[allow(dead_code)]
     profile_id: Option<Uuid>,
+    /// Account the operations are imported on: one of the user's imported checking accounts
+    #[allow(dead_code)]
+    account_id: Uuid,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -126,8 +132,9 @@ pub async fn import_operations<
     P: ImportProfileRepository,
     C: CategoryRepository,
     R: IgnoreRuleRepository,
+    A: AccountRepository,
 >(
-    State(state): State<AppState<U, O, B, P, C, R>>,
+    State(state): State<AppState<U, O, B, P, C, R, A>>,
     auth_user: AuthUser,
     MultipartBody(mut multipart, _): MultipartBody,
 ) -> AppResult<(StatusCode, Json<ImportResponse>)> {
@@ -141,6 +148,7 @@ pub async fn import_operations<
     let mut skip_lines: Option<usize> = None;
     let mut csv_delimiter = CsvDelimiter::default();
     let mut profile_id: Option<Uuid> = None;
+    let mut account_id: Option<Uuid> = None;
 
     while let Some(field) = multipart
         .next_field()
@@ -206,6 +214,15 @@ pub async fn import_operations<
                     AppError::BadRequest("invalid profileId: expected a UUID".to_string())
                 })?);
             }
+            "accountId" => {
+                let text = field
+                    .text()
+                    .await
+                    .map_err(|e| AppError::BadRequest(format!("accountId read error: {e}")))?;
+                account_id = Some(text.trim().parse().map_err(|_| {
+                    AppError::BadRequest("invalid accountId: expected a UUID".to_string())
+                })?);
+            }
             _ => {}
         }
     }
@@ -223,6 +240,9 @@ pub async fn import_operations<
         skip_lines: skip_lines.unwrap_or(0),
         csv_delimiter,
     };
+    let account_id =
+        account_id.ok_or_else(|| AppError::BadRequest("missing accountId field".to_string()))?;
+    account_receiving_operations(&state.account_repo, account_id, user_id).await?;
     let name = file_name.unwrap_or_default();
 
     let result = if is_spreadsheet(&name) {
@@ -245,6 +265,7 @@ pub async fn import_operations<
             .operation_repo
             .exists_by_fields(
                 user_id,
+                account_id,
                 parsed_row.amount,
                 parsed_row.date,
                 &parsed_row.label,
@@ -285,10 +306,13 @@ pub async fn import_operations<
             .insert(
                 id,
                 user_id,
-                parsed_row.amount,
-                parsed_row.date,
-                None,
-                &parsed_row.label,
+                &NewOperation {
+                    account_id,
+                    amount: parsed_row.amount,
+                    date: parsed_row.date,
+                    effective_date: None,
+                    label: parsed_row.label.clone(),
+                },
             )
             .await
         {
@@ -297,6 +321,7 @@ pub async fn import_operations<
                 let op = Operation {
                     id,
                     user_id,
+                    account_id,
                     amount: parsed_row.amount,
                     date: parsed_row.date,
                     effective_date: None,
@@ -407,16 +432,18 @@ mod tests {
     use super::*;
     use crate::{
         domain::{
+            account::{Account, AccountFields, AccountKind},
             budget::{Budget, BudgetKind, BudgetType},
             user::UserRole,
         },
         repositories::{
-            MockBudgetRepository, MockImportProfileRepository, MockOperationRepository,
-            MockUserRepository,
+            MockAccountRepository, MockBudgetRepository, MockImportProfileRepository,
+            MockOperationRepository, MockUserRepository,
         },
         test_util::{
-            auth_header, build_test_router, make_test_state, make_test_state_with_profiles,
-            response_json,
+            auth_header, build_test_router, main_accounts, make_test_state,
+            make_test_state_with_all, make_test_state_with_profiles, no_categories,
+            no_ignore_rules, no_import_profiles, response_json,
         },
     };
     use axum::body::Body;
@@ -425,6 +452,9 @@ mod tests {
     use rust_decimal::Decimal;
     use tower::ServiceExt;
     use uuid::Uuid;
+
+    /// Account every test import targets.
+    const IMPORT_ACCOUNT: Uuid = Uuid::nil();
 
     fn make_budget(user_id: Uuid) -> Budget {
         Budget {
@@ -488,6 +518,7 @@ mod tests {
         if params.csv_delimiter != CsvDelimiter::Comma {
             add_text_field(&mut body, b, "csvDelimiter", params.csv_delimiter.as_str());
         }
+        add_text_field(&mut body, b, "accountId", &IMPORT_ACCOUNT.to_string());
 
         body.extend_from_slice(b"--");
         body.extend_from_slice(b);
@@ -551,11 +582,11 @@ mod tests {
         op_repo
             .expect_exists_by_fields()
             .times(2)
-            .returning(|_, _, _, _| Box::pin(async { Ok(false) }));
+            .returning(|_, _, _, _, _| Box::pin(async { Ok(false) }));
         op_repo
             .expect_insert()
             .times(2)
-            .returning(|_, _, _, _, _, _| Box::pin(async { Ok(()) }));
+            .returning(|_, _, _| Box::pin(async { Ok(()) }));
         budget_repo
             .expect_list_all_for_user()
             .times(2)
@@ -623,11 +654,11 @@ mod tests {
         op_repo
             .expect_exists_by_fields()
             .times(2)
-            .returning(|_, _, _, _| Box::pin(async { Ok(false) }));
+            .returning(|_, _, _, _, _| Box::pin(async { Ok(false) }));
         op_repo
             .expect_insert()
             .times(2)
-            .returning(|_, _, _, _, _, _| Box::pin(async { Ok(()) }));
+            .returning(|_, _, _| Box::pin(async { Ok(()) }));
         budget_repo
             .expect_list_all_for_user()
             .times(2)
@@ -669,7 +700,7 @@ mod tests {
         op_repo
             .expect_exists_by_fields()
             .times(3)
-            .returning(move |_, _, _, _| {
+            .returning(move |_, _, _, _, _| {
                 call += 1;
                 let is_dup = call == 2;
                 Box::pin(async move { Ok(is_dup) })
@@ -677,7 +708,7 @@ mod tests {
         op_repo
             .expect_insert()
             .times(2)
-            .returning(|_, _, _, _, _, _| Box::pin(async { Ok(()) }));
+            .returning(|_, _, _| Box::pin(async { Ok(()) }));
         budget_repo
             .expect_list_all_for_user()
             .times(2)
@@ -720,7 +751,7 @@ mod tests {
         op_repo
             .expect_exists_by_fields()
             .times(5)
-            .returning(move |_, _, _, _| {
+            .returning(move |_, _, _, _, _| {
                 call += 1;
                 let is_dup = matches!(call, 1 | 3 | 4);
                 Box::pin(async move { Ok(is_dup) })
@@ -728,7 +759,7 @@ mod tests {
         op_repo
             .expect_insert()
             .times(2)
-            .returning(|_, _, _, _, _, _| Box::pin(async { Ok(()) }));
+            .returning(|_, _, _| Box::pin(async { Ok(()) }));
         budget_repo
             .expect_list_all_for_user()
             .times(2)
@@ -777,7 +808,7 @@ mod tests {
         op_repo
             .expect_exists_by_fields()
             .times(2)
-            .returning(move |_, _, _, _| {
+            .returning(move |_, _, _, _, _| {
                 call += 1;
                 let fail = call == 1;
                 Box::pin(async move {
@@ -791,7 +822,7 @@ mod tests {
         op_repo
             .expect_insert()
             .times(1)
-            .returning(|_, _, _, _, _, _| Box::pin(async { Ok(()) }));
+            .returning(|_, _, _| Box::pin(async { Ok(()) }));
         budget_repo
             .expect_list_all_for_user()
             .times(1)
@@ -834,23 +865,20 @@ mod tests {
         op_repo
             .expect_exists_by_fields()
             .times(2)
-            .returning(|_, _, _, _| Box::pin(async { Ok(false) }));
+            .returning(|_, _, _, _, _| Box::pin(async { Ok(false) }));
         // First insert fails (row 2), second succeeds (row 3).
         let mut call = 0;
-        op_repo
-            .expect_insert()
-            .times(2)
-            .returning(move |_, _, _, _, _, _| {
-                call += 1;
-                let fail = call == 1;
-                Box::pin(async move {
-                    if fail {
-                        Err(AppError::Internal("insert failed".to_string()))
-                    } else {
-                        Ok(())
-                    }
-                })
-            });
+        op_repo.expect_insert().times(2).returning(move |_, _, _| {
+            call += 1;
+            let fail = call == 1;
+            Box::pin(async move {
+                if fail {
+                    Err(AppError::Internal("insert failed".to_string()))
+                } else {
+                    Ok(())
+                }
+            })
+        });
         budget_repo
             .expect_list_all_for_user()
             .times(1)
@@ -891,7 +919,7 @@ mod tests {
         op_repo
             .expect_exists_by_fields()
             .times(3)
-            .returning(|_, _, _, _| Box::pin(async { Ok(true) }));
+            .returning(|_, _, _, _, _| Box::pin(async { Ok(true) }));
 
         let app = build_test_router(make_test_state(
             MockUserRepository::new(),
@@ -933,11 +961,11 @@ mod tests {
         op_repo
             .expect_exists_by_fields()
             .times(2)
-            .returning(|_, _, _, _| Box::pin(async { Ok(false) }));
+            .returning(|_, _, _, _, _| Box::pin(async { Ok(false) }));
         op_repo
             .expect_insert()
             .times(2)
-            .returning(|_, _, _, _, _, _| Box::pin(async { Ok(()) }));
+            .returning(|_, _, _| Box::pin(async { Ok(()) }));
         budget_repo
             .expect_list_all_for_user()
             .times(2)
@@ -980,7 +1008,7 @@ mod tests {
         op_repo
             .expect_exists_by_fields()
             .times(2)
-            .returning(|_, _, _, _| Box::pin(async { Ok(true) }));
+            .returning(|_, _, _, _, _| Box::pin(async { Ok(true) }));
 
         let app = build_test_router(make_test_state(
             MockUserRepository::new(),
@@ -1032,7 +1060,7 @@ mod tests {
         let mut op_repo = MockOperationRepository::new();
         op_repo
             .expect_exists_by_fields()
-            .returning(|_, _, _, _| Box::pin(async { Ok(true) }));
+            .returning(|_, _, _, _, _| Box::pin(async { Ok(true) }));
         (op_repo, MockBudgetRepository::new())
     }
 
@@ -1100,6 +1128,103 @@ mod tests {
         assert_eq!(resp.status(), StatusCode::OK);
         let json: ImportResponse = response_json(resp).await;
         assert_eq!(json.skipped, 1);
+    }
+
+    #[tokio::test]
+    async fn import_checks_duplicates_and_inserts_on_the_requested_account() {
+        let user_id = Uuid::new_v4();
+        let mut op_repo = MockOperationRepository::new();
+        op_repo
+            .expect_exists_by_fields()
+            .withf(|_, account, _, _, _| *account == IMPORT_ACCOUNT)
+            .times(1)
+            .returning(|_, _, _, _, _| Box::pin(async { Ok(false) }));
+        op_repo
+            .expect_insert()
+            .withf(|_, _, op| op.account_id == IMPORT_ACCOUNT)
+            .times(1)
+            .returning(|_, _, _| Box::pin(async { Ok(()) }));
+        let mut budget_repo = MockBudgetRepository::new();
+        budget_repo
+            .expect_list_all_for_user()
+            .returning(|_| Box::pin(async { Ok(vec![]) }));
+        let app = build_test_router(make_test_state(
+            MockUserRepository::new(),
+            op_repo,
+            budget_repo,
+        ));
+
+        let csv = b"label,amount,date\nGroceries,-50.00,15/01/2024\n";
+        let auth = auth_header(user_id, UserRole::User);
+        let resp = app
+            .oneshot(import_request(
+                "b",
+                "ops.csv",
+                csv,
+                &default_import_params(),
+                &auth,
+            ))
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        let json: ImportResponse = response_json(resp).await;
+        assert_eq!(json.imported, 1);
+    }
+
+    #[tokio::test]
+    async fn import_needs_an_account_receiving_operations() {
+        let mut savings = MockAccountRepository::new();
+        savings.expect_find().returning(|id, user_id| {
+            Box::pin(async move {
+                Ok(Some(Account {
+                    id,
+                    user_id,
+                    fields: AccountFields {
+                        name: "Livret A".to_string(),
+                        kind: AccountKind::Savings,
+                        imported: false,
+                    },
+                    balance: None,
+                    current_balance: None,
+                    created_at: Utc::now(),
+                }))
+            })
+        });
+        let csv = b"label,amount,date\nGroceries,-50.00,15/01/2024\n";
+        let params = default_import_params();
+        let without_account = [
+            ("labelCol", params.label_col.to_string()),
+            ("amountCol", params.amount_col.to_string()),
+            ("dateCol", params.date_col.to_string()),
+            ("dateFormat", params.date_format.clone()),
+        ]
+        .iter()
+        .fold(
+            file_only_body("b", "ops.csv", csv),
+            |body, (name, value)| with_text_field(body, "b", name, value),
+        );
+        let auth = auth_header(Uuid::new_v4(), UserRole::User);
+
+        for (accounts, body) in [
+            (main_accounts(), without_account),
+            (savings, multipart_body("b", "ops.csv", csv, &params)),
+        ] {
+            let app = build_test_router(make_test_state_with_all(
+                MockUserRepository::new(),
+                MockOperationRepository::new(),
+                MockBudgetRepository::new(),
+                no_import_profiles(),
+                no_categories(),
+                no_ignore_rules(),
+                accounts,
+            ));
+            let resp = app
+                .oneshot(multipart_request("/operations/import", "b", body, &auth))
+                .await
+                .unwrap();
+            assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+        }
     }
 
     #[tokio::test]

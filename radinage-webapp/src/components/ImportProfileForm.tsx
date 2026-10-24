@@ -25,6 +25,7 @@ import { useTranslation } from "react-i18next";
 import { ApiError } from "@/lib/api";
 import { columnLetter } from "@/lib/columns";
 import {
+	useAccounts,
 	useDeleteImportProfile,
 	useImportPreview,
 	useSaveImportProfile,
@@ -112,8 +113,12 @@ export function ImportProfileForm({
 	const save = useSaveImportProfile();
 	const remove = useDeleteImportProfile();
 	const preview = useImportPreview();
+	const accounts = useAccounts();
 
 	const [name, setName] = useState(profile?.name ?? "");
+	const [accountChoice, setAccountChoice] = useState<string | null>(
+		profile?.accountId ?? null,
+	);
 	const [roles, setRoles] = useState<ColumnRoles>({
 		label: profile?.labelCol ?? null,
 		amount: profile?.amountCol ?? null,
@@ -148,8 +153,11 @@ export function ImportProfileForm({
 		dateFormats.push({ value: dateFormat, label: dateFormat });
 	}
 	const { label: labelCol, amount: amountCol, date: dateCol } = roles;
+	const receiving = (accounts.data ?? []).filter((a) => a.receivesOperations);
+	const accountId = accountChoice ?? receiving[0]?.id ?? null;
 	const complete =
 		name.trim() !== "" &&
+		accountId !== null &&
 		labelCol !== null &&
 		amountCol !== null &&
 		dateCol !== null;
@@ -172,13 +180,20 @@ export function ImportProfileForm({
 	}
 
 	async function handleSave() {
-		if (labelCol === null || amountCol === null || dateCol === null) return;
+		if (
+			accountId === null ||
+			labelCol === null ||
+			amountCol === null ||
+			dateCol === null
+		)
+			return;
 		setError(null);
 		try {
 			const saved = await save.mutateAsync({
 				...(profile ? { id: profile.id } : {}),
 				body: {
 					name: name.trim(),
+					accountId,
 					labelCol,
 					amountCol,
 					dateCol,
@@ -218,6 +233,22 @@ export function ImportProfileForm({
 				maxLength={100}
 				required
 			/>
+
+			{accounts.isSuccess && receiving.length === 0 ? (
+				<Alert color="gold" icon={<IconAlertCircle size={16} />}>
+					{t("importProfile.noAccount")}
+				</Alert>
+			) : (
+				<Select
+					label={t("importProfile.account")}
+					description={t("importProfile.accountHint")}
+					data={receiving.map((a) => ({ value: a.id, label: a.name }))}
+					value={accountId}
+					onChange={setAccountChoice}
+					allowDeselect={false}
+					required
+				/>
+			)}
 
 			<SimpleGrid cols={{ base: 1, sm: 2 }} spacing="sm">
 				<FileInput

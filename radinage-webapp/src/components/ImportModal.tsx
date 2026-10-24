@@ -23,7 +23,11 @@ import {
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ImportProfileForm } from "@/components/ImportProfileForm";
-import { useImportOperations, useImportProfiles } from "@/lib/hooks";
+import {
+	useAccounts,
+	useImportOperations,
+	useImportProfiles,
+} from "@/lib/hooks";
 import type { ImportProfileResponse, ImportResult } from "@/lib/types";
 import { headingFont } from "@/theme";
 
@@ -45,6 +49,7 @@ export function ImportModal({
 }) {
 	const { t } = useTranslation();
 	const profiles = useImportProfiles();
+	const accounts = useAccounts();
 	const importOperations = useImportOperations();
 
 	const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -64,6 +69,12 @@ export function ImportModal({
 	const list = profiles.data ?? [];
 	// The list comes most recently used first, so that is the default choice.
 	const selected = list.find((p) => p.id === selectedId) ?? list[0] ?? null;
+	const accountName = (id: string) =>
+		accounts.data?.find((a) => a.id === id)?.name;
+	const profileLabel = (profile: ImportProfileResponse) => {
+		const account = accountName(profile.accountId);
+		return account ? `${profile.name} · ${account}` : profile.name;
+	};
 
 	async function handleImport() {
 		if (!file || !selected) return;
@@ -142,7 +153,7 @@ export function ImportModal({
 					<Select
 						label={t("import.profile")}
 						data={[
-							...list.map((p) => ({ value: p.id, label: p.name })),
+							...list.map((p) => ({ value: p.id, label: profileLabel(p) })),
 							{ value: NEW_PROFILE, label: t("import.newProfile") },
 						]}
 						value={selected.id}

@@ -1,3 +1,4 @@
+pub mod account;
 pub mod budget;
 pub mod category;
 pub mod ignore_rule;
@@ -12,6 +13,7 @@ use crate::{
 use schemars::JsonSchema;
 use serde::Deserialize;
 
+pub use account::{AccountRepository, PgAccountRepository};
 pub use budget::{BudgetRepository, BudgetSortField, ListBudgetsParams, PgBudgetRepository};
 pub use category::{CategoryRepository, PgCategoryRepository};
 pub use ignore_rule::{IgnoreRuleRepository, PgIgnoreRuleRepository};
@@ -65,6 +67,8 @@ fn label_pattern_from_cols(pattern_type: &str, value: String) -> AppResult<Label
     }
 }
 
+#[cfg(test)]
+pub use account::MockAccountRepository;
 #[cfg(test)]
 pub use budget::MockBudgetRepository;
 #[cfg(test)]

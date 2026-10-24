@@ -10,6 +10,8 @@ export interface PaginatedResponse<T> {
 
 export interface OperationResponse {
 	id: string;
+	/** Account the operation was recorded or imported on. */
+	accountId: string;
 	amount: string;
 	date: string;
 	effectiveDate: string | null;
@@ -276,17 +278,43 @@ export interface ResetPasswordResponse {
 	resetLink: string;
 }
 
-/** Account balance read on `date`; operations accounted that day are included in `amount`. */
-export interface AccountBalance {
+export type AccountKind = "checking" | "savings";
+
+/** Balance read on `date`; operations accounted that day are included in `amount`. */
+export interface BalanceEntry {
+	id: string;
 	amount: string;
 	/** YYYY-MM-DD, today or earlier. */
 	date: string;
 }
 
+export type AccountBalance = Omit<BalanceEntry, "id">;
+
+/** A bank account; only an imported checking account holds operations. */
+export interface AccountResponse {
+	id: string;
+	name: string;
+	kind: AccountKind;
+	/** Whether its statements are imported; a checking account only. */
+	imported: boolean;
+	/** Whether operations can be imported on it: an imported checking account. */
+	receivesOperations: boolean;
+	/** Most recent balance read, null when none. */
+	balance: BalanceEntry | null;
+	/** Balance today: `balance`, plus the operations dated after it on an account receiving them. */
+	currentBalance: string | null;
+	createdAt: string;
+}
+
+export type AccountRequest = Pick<
+	AccountResponse,
+	"name" | "kind" | "imported"
+>;
+
 export interface ExportDataResponse {
 	version: number;
 	exportedAt: string;
-	balance?: AccountBalance | null;
+	accounts?: unknown[];
 	budgets: unknown[];
 	operations: unknown[];
 }
@@ -302,7 +330,10 @@ export interface ImportDataResponse {
 	skippedOperations: number;
 	importedImportProfiles: number;
 	skippedImportProfiles: number;
-	importedBalance: boolean;
+	importedAccounts: number;
+	skippedAccounts: number;
+	/** Balances of the accounts created, and the single balance of an older export. */
+	importedBalances: number;
 }
 
 /** Field separator of a CSV file; spreadsheets ignore it. */
@@ -312,6 +343,8 @@ export type CsvDelimiter = "comma" | "semicolon" | "tab" | "pipe";
 export interface ImportProfileResponse {
 	id: string;
 	name: string;
+	/** Account the profile imports operations on. */
+	accountId: string;
 	labelCol: number;
 	amountCol: number;
 	dateCol: number;

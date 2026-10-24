@@ -32,8 +32,8 @@ pub struct MonthlyOperationsQuery {
     pub include_ignored: bool,
 }
 
-pub async fn get_monthly_operations<U, O: OperationRepository, B, P, C, R>(
-    State(state): State<AppState<U, O, B, P, C, R>>,
+pub async fn get_monthly_operations<U, O: OperationRepository, B, P, C, R, A>(
+    State(state): State<AppState<U, O, B, P, C, R, A>>,
     auth_user: AuthUser,
     Path((year, month)): Path<(i32, u32)>,
     Query(q): Query<MonthlyOperationsQuery>,
@@ -87,6 +87,7 @@ mod tests {
         Operation {
             id,
             user_id,
+            account_id: Uuid::nil(),
             amount: Decimal::new(-50, 0),
             date,
             label: "Test op".to_string(),

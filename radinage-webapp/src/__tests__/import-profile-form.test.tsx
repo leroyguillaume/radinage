@@ -1,6 +1,12 @@
 import { MantineProvider } from "@mantine/core";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import {
+	fireEvent,
+	render,
+	screen,
+	waitFor,
+	within,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { selectMantineOption } from "@/__tests__/mantine";
@@ -10,7 +16,7 @@ import {
 	ImportProfileForm,
 } from "@/components/ImportProfileForm";
 import { i18n } from "@/i18n";
-import type { ImportProfileResponse } from "@/lib/types";
+import type { AccountResponse, ImportProfileResponse } from "@/lib/types";
 import { theme } from "@/theme";
 
 vi.mock("@/lib/api", () => ({
@@ -31,6 +37,7 @@ const apiFetchMock = vi.mocked(apiFetch);
 const existing: ImportProfileResponse = {
 	id: "p1",
 	name: "Crédit Agricole",
+	accountId: "account-1",
 	labelCol: 1,
 	amountCol: 3,
 	dateCol: 0,
@@ -47,12 +54,38 @@ const previewRows = [
 	["03/10/2026", "VIR SALAIRE", "48212", "2 450,00"],
 ];
 
-function renderForm(profile: ImportProfileResponse | null = null) {
+const account: AccountResponse = {
+	id: "account-1",
+	name: "Compte perso",
+	kind: "checking",
+	imported: true,
+	receivesOperations: true,
+	balance: null,
+	currentBalance: null,
+	createdAt: "2026-01-01T10:00:00Z",
+};
+
+const savings: AccountResponse = {
+	...account,
+	id: "account-2",
+	name: "Livret A",
+	kind: "savings",
+	imported: false,
+	receivesOperations: false,
+};
+
+function renderForm(
+	profile: ImportProfileResponse | null = null,
+	accounts: AccountResponse[] = [savings, account],
+) {
 	const onSaved = vi.fn();
 	const onDeleted = vi.fn();
 	const queryClient = new QueryClient({
-		defaultOptions: { queries: { retry: false } },
+		defaultOptions: {
+			queries: { retry: false, staleTime: Number.POSITIVE_INFINITY },
+		},
 	});
+	queryClient.setQueryData(["accounts"], accounts);
 
 	render(
 		<QueryClientProvider client={queryClient}>
@@ -124,6 +157,39 @@ describe("assignColumn", () => {
 });
 
 describe("ImportProfileForm", () => {
+	it("offers only the accounts receiving operations, the first one by default", async () => {
+		renderForm(null, [
+			savings,
+			account,
+			{ ...account, id: "account-3", name: "Compte joint" },
+		]);
+
+		const select = screen.getByRole("combobox", { name: /^Compte/ });
+		expect(select).toHaveValue("Compte perso");
+		fireEvent.focus(select);
+		fireEvent.click(select);
+		expect(
+			await screen.findByRole("option", { name: "Compte joint" }),
+		).toBeInTheDocument();
+		expect(
+			screen.queryByRole("option", { name: "Livret A" }),
+		).not.toBeInTheDocument();
+	});
+
+	it("asks for an account receiving operations before a profile can be saved", async () => {
+		renderForm(null, [savings]);
+		const user = userEvent.setup();
+
+		expect(
+			screen.getByText(/ajoute d'abord, dans les réglages, un compte courant/i),
+		).toBeInTheDocument();
+		await user.type(screen.getByLabelText(/Nom/), "Ma banque");
+		await selectMantineOption("Colonne du libellé", "B");
+		await selectMantineOption("Colonne du montant", "D");
+		await selectMantineOption("Colonne de la date", "A");
+		expect(screen.getByRole("button", { name: "Enregistrer" })).toBeDisabled();
+	});
+
 	it("creates a profile from columns picked by letter", async () => {
 		apiFetchMock.mockResolvedValue({ ...existing, id: "new" });
 		const { onSaved } = renderForm();
@@ -145,6 +211,7 @@ describe("ImportProfileForm", () => {
 			method: "POST",
 			body: {
 				name: "Ma banque",
+				accountId: "account-1",
 				labelCol: 1,
 				amountCol: 3,
 				dateCol: 0,

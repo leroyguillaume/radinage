@@ -2,21 +2,23 @@ use crate::{
     AppState,
     auth::middleware::AuthUser,
     domain::{
+        account::{Account, AccountBalance, AccountFields, AccountKind},
         budget::{Budget, BudgetFields, BudgetKind, BudgetType, LabelPattern, Rule},
         category::{Category, CategoryColor, CategoryFields, CategoryIcon, CategoryRule},
         ignore_rule::{IgnoreRule, IgnoreRuleFields},
         import_profile::{CsvDelimiter, ImportProfile, ImportProfileFields},
-        operation::{BudgetLink, NewOperationSplit, Operation, OperationSplit, validate_splits},
-        user::AccountBalance,
+        operation::{
+            BudgetLink, NewOperation, NewOperationSplit, Operation, OperationSplit, validate_splits,
+        },
     },
     error::{AppError, AppResult},
     handlers::{
-        categories::CategoryRequest, ignore_rules::IgnoreRuleRequest,
+        accounts::AccountRequest, categories::CategoryRequest, ignore_rules::IgnoreRuleRequest,
         import_profiles::ImportProfileRequest,
     },
     repositories::{
-        BudgetRepository, CategoryRepository, IgnoreRuleRepository, ImportProfileRepository,
-        OperationRepository, UserRepository,
+        AccountRepository, BudgetRepository, CategoryRepository, IgnoreRuleRepository,
+        ImportProfileRepository, OperationRepository,
     },
 };
 use axum::{Json, extract::State, http::StatusCode};
@@ -122,6 +124,10 @@ pub struct ExportOperation {
     pub label: String,
     pub budget_link: BudgetLink,
     pub ignored: bool,
+    /// Payload account the operation is on; absent from exports made before accounts existed,
+    /// the operation then going to the default account.
+    #[serde(default)]
+    pub account_id: Option<Uuid>,
     /// Ignore rule that ignored the operation; absent from exports made before ignore rules
     /// existed.
     #[serde(default)]
@@ -181,6 +187,7 @@ impl From<Operation> for ExportOperation {
             label: op.label,
             budget_link: op.budget_link,
             ignored: op.ignored,
+            account_id: Some(op.account_id),
             ignore_rule_id: op.ignore_rule_id,
             category_id: op.category_id,
             splits: op
@@ -192,7 +199,22 @@ impl From<Operation> for ExportOperation {
     }
 }
 
-/// The recorded account balance inside an export payload.
+/// An account inside an export payload (omits `userId`), with its balances.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ExportAccount {
+    /// Identifier the payload's operations and import profiles refer to it by.
+    pub id: Uuid,
+    pub name: String,
+    pub kind: AccountKind,
+    #[serde(default)]
+    pub imported: bool,
+    /// Balances read on the account, most recent first.
+    #[serde(default)]
+    pub balances: Vec<ExportAccountBalance>,
+}
+
+/// A balance read on an account, inside an export payload.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ExportAccountBalance {
@@ -225,6 +247,10 @@ impl From<ExportAccountBalance> for AccountBalance {
 #[serde(rename_all = "camelCase")]
 pub struct ExportImportProfile {
     pub name: String,
+    /// Payload account the profile imports on; absent from exports made before accounts
+    /// existed, the profile then importing on the default account.
+    #[serde(default)]
+    pub account_id: Option<Uuid>,
     pub label_col: usize,
     pub amount_col: usize,
     pub date_col: usize,
@@ -239,6 +265,7 @@ impl From<ImportProfile> for ExportImportProfile {
     fn from(p: ImportProfile) -> Self {
         Self {
             name: p.fields.name,
+            account_id: Some(p.fields.account_id),
             label_col: p.fields.label_col,
             amount_col: p.fields.amount_col,
             date_col: p.fields.date_col,
@@ -249,10 +276,13 @@ impl From<ImportProfile> for ExportImportProfile {
     }
 }
 
+/// The request a payload profile is validated as, before its account is known: the account
+/// is set once the payload accounts are imported.
 impl From<ExportImportProfile> for ImportProfileRequest {
     fn from(p: ExportImportProfile) -> Self {
         Self {
             name: p.name,
+            account_id: Uuid::nil(),
             label_col: p.label_col,
             amount_col: p.amount_col,
             date_col: p.date_col,
@@ -271,8 +301,7 @@ pub struct ExportResponse {
     pub version: u32,
     /// UTC timestamp at which the export was generated.
     pub exported_at: DateTime<Utc>,
-    /// Recorded account balance, null when none is recorded.
-    pub balance: Option<ExportAccountBalance>,
+    pub accounts: Vec<ExportAccount>,
     pub categories: Vec<ExportCategory>,
     pub budgets: Vec<ExportBudget>,
     pub ignore_rules: Vec<ExportIgnoreRule>,
@@ -286,8 +315,11 @@ pub struct ExportResponse {
 pub struct ImportDataRequest {
     /// Must match the supported export version.
     pub version: u32,
-    /// Account balance to record when the account has none; absent from exports made before
-    /// balances existed.
+    /// Absent from exports made before accounts existed.
+    #[serde(default)]
+    pub accounts: Vec<ExportAccount>,
+    /// The single balance of exports made before accounts existed, recorded on the default
+    /// account when it has none.
     #[serde(default)]
     pub balance: Option<ExportAccountBalance>,
     /// Absent from exports made before categories existed.
@@ -324,26 +356,44 @@ pub struct ImportDataResponse {
     pub imported_import_profiles: usize,
     /// Profiles skipped because the account already has one by that name.
     pub skipped_import_profiles: usize,
-    /// Whether the payload's balance was recorded: false when it carries none or the account
-    /// already has one, which is kept.
-    pub imported_balance: bool,
+    pub imported_accounts: usize,
+    /// Accounts skipped because the user already has one by that name, which is used instead
+    /// and keeps its own balances.
+    pub skipped_accounts: usize,
+    /// Balances recorded: those of the accounts created, and the single balance of an older
+    /// export when the default account had none.
+    pub imported_balances: usize,
 }
 
 // ── Handlers ─────────────────────────────────────────────────────────────────
 
 pub async fn export_data<
-    U: UserRepository,
+    U,
     O: OperationRepository,
     B: BudgetRepository,
     P: ImportProfileRepository,
     C: CategoryRepository,
     R: IgnoreRuleRepository,
+    A: AccountRepository,
 >(
-    State(state): State<AppState<U, O, B, P, C, R>>,
+    State(state): State<AppState<U, O, B, P, C, R, A>>,
     auth_user: AuthUser,
 ) -> AppResult<Json<ExportResponse>> {
     let user_id = auth_user.id;
-    let balance = state.user_repo.find_balance(user_id).await?;
+    let mut accounts = Vec::new();
+    for account in state.account_repo.list(user_id).await? {
+        let balances = state
+            .account_repo
+            .list_balances(account.id, user_id)
+            .await?;
+        accounts.push(ExportAccount {
+            id: account.id,
+            name: account.fields.name,
+            kind: account.fields.kind,
+            imported: account.fields.imported,
+            balances: balances.into_iter().map(|e| e.balance.into()).collect(),
+        });
+    }
     let categories = state.category_repo.list(user_id).await?;
     let budgets = state.budget_repo.list_all_for_user(user_id).await?;
     let operations = state.operation_repo.list_all_for_user(user_id).await?;
@@ -353,7 +403,7 @@ pub async fn export_data<
     Ok(Json(ExportResponse {
         version: EXPORT_VERSION,
         exported_at: Utc::now(),
-        balance: balance.map(Into::into),
+        accounts,
         categories: categories.into_iter().map(ExportCategory::from).collect(),
         budgets: budgets.into_iter().map(ExportBudget::from).collect(),
         ignore_rules: ignore_rules
@@ -369,14 +419,15 @@ pub async fn export_data<
 }
 
 pub async fn import_data<
-    U: UserRepository,
+    U,
     O: OperationRepository,
     B: BudgetRepository,
     P: ImportProfileRepository,
     C: CategoryRepository,
     R: IgnoreRuleRepository,
+    A: AccountRepository,
 >(
-    State(state): State<AppState<U, O, B, P, C, R>>,
+    State(state): State<AppState<U, O, B, P, C, R, A>>,
     auth_user: AuthUser,
     Json(body): Json<ImportDataRequest>,
 ) -> AppResult<(StatusCode, Json<ImportDataResponse>)> {
@@ -398,8 +449,27 @@ pub async fn import_data<
         .into_iter()
         .map(|p| {
             let name = p.name.clone();
+            let account_id = p.account_id;
             ImportProfileFields::try_from(ImportProfileRequest::from(p))
+                .map(|fields| (account_id, fields))
                 .map_err(|e| AppError::BadRequest(format!("import profile '{name}': {e}")))
+        })
+        .collect::<AppResult<Vec<_>>>()?;
+    let accounts = body
+        .accounts
+        .iter()
+        .map(|a| {
+            let request = AccountRequest {
+                name: a.name.clone(),
+                kind: a.kind,
+                imported: a.imported,
+            };
+            AccountFields::try_from(request)
+                .map(|fields| {
+                    let balances = a.balances.iter().copied().map(Into::into).collect();
+                    (a.id, fields, balances)
+                })
+                .map_err(|e| AppError::BadRequest(format!("account '{}': {e}", a.name)))
         })
         .collect::<AppResult<Vec<_>>>()?;
     let categories = body
@@ -434,6 +504,23 @@ pub async fn import_data<
 
     let user_id = auth_user.id;
 
+    let targets: Vec<Option<Uuid>> = body
+        .operations
+        .iter()
+        .map(|op| op.account_id)
+        .chain(profiles.iter().map(|(account_id, _)| *account_id))
+        .collect();
+    let legacy_balance = body.balance.map(Into::into);
+    let account_plan = check_accounts(
+        &state.account_repo,
+        user_id,
+        &accounts,
+        &targets,
+        legacy_balance,
+        state.config.max_accounts_per_user,
+    )
+    .await?;
+
     let (ignore_rule_id_map, imported_ignore_rules) = import_ignore_rules(
         &state.ignore_rule_repo,
         user_id,
@@ -450,6 +537,14 @@ pub async fn import_data<
     )
     .await?;
     let remap_category = |id: Option<Uuid>| id.and_then(|id| category_id_map.get(&id).copied());
+    let imported = import_accounts(
+        &state.account_repo,
+        user_id,
+        &accounts,
+        account_plan,
+        legacy_balance,
+    )
+    .await?;
 
     // Merge budgets by label: keep existing, create missing. Track id mapping
     // so that operations can re-point their budget links to the correct budget.
@@ -480,13 +575,15 @@ pub async fn import_data<
         imported_budgets += 1;
     }
 
-    // Merge operations by (date, amount, label): skip if a matching row already exists.
+    // Merge operations by account, date, amount and label: skip if a matching row already
+    // exists.
     let mut imported_operations = 0usize;
     let mut skipped_operations = 0usize;
     for op in &body.operations {
+        let account_id = imported.account_for(op.account_id)?;
         let exists = state
             .operation_repo
-            .exists_by_fields(user_id, op.amount, op.date, &op.label)
+            .exists_by_fields(user_id, account_id, op.amount, op.date, &op.label)
             .await?;
         if exists {
             skipped_operations += 1;
@@ -499,10 +596,13 @@ pub async fn import_data<
             .insert(
                 new_id,
                 user_id,
-                op.amount,
-                op.date,
-                op.effective_date,
-                &op.label,
+                &NewOperation {
+                    account_id,
+                    amount: op.amount,
+                    date: op.date,
+                    effective_date: op.effective_date,
+                    label: op.label.clone(),
+                },
             )
             .await?;
 
@@ -570,16 +670,17 @@ pub async fn import_data<
         imported_operations += 1;
     }
 
+    let profiles = profiles
+        .into_iter()
+        .map(|(account_id, fields)| {
+            Ok(ImportProfileFields {
+                account_id: imported.account_for(account_id)?,
+                ..fields
+            })
+        })
+        .collect::<AppResult<Vec<_>>>()?;
     let (imported_import_profiles, skipped_import_profiles) =
         import_profiles(&state.import_profile_repo, user_id, &profiles).await?;
-
-    let imported_balance = match body.balance {
-        Some(balance) if state.user_repo.find_balance(user_id).await?.is_none() => {
-            state.user_repo.set_balance(user_id, balance.into()).await?;
-            true
-        }
-        _ => false,
-    };
 
     Ok((
         StatusCode::OK,
@@ -594,9 +695,173 @@ pub async fn import_data<
             skipped_operations,
             imported_import_profiles,
             skipped_import_profiles,
-            imported_balance,
+            imported_accounts: imported.created,
+            skipped_accounts: imported.skipped,
+            imported_balances: imported.balances,
         }),
     ))
+}
+
+/// Name of the account created to hold what an older export, made before accounts existed,
+/// carries, the same the accounts migration gives the account it creates.
+const DEFAULT_ACCOUNT_NAME: &str = "Default";
+
+/// The payload's accounts once imported.
+struct ImportedAccounts {
+    /// The user's account each payload account maps to.
+    ids: HashMap<Uuid, Uuid>,
+    /// Account taking what names no payload account; `None` when nothing does.
+    default: Option<Uuid>,
+    /// Accounts created, the default one included.
+    created: usize,
+    /// Payload accounts mapped to an account the user already had.
+    skipped: usize,
+    balances: usize,
+}
+
+impl ImportedAccounts {
+    /// The user's account an operation or profile naming the payload account `id` goes to.
+    fn account_for(&self, id: Option<Uuid>) -> AppResult<Uuid> {
+        id.and_then(|id| self.ids.get(&id).copied())
+            .or(self.default)
+            .ok_or_else(|| AppError::Internal("no account resolved for an import".to_string()))
+    }
+}
+
+/// What importing the payload's accounts takes, checked before anything is written.
+struct AccountPlan {
+    /// The user's accounts before the import.
+    existing: Vec<Account>,
+    /// Whether a target names no payload account, or an older export's balance is given.
+    needs_default: bool,
+}
+
+/// Check, writing nothing, that every payload account a target names receives operations, the
+/// user's account by that name deciding when there is one (`BadRequest`), and that the
+/// accounts to create fit within `max` (`Conflict`).
+async fn check_accounts(
+    repo: &impl AccountRepository,
+    user_id: Uuid,
+    incoming: &[(Uuid, AccountFields, Vec<AccountBalance>)],
+    targets: &[Option<Uuid>],
+    legacy_balance: Option<AccountBalance>,
+    max: u32,
+) -> AppResult<AccountPlan> {
+    let existing = repo.list(user_id).await?;
+    let existing_named = |name: &str| existing.iter().find(|a| a.fields.name == name);
+
+    let mut needs_default = legacy_balance.is_some();
+    for target in targets {
+        let named = target.and_then(|id| incoming.iter().find(|(i, _, _)| *i == id));
+        match named {
+            None => needs_default = true,
+            Some((_, fields, _)) => {
+                let receives = existing_named(&fields.name).map_or_else(
+                    || fields.receives_operations(),
+                    |a| a.fields.receives_operations(),
+                );
+                if !receives {
+                    return Err(AppError::BadRequest(format!(
+                        "account '{}' does not receive operations",
+                        fields.name
+                    )));
+                }
+            }
+        }
+    }
+    let default_existing = existing.iter().find(|a| a.fields.receives_operations());
+
+    let mut new_names: Vec<&str> = incoming
+        .iter()
+        .map(|(_, fields, _)| fields.name.as_str())
+        .filter(|name| existing_named(name).is_none())
+        .collect();
+    if needs_default && default_existing.is_none() {
+        new_names.push(DEFAULT_ACCOUNT_NAME);
+    }
+    new_names.sort_unstable();
+    new_names.dedup();
+    if existing.len() + new_names.len() > max as usize {
+        return Err(AppError::Conflict(format!(
+            "importing {} new accounts would exceed the account limit ({max})",
+            new_names.len()
+        )));
+    }
+    Ok(AccountPlan {
+        existing,
+        needs_default,
+    })
+}
+
+/// Map each payload account to the user's account by that name, creating the missing ones with
+/// their balances. When the plan needs it, also resolve the default account: the user's first
+/// account receiving operations, else a new imported checking account, which gets
+/// `legacy_balance` when it has no balance.
+async fn import_accounts(
+    repo: &impl AccountRepository,
+    user_id: Uuid,
+    incoming: &[(Uuid, AccountFields, Vec<AccountBalance>)],
+    plan: AccountPlan,
+    legacy_balance: Option<AccountBalance>,
+) -> AppResult<ImportedAccounts> {
+    let AccountPlan {
+        existing,
+        needs_default,
+    } = plan;
+    let default_existing = existing.iter().find(|a| a.fields.receives_operations());
+    let mut by_name: HashMap<String, Uuid> = existing
+        .iter()
+        .map(|a| (a.fields.name.clone(), a.id))
+        .collect();
+    let mut imported = ImportedAccounts {
+        ids: HashMap::new(),
+        default: None,
+        created: 0,
+        skipped: 0,
+        balances: 0,
+    };
+    for (incoming_id, fields, balances) in incoming {
+        let id = match by_name.get(&fields.name) {
+            Some(id) => {
+                imported.skipped += 1;
+                *id
+            }
+            None => {
+                let created = repo.create(user_id, fields).await?;
+                for balance in balances {
+                    repo.add_balance(created.id, user_id, *balance).await?;
+                    imported.balances += 1;
+                }
+                by_name.insert(created.fields.name, created.id);
+                imported.created += 1;
+                created.id
+            }
+        };
+        imported.ids.insert(*incoming_id, id);
+    }
+
+    if needs_default {
+        let (id, has_balance) = match default_existing {
+            Some(account) => (account.id, account.balance.is_some()),
+            None => {
+                let fields = AccountFields {
+                    name: DEFAULT_ACCOUNT_NAME.to_string(),
+                    kind: AccountKind::Checking,
+                    imported: true,
+                };
+                imported.created += 1;
+                (repo.create(user_id, &fields).await?.id, false)
+            }
+        };
+        if let Some(balance) = legacy_balance
+            && !has_balance
+        {
+            repo.add_balance(id, user_id, balance).await?;
+            imported.balances += 1;
+        }
+        imported.default = Some(id);
+    }
+    Ok(imported)
 }
 
 /// Create the payload's categories the account has no category by that name for, and map each
@@ -729,17 +994,20 @@ mod tests {
     use super::*;
     use crate::{
         domain::{
+            account::{Account, BalanceEntry},
             budget::{Budget, BudgetKind, BudgetType, CurrentPeriod, Recurrence, YearMonth},
             user::UserRole,
         },
         repositories::{
-            MockBudgetRepository, MockCategoryRepository, MockIgnoreRuleRepository,
-            MockImportProfileRepository, MockOperationRepository, MockUserRepository,
+            MockAccountRepository, MockBudgetRepository, MockCategoryRepository,
+            MockIgnoreRuleRepository, MockImportProfileRepository, MockOperationRepository,
+            MockUserRepository,
         },
         test_util::{
-            auth_header, build_test_router, json_request, make_test_state,
-            make_test_state_with_categories, make_test_state_with_ignore_rules,
-            make_test_state_with_profiles, response_json,
+            auth_header, build_test_router, json_request, main_account, make_test_state,
+            make_test_state_with_all, make_test_state_with_categories,
+            make_test_state_with_ignore_rules, make_test_state_with_profiles, no_categories,
+            no_ignore_rules, no_import_profiles, response_json,
         },
     };
     use axum::Router;
@@ -782,6 +1050,7 @@ mod tests {
         Operation {
             id: Uuid::new_v4(),
             user_id,
+            account_id: Uuid::nil(),
             amount: Decimal::new(-1234, 2),
             date: NaiveDate::from_ymd_opt(2024, 3, 15).unwrap(),
             effective_date: None,
@@ -820,7 +1089,7 @@ mod tests {
             });
 
         let app = build_test_router(make_test_state(
-            users_with_balance(None),
+            MockUserRepository::new(),
             op_repo,
             budget_repo,
         ));
@@ -905,7 +1174,7 @@ mod tests {
         op_repo
             .expect_exists_by_fields()
             .times(0)
-            .returning(|_, _, _, _| Box::pin(async { Ok(false) }));
+            .returning(|_, _, _, _, _| Box::pin(async { Ok(false) }));
 
         let app = build_test_router(make_test_state(
             MockUserRepository::new(),
@@ -952,7 +1221,7 @@ mod tests {
         assert_eq!(json.skipped_budgets, 1);
         assert_eq!(json.imported_operations, 0);
         assert_eq!(json.skipped_operations, 0);
-        assert!(!json.imported_balance);
+        assert_eq!(json.imported_balances, 0);
     }
 
     #[tokio::test]
@@ -977,11 +1246,11 @@ mod tests {
         op_repo
             .expect_exists_by_fields()
             .times(1)
-            .returning(|_, _, _, _| Box::pin(async { Ok(false) }));
+            .returning(|_, _, _, _, _| Box::pin(async { Ok(false) }));
         op_repo
             .expect_insert()
             .times(1)
-            .returning(|_, _, _, _, _, _| Box::pin(async { Ok(()) }));
+            .returning(|_, _, _| Box::pin(async { Ok(()) }));
         // Link must be re-pointed to the existing budget id.
         op_repo
             .expect_set_budget_link()
@@ -1056,7 +1325,7 @@ mod tests {
         op_repo
             .expect_exists_by_fields()
             .times(2)
-            .returning(move |_, _, _, _| {
+            .returning(move |_, _, _, _, _| {
                 call += 1;
                 let dup = call == 1;
                 Box::pin(async move { Ok(dup) })
@@ -1064,7 +1333,7 @@ mod tests {
         op_repo
             .expect_insert()
             .times(1)
-            .returning(|_, _, _, _, _, _| Box::pin(async { Ok(()) }));
+            .returning(|_, _, _| Box::pin(async { Ok(()) }));
         // ignored=true → set_ignored should be called once.
         op_repo
             .expect_set_ignored()
@@ -1136,12 +1405,8 @@ mod tests {
         budget_repo
             .expect_list_all_for_user()
             .returning(|_| Box::pin(async { Ok(vec![]) }));
-        let mut user_repo = MockUserRepository::new();
-        user_repo
-            .expect_find_balance()
-            .returning(|_| Box::pin(async { Ok(None) }));
         build_test_router(make_test_state_with_ignore_rules(
-            user_repo,
+            MockUserRepository::new(),
             op_repo,
             budget_repo,
             rule_repo,
@@ -1211,10 +1476,10 @@ mod tests {
         let mut op_repo = MockOperationRepository::new();
         op_repo
             .expect_exists_by_fields()
-            .returning(|_, _, _, _| Box::pin(async { Ok(false) }));
+            .returning(|_, _, _, _, _| Box::pin(async { Ok(false) }));
         op_repo
             .expect_insert()
-            .returning(|_, _, _, _, _, _| Box::pin(async { Ok(()) }));
+            .returning(|_, _, _| Box::pin(async { Ok(()) }));
         op_repo
             .expect_ignore_by_rule()
             .withf(move |_, rule_id| *rule_id == existing_id || *rule_id == created_id)
@@ -1312,11 +1577,11 @@ mod tests {
         op_repo
             .expect_exists_by_fields()
             .times(1)
-            .returning(|_, _, _, _| Box::pin(async { Ok(false) }));
+            .returning(|_, _, _, _, _| Box::pin(async { Ok(false) }));
         op_repo
             .expect_insert()
             .times(1)
-            .returning(|_, _, _, _, _, _| Box::pin(async { Ok(()) }));
+            .returning(|_, _, _| Box::pin(async { Ok(()) }));
         // No set_budget_link call because the referenced budget is not in the payload.
         op_repo.expect_set_budget_link().times(0);
 
@@ -1394,7 +1659,7 @@ mod tests {
         });
 
         let app = build_test_router(make_test_state(
-            users_with_balance(None),
+            MockUserRepository::new(),
             op_repo,
             budget_repo,
         ));
@@ -1435,11 +1700,11 @@ mod tests {
         op_repo
             .expect_exists_by_fields()
             .once()
-            .returning(|_, _, _, _| Box::pin(async { Ok(false) }));
+            .returning(|_, _, _, _, _| Box::pin(async { Ok(false) }));
         op_repo
             .expect_insert()
             .once()
-            .returning(|_, _, _, _, _, _| Box::pin(async { Ok(()) }));
+            .returning(|_, _, _| Box::pin(async { Ok(()) }));
         op_repo
             .expect_replace_splits()
             .withf(move |_, uid, splits| {
@@ -1613,7 +1878,7 @@ mod tests {
         let export = ExportResponse {
             version: EXPORT_VERSION,
             exported_at: Utc::now(),
-            balance: None,
+            accounts: vec![],
             categories: vec![],
             budgets: vec![ExportBudget::from(budget)],
             ignore_rules: vec![],
@@ -1638,14 +1903,6 @@ mod tests {
         assert_eq!(json.imported_budgets, 1);
     }
 
-    fn users_with_balance(balance: Option<AccountBalance>) -> MockUserRepository {
-        let mut user_repo = MockUserRepository::new();
-        user_repo
-            .expect_find_balance()
-            .returning(move |_| Box::pin(async move { Ok(balance) }));
-        user_repo
-    }
-
     fn sample_balance() -> AccountBalance {
         AccountBalance {
             amount: Decimal::new(152340, 2),
@@ -1665,34 +1922,80 @@ mod tests {
         (op_repo, budget_repo)
     }
 
-    async fn import_balance_payload(user_repo: MockUserRepository) -> ImportDataResponse {
-        let (op_repo, budget_repo) = empty_repos();
-        let app = build_test_router(make_test_state(user_repo, op_repo, budget_repo));
+    fn data_app(op_repo: MockOperationRepository, account_repo: MockAccountRepository) -> Router {
+        let mut budget_repo = MockBudgetRepository::new();
+        budget_repo
+            .expect_list_all_for_user()
+            .returning(|_| Box::pin(async { Ok(vec![]) }));
+        build_test_router(make_test_state_with_all(
+            MockUserRepository::new(),
+            op_repo,
+            budget_repo,
+            no_import_profiles(),
+            no_categories(),
+            no_ignore_rules(),
+            account_repo,
+        ))
+    }
+
+    async fn import_payload(app: Router, body: &str) -> axum::response::Response {
         let auth = auth_header(Uuid::new_v4(), UserRole::User);
-        let body = r#"{"version":1,"balance":{"amount":"1523.40","date":"2026-03-31"},
-                       "budgets":[],"operations":[]}"#;
-        let resp = app
-            .oneshot(json_request(
-                "POST",
-                "/data/import",
-                Some(body),
-                Some(&auth),
-            ))
-            .await
-            .unwrap();
-        assert_eq!(resp.status(), StatusCode::OK);
-        response_json(resp).await
+        app.oneshot(json_request(
+            "POST",
+            "/data/import",
+            Some(body),
+            Some(&auth),
+        ))
+        .await
+        .unwrap()
+    }
+
+    /// An account repository listing `accounts`.
+    fn accounts_listing(accounts: Vec<Account>) -> MockAccountRepository {
+        let mut repo = MockAccountRepository::new();
+        repo.expect_list().returning(move |_| {
+            let accounts = accounts.clone();
+            Box::pin(async move { Ok(accounts) })
+        });
+        repo
+    }
+
+    /// The account a mocked `create` returns for `fields`.
+    fn created_account(user_id: Uuid, fields: &AccountFields) -> Account {
+        Account {
+            fields: fields.clone(),
+            ..main_account(Uuid::new_v4(), user_id)
+        }
     }
 
     #[tokio::test]
-    async fn export_includes_the_recorded_balance() {
+    async fn export_includes_every_account_with_its_balances() {
+        let user_id = Uuid::new_v4();
+        let account = main_account(Uuid::new_v4(), user_id);
+        let account_id = account.id;
+        let mut account_repo = accounts_listing(vec![account]);
+        account_repo
+            .expect_list_balances()
+            .withf(move |id, uid| *id == account_id && *uid == user_id)
+            .returning(|_, _| {
+                Box::pin(async {
+                    Ok(vec![BalanceEntry {
+                        id: Uuid::new_v4(),
+                        balance: sample_balance(),
+                    }])
+                })
+            });
         let (op_repo, budget_repo) = empty_repos();
-        let app = build_test_router(make_test_state(
-            users_with_balance(Some(sample_balance())),
+        let app = build_test_router(make_test_state_with_all(
+            MockUserRepository::new(),
             op_repo,
             budget_repo,
+            no_import_profiles(),
+            no_categories(),
+            no_ignore_rules(),
+            account_repo,
         ));
-        let auth = auth_header(Uuid::new_v4(), UserRole::User);
+        let auth = auth_header(user_id, UserRole::User);
         let resp = app
             .oneshot(json_request("GET", "/data/export", None, Some(&auth)))
             .await
@@ -1701,57 +2004,181 @@ mod tests {
         assert_eq!(resp.status(), StatusCode::OK);
         let json: serde_json::Value = response_json(resp).await;
         assert_eq!(
-            json["balance"],
-            serde_json::json!({"amount": "1523.40", "date": "2026-03-31"})
+            json["accounts"],
+            serde_json::json!([{
+                "id": account_id,
+                "name": "Main",
+                "kind": "checking",
+                "imported": true,
+                "balances": [{"amount": "1523.40", "date": "2026-03-31"}]
+            }])
         );
+        assert!(json.get("balance").is_none());
     }
 
     #[tokio::test]
-    async fn export_without_balance_has_a_null_balance() {
-        let (op_repo, budget_repo) = empty_repos();
-        let app = build_test_router(make_test_state(
-            users_with_balance(None),
-            op_repo,
-            budget_repo,
-        ));
-        let auth = auth_header(Uuid::new_v4(), UserRole::User);
-        let resp = app
-            .oneshot(json_request("GET", "/data/export", None, Some(&auth)))
-            .await
-            .unwrap();
-
-        let json: serde_json::Value = response_json(resp).await;
-        assert!(json["balance"].is_null());
-    }
-
-    #[tokio::test]
-    async fn import_records_the_balance_when_the_account_has_none() {
-        let mut user_repo = users_with_balance(None);
-        user_repo
-            .expect_set_balance()
-            .withf(|_, balance| *balance == sample_balance())
+    async fn an_older_export_lands_on_a_new_default_account_with_its_balance() {
+        let mut account_repo = accounts_listing(vec![]);
+        account_repo
+            .expect_create()
+            .withf(|_, f| f.name == DEFAULT_ACCOUNT_NAME && f.receives_operations())
             .once()
-            .returning(|_, _| Box::pin(async { Ok(()) }));
+            .returning(|uid, f| {
+                let created = created_account(uid, f);
+                Box::pin(async move { Ok(created) })
+            });
+        account_repo
+            .expect_add_balance()
+            .withf(|_, _, balance| *balance == sample_balance())
+            .once()
+            .returning(|_, _, balance| {
+                Box::pin(async move {
+                    Ok(Some(BalanceEntry {
+                        id: Uuid::new_v4(),
+                        balance,
+                    }))
+                })
+            });
+        let mut op_repo = MockOperationRepository::new();
+        op_repo
+            .expect_exists_by_fields()
+            .returning(|_, _, _, _, _| Box::pin(async { Ok(false) }));
+        op_repo
+            .expect_insert()
+            .once()
+            .returning(|_, _, _| Box::pin(async { Ok(()) }));
+        let body = r#"{"version":1,"balance":{"amount":"1523.40","date":"2026-03-31"},
+            "operations":[{"id":"33333333-3333-3333-3333-333333333333","amount":"-12",
+                           "date":"2026-04-02","effectiveDate":null,"label":"Bakery",
+                           "budgetLink":{"type":"unlinked"},"ignored":false}]}"#;
 
-        let json = import_balance_payload(user_repo).await;
-        assert!(json.imported_balance);
+        let resp = import_payload(data_app(op_repo, account_repo), body).await;
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        let json: ImportDataResponse = response_json(resp).await;
+        assert_eq!(json.imported_accounts, 1);
+        assert_eq!(json.imported_balances, 1);
+        assert_eq!(json.imported_operations, 1);
     }
 
     #[tokio::test]
-    async fn import_keeps_an_existing_balance() {
-        let mut user_repo = users_with_balance(Some(AccountBalance {
-            amount: Decimal::ONE,
-            date: NaiveDate::from_ymd_opt(2026, 5, 1).unwrap(),
-        }));
-        user_repo.expect_set_balance().never();
+    async fn an_older_export_keeps_the_balance_of_an_existing_account() {
+        let user_id = Uuid::new_v4();
+        let existing = Account {
+            balance: Some(BalanceEntry {
+                id: Uuid::new_v4(),
+                balance: sample_balance(),
+            }),
+            ..main_account(Uuid::new_v4(), user_id)
+        };
+        let mut account_repo = accounts_listing(vec![existing]);
+        account_repo.expect_create().never();
+        account_repo.expect_add_balance().never();
+        let body = r#"{"version":1,"balance":{"amount":"1","date":"2026-05-01"}}"#;
 
-        let json = import_balance_payload(user_repo).await;
-        assert!(!json.imported_balance);
+        let resp =
+            import_payload(data_app(MockOperationRepository::new(), account_repo), body).await;
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        let json: ImportDataResponse = response_json(resp).await;
+        assert_eq!(json.imported_accounts, 0);
+        assert_eq!(json.imported_balances, 0);
+    }
+
+    #[tokio::test]
+    async fn import_creates_the_missing_accounts_and_puts_operations_on_them() {
+        let user_id = Uuid::new_v4();
+        let existing = Account {
+            fields: AccountFields {
+                name: "Joint".to_string(),
+                ..main_account(Uuid::nil(), user_id).fields
+            },
+            ..main_account(Uuid::new_v4(), user_id)
+        };
+        let existing_id = existing.id;
+        let created_id = Uuid::new_v4();
+        let mut account_repo = accounts_listing(vec![existing]);
+        account_repo
+            .expect_create()
+            .withf(|_, f| f.name == "Perso")
+            .once()
+            .returning(move |uid, f| {
+                let created = Account {
+                    id: created_id,
+                    ..created_account(uid, f)
+                };
+                Box::pin(async move { Ok(created) })
+            });
+        account_repo
+            .expect_add_balance()
+            .withf(move |id, _, _| *id == created_id)
+            .once()
+            .returning(|_, _, balance| {
+                Box::pin(async move {
+                    Ok(Some(BalanceEntry {
+                        id: Uuid::new_v4(),
+                        balance,
+                    }))
+                })
+            });
+        let mut op_repo = MockOperationRepository::new();
+        op_repo
+            .expect_exists_by_fields()
+            .returning(|_, _, _, _, _| Box::pin(async { Ok(false) }));
+        op_repo
+            .expect_insert()
+            .withf(move |_, _, op| {
+                (op.label == "On perso" && op.account_id == created_id)
+                    || (op.label == "On joint" && op.account_id == existing_id)
+            })
+            .times(2)
+            .returning(|_, _, _| Box::pin(async { Ok(()) }));
+        let body = r#"{"version":1,
+            "accounts":[
+                {"id":"11111111-1111-1111-1111-111111111111","name":"Perso","kind":"checking",
+                 "imported":true,"balances":[{"amount":"10","date":"2026-01-31"}]},
+                {"id":"22222222-2222-2222-2222-222222222222","name":"Joint","kind":"checking",
+                 "imported":true,"balances":[{"amount":"99","date":"2026-01-31"}]}],
+            "operations":[
+                {"id":"33333333-3333-3333-3333-333333333333","amount":"-1","date":"2026-02-01",
+                 "effectiveDate":null,"label":"On perso","budgetLink":{"type":"unlinked"},
+                 "ignored":false,"accountId":"11111111-1111-1111-1111-111111111111"},
+                {"id":"44444444-4444-4444-4444-444444444444","amount":"-2","date":"2026-02-01",
+                 "effectiveDate":null,"label":"On joint","budgetLink":{"type":"unlinked"},
+                 "ignored":false,"accountId":"22222222-2222-2222-2222-222222222222"}]}"#;
+
+        let resp = import_payload(data_app(op_repo, account_repo), body).await;
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        let json: ImportDataResponse = response_json(resp).await;
+        assert_eq!(json.imported_accounts, 1);
+        assert_eq!(json.skipped_accounts, 1);
+        assert_eq!(json.imported_balances, 1);
+        assert_eq!(json.imported_operations, 2);
+    }
+
+    #[tokio::test]
+    async fn import_refuses_operations_on_an_account_not_receiving_them() {
+        let mut account_repo = accounts_listing(vec![]);
+        account_repo.expect_create().never();
+        let body = r#"{"version":1,
+            "accounts":[{"id":"11111111-1111-1111-1111-111111111111","name":"Livret A",
+                         "kind":"savings"}],
+            "operations":[
+                {"id":"33333333-3333-3333-3333-333333333333","amount":"-1","date":"2026-02-01",
+                 "effectiveDate":null,"label":"Op","budgetLink":{"type":"unlinked"},
+                 "ignored":false,"accountId":"11111111-1111-1111-1111-111111111111"}]}"#;
+
+        let resp =
+            import_payload(data_app(MockOperationRepository::new(), account_repo), body).await;
+
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
     }
 
     fn profile_fields(name: &str) -> ImportProfileFields {
         ImportProfileFields {
             name: name.to_string(),
+            account_id: Uuid::nil(),
             label_col: 1,
             amount_col: 3,
             date_col: 0,
@@ -1774,6 +2201,7 @@ mod tests {
     fn profile_json(name: &str, date_col: usize) -> serde_json::Value {
         serde_json::json!({
             "name": name,
+            "accountId": Uuid::nil(),
             "labelCol": 1,
             "amountCol": 3,
             "dateCol": date_col,
@@ -1797,7 +2225,7 @@ mod tests {
     ) -> axum::response::Response {
         let (op_repo, budget_repo) = empty_repos();
         let app = build_test_router(make_test_state_with_profiles(
-            users_with_balance(None),
+            MockUserRepository::new(),
             op_repo,
             budget_repo,
             profile_repo,
@@ -1824,7 +2252,7 @@ mod tests {
         });
         let (op_repo, budget_repo) = empty_repos();
         let app = build_test_router(make_test_state_with_profiles(
-            users_with_balance(None),
+            MockUserRepository::new(),
             op_repo,
             budget_repo,
             profile_repo,
@@ -1945,13 +2373,8 @@ mod tests {
             let op = op.clone();
             Box::pin(async { Ok(vec![op]) })
         });
-        let mut user_repo = MockUserRepository::new();
-        user_repo
-            .expect_find_balance()
-            .returning(|_| Box::pin(async { Ok(None) }));
-
         let app = build_test_router(make_test_state_with_categories(
-            user_repo,
+            MockUserRepository::new(),
             op_repo,
             budget_repo,
             categories_listing(vec![category]),
@@ -2006,10 +2429,10 @@ mod tests {
         let mut op_repo = MockOperationRepository::new();
         op_repo
             .expect_exists_by_fields()
-            .returning(|_, _, _, _| Box::pin(async { Ok(false) }));
+            .returning(|_, _, _, _, _| Box::pin(async { Ok(false) }));
         op_repo
             .expect_insert()
-            .returning(|_, _, _, _, _, _| Box::pin(async { Ok(()) }));
+            .returning(|_, _, _| Box::pin(async { Ok(()) }));
         op_repo
             .expect_set_category()
             .withf(move |_, _, category_id| *category_id == Some(existing_id))

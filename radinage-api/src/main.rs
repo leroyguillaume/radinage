@@ -19,8 +19,8 @@ use axum::{Extension, Json, Router, response::Html, routing::get};
 use clap::Parser;
 use config::Config;
 use repositories::{
-    PgBudgetRepository, PgCategoryRepository, PgIgnoreRuleRepository, PgImportProfileRepository,
-    PgOperationRepository, PgUserRepository, UserRepository,
+    PgAccountRepository, PgBudgetRepository, PgCategoryRepository, PgIgnoreRuleRepository,
+    PgImportProfileRepository, PgOperationRepository, PgUserRepository, UserRepository,
 };
 use std::sync::Arc;
 use tower_http::cors::{AllowOrigin, Any, CorsLayer};
@@ -28,13 +28,14 @@ use tower_http::trace::TraceLayer;
 use tracing_subscriber::{EnvFilter, fmt, prelude::*};
 
 /// Inner application state holding repositories and configuration.
-pub struct AppStateInner<U, O, B, P, C, R> {
+pub struct AppStateInner<U, O, B, P, C, R, A> {
     pub user_repo: U,
     pub operation_repo: O,
     pub budget_repo: B,
     pub import_profile_repo: P,
     pub category_repo: C,
     pub ignore_rule_repo: R,
+    pub account_repo: A,
     pub config: Config,
 }
 
@@ -42,11 +43,11 @@ pub struct AppStateInner<U, O, B, P, C, R> {
 ///
 /// Wrapped in [`Arc`] so that it is cheaply cloneable (required by Axum)
 /// without requiring `Clone` on the repository implementations.
-pub struct AppState<U, O, B, P, C, R> {
-    inner: Arc<AppStateInner<U, O, B, P, C, R>>,
+pub struct AppState<U, O, B, P, C, R, A> {
+    inner: Arc<AppStateInner<U, O, B, P, C, R, A>>,
 }
 
-impl<U, O, B, P, C, R> Clone for AppState<U, O, B, P, C, R> {
+impl<U, O, B, P, C, R, A> Clone for AppState<U, O, B, P, C, R, A> {
     fn clone(&self) -> Self {
         Self {
             inner: Arc::clone(&self.inner),
@@ -54,14 +55,16 @@ impl<U, O, B, P, C, R> Clone for AppState<U, O, B, P, C, R> {
     }
 }
 
-impl<U, O, B, P, C, R> std::ops::Deref for AppState<U, O, B, P, C, R> {
-    type Target = AppStateInner<U, O, B, P, C, R>;
+impl<U, O, B, P, C, R, A> std::ops::Deref for AppState<U, O, B, P, C, R, A> {
+    type Target = AppStateInner<U, O, B, P, C, R, A>;
     fn deref(&self) -> &Self::Target {
         &self.inner
     }
 }
 
-impl<U, O, B, P, C, R> AppState<U, O, B, P, C, R> {
+impl<U, O, B, P, C, R, A> AppState<U, O, B, P, C, R, A> {
+    // One parameter per repository, plus the configuration: a builder would only rename them.
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         user_repo: U,
         operation_repo: O,
@@ -69,6 +72,7 @@ impl<U, O, B, P, C, R> AppState<U, O, B, P, C, R> {
         import_profile_repo: P,
         category_repo: C,
         ignore_rule_repo: R,
+        account_repo: A,
         config: Config,
     ) -> Self {
         Self {
@@ -79,14 +83,15 @@ impl<U, O, B, P, C, R> AppState<U, O, B, P, C, R> {
                 import_profile_repo,
                 category_repo,
                 ignore_rule_repo,
+                account_repo,
                 config,
             }),
         }
     }
 }
 
-impl<U, O, B, P, C, R> axum::extract::FromRef<AppState<U, O, B, P, C, R>> for Config {
-    fn from_ref(state: &AppState<U, O, B, P, C, R>) -> Config {
+impl<U, O, B, P, C, R, A> axum::extract::FromRef<AppState<U, O, B, P, C, R, A>> for Config {
+    fn from_ref(state: &AppState<U, O, B, P, C, R, A>) -> Config {
         state.config.clone()
     }
 }
@@ -99,6 +104,7 @@ pub type ProdAppState = AppState<
     PgImportProfileRepository,
     PgCategoryRepository,
     PgIgnoreRuleRepository,
+    PgAccountRepository,
 >;
 
 #[tokio::main]
@@ -135,7 +141,8 @@ async fn main() -> anyhow::Result<()> {
         PgBudgetRepository::new(pool.clone()),
         PgImportProfileRepository::new(pool.clone()),
         PgCategoryRepository::new(pool.clone()),
-        PgIgnoreRuleRepository::new(pool),
+        PgIgnoreRuleRepository::new(pool.clone()),
+        PgAccountRepository::new(pool),
         config.clone(),
     );
 
@@ -164,7 +171,7 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-pub(crate) fn build_router<U, O, B, P, C, R>(state: AppState<U, O, B, P, C, R>) -> Router
+pub(crate) fn build_router<U, O, B, P, C, R, A>(state: AppState<U, O, B, P, C, R, A>) -> Router
 where
     U: repositories::UserRepository + 'static,
     O: repositories::OperationRepository + 'static,
@@ -172,6 +179,7 @@ where
     P: repositories::ImportProfileRepository + 'static,
     C: repositories::CategoryRepository + 'static,
     R: repositories::IgnoreRuleRepository + 'static,
+    A: repositories::AccountRepository + 'static,
 {
     aide::generate::on_error(|error| {
         tracing::warn!("aide schema generation error: {error}");
@@ -203,6 +211,11 @@ where
             Tag {
                 name: "Users".to_string(),
                 description: Some("Manage user accounts. Only administrators can create new users.".to_string()),
+                ..Tag::default()
+            },
+            Tag {
+                name: "Accounts".to_string(),
+                description: Some("Manage the bank accounts a user follows and the balances read on them. A checking account whose statements are imported holds the operations: its balance is its most recent balance plus the operations dated after it, and the forecast starts from the sum of these accounts. Any other account, savings ones included, is worth its most recent balance.".to_string()),
                 ..Tag::default()
             },
             Tag {
@@ -242,7 +255,7 @@ where
             },
             Tag {
                 name: "Data".to_string(),
-                description: Some("Export and re-import a user's full data (account balance, categories, budgets, ignore rules, operations and import profiles) as JSON. Intended for backup and account migration.".to_string()),
+                description: Some("Export and re-import a user's full data (accounts and their balances, categories, budgets, ignore rules, operations and import profiles) as JSON. Intended for backup and account migration.".to_string()),
                 ..Tag::default()
             },
         ],
@@ -297,27 +310,6 @@ where
             }),
         )
         .api_route(
-            "/users/me/balance",
-            get_with(handlers::users::get_balance, |op| {
-                op.tag("Users")
-                    .summary("Get own account balance")
-                    .description("Return the account balance the authenticated user recorded and the date it was read. Returns 404 when no balance is recorded.")
-                    .id("getAccountBalance")
-            })
-            .put_with(handlers::users::update_balance, |op| {
-                op.tag("Users")
-                    .summary("Record own account balance")
-                    .description("Record the account balance read at a date (today or earlier), replacing any previous one. Operations accounted on that date are considered already included in the amount. Forecasts then start from this balance instead of zero. Returns 400 when the date is in the future.")
-                    .id("updateAccountBalance")
-            })
-            .delete_with(handlers::users::delete_balance, |op| {
-                op.tag("Users")
-                    .summary("Forget own account balance")
-                    .description("Remove the recorded account balance; forecasts start from zero again. Idempotent: returns 204 whether or not a balance was recorded.")
-                    .id("deleteAccountBalance")
-            }),
-        )
-        .api_route(
             "/users/reset-password",
             post_with(handlers::users::reset_password, |op| {
                 op.tag("Users")
@@ -335,6 +327,69 @@ where
                     .id("deleteUser")
             }),
         )
+        // Accounts
+        .api_route(
+            "/accounts",
+            get_with(handlers::accounts::list_accounts, |op| {
+                op.tag("Accounts")
+                    .summary("List accounts")
+                    .description("Retrieve all accounts of the authenticated user, checking accounts first, then by name, each with its most recent balance and its balance today. A user has at most MAX_ACCOUNTS_PER_USER accounts.")
+                    .id("listAccounts")
+            })
+            .post_with(handlers::accounts::create_account, |op| {
+                op.tag("Accounts")
+                    .summary("Create an account")
+                    .description("Create a checking or savings account. The name is trimmed, 1 to 100 characters long and unique for the user (409 otherwise). Only a checking account can be `imported`, which makes it the account operations are recorded and imported on (400 otherwise). Returns 409 once the user has MAX_ACCOUNTS_PER_USER accounts.")
+                    .id("createAccount")
+                    .response::<201, Json<handlers::accounts::AccountResponse>>()
+            }),
+        )
+        .api_route(
+            "/accounts/{id}",
+            put_with(handlers::accounts::update_account, |op| {
+                op.tag("Accounts")
+                    .summary("Update an account")
+                    .description("Replace the name, kind and `imported` flag of an account, with the same rules as creation. An account holding operations or import profiles must stay an imported checking account (409 otherwise). Returns 404 if the account does not exist or belongs to another user.")
+                    .id("updateAccount")
+            })
+            .delete_with(handlers::accounts::delete_account, |op| {
+                op.tag("Accounts")
+                    .summary("Delete an account")
+                    .description("Permanently delete an account and its balances. Returns 409 while operations or import profiles point at it, 404 if it does not exist or belongs to another user.")
+                    .id("deleteAccount")
+            }),
+        )
+        .api_route(
+            "/accounts/{id}/balances",
+            get_with(handlers::accounts::list_balances, |op| {
+                op.tag("Accounts")
+                    .summary("List the balances of an account")
+                    .description("Retrieve the balances read on an account, most recent first. Returns 404 if the account does not exist or belongs to another user.")
+                    .id("listAccountBalances")
+            })
+            .post_with(handlers::accounts::add_balance, |op| {
+                op.tag("Accounts")
+                    .summary("Record a balance of an account")
+                    .description("Record the balance shown by the bank at the end of a date, today or earlier (400 otherwise). Operations accounted on that date are considered already included in the amount. The most recent balance is the starting point of an account receiving operations. Returns 409 when the account already has a balance on that date, 404 if it does not exist or belongs to another user.")
+                    .id("addAccountBalance")
+                    .response::<201, Json<handlers::accounts::BalanceEntryResponse>>()
+            }),
+        )
+        .api_route(
+            "/accounts/{id}/balances/{balanceId}",
+            put_with(handlers::accounts::update_balance, |op| {
+                op.tag("Accounts")
+                    .summary("Correct a balance of an account")
+                    .description("Replace the amount and date of one balance, with the same rules as recording it. Returns 409 when the account already has another balance on the new date, 404 if the balance is not one of the account's or the account not the user's.")
+                    .id("updateAccountBalance")
+            })
+            .delete_with(handlers::accounts::delete_balance, |op| {
+                op.tag("Accounts")
+                    .summary("Delete a balance of an account")
+                    .description("Remove one balance; the account then starts from its previous one, or from none. Returns 404 if the balance is not one of the account's or the account not the user's.")
+                    .id("deleteAccountBalance")
+            }),
+        )
         // Operations
         .api_route(
             "/operations",
@@ -347,7 +402,7 @@ where
             .post_with(handlers::operations::create_operation, |op| {
                 op.tag("Operations")
                     .summary("Create an operation")
-                    .description("Record a new bank operation (debit or credit) for the authenticated user. The amount should be negative for expenses and positive for income. The first of the user's ignore rules that matches it ignores it.")
+                    .description("Record a new bank operation (debit or credit) on the authenticated user's imported checking account named by `accountId` (400 when it is not one). The amount should be negative for expenses and positive for income. The first of the user's ignore rules that matches it ignores it.")
                     .id("createOperation")
             }),
         )
@@ -356,7 +411,7 @@ where
             post_with(handlers::import::import_operations, |op| {
                 op.tag("Operations")
                     .summary("Import operations from a file (CSV/XLSX)")
-                    .description("Bulk-import bank operations from a CSV or XLSX file uploaded as multipart form data. Duplicate operations (same date, amount, and label) are automatically skipped. Returns the number of imported and skipped operations. Each imported operation is ignored by the first of the user's ignore rules that matches it. When `profileId` names one of the user's import profiles, the import is recorded as its last use; the columns, date format and skipped lines still come from the request.")
+                    .description("Bulk-import bank operations from a CSV or XLSX file uploaded as multipart form data. `accountId` names the imported checking account the operations go to (400 when it is not one); rows matching an operation already on that account by date, amount and label are skipped as duplicates. Returns the number of imported and skipped operations. Each imported operation is ignored by the first of the user's ignore rules that matches it. When `profileId` names one of the user's import profiles, the import is recorded as its last use; the columns, date format and skipped lines still come from the request.")
                     .id("importOperations")
             }),
         )
@@ -590,7 +645,7 @@ where
             .post_with(handlers::import_profiles::create_import_profile, |op| {
                 op.tag("Import profiles")
                     .summary("Create an import profile")
-                    .description("Create a named import profile. The name is trimmed and must be unique for the user (409 otherwise); the label, amount and date columns must be distinct and the date format a valid strftime pattern (400 otherwise). Returns 409 once the user has MAX_IMPORT_PROFILES_PER_USER profiles.")
+                    .description("Create a named import profile. The name is trimmed and must be unique for the user (409 otherwise); `accountId` must name one of the user's imported checking accounts, the label, amount and date columns must be distinct and the date format a valid strftime pattern (400 otherwise). Returns 409 once the user has MAX_IMPORT_PROFILES_PER_USER profiles.")
                     .id("createImportProfile")
                     .response::<201, Json<handlers::import_profiles::ImportProfileResponse>>()
             }),
@@ -654,7 +709,7 @@ where
             get_with(handlers::forecast::get_forecast, |op| {
                 op.tag("Forecast")
                     .summary("Forecast monthly balances over a horizon")
-                    .description("Project income, expenses, savings, balance and running balance for `months` consecutive months (1 to 24) starting at fromYear/fromMonth. Past months use the operations accounted so far: budget-linked amounts under their budget's type, each unbudgeted operation under income or expenses by its own sign. The current month adds to its operations so far what each budget still expects (`committed`). Future months use the amounts the budgets expect. Unbudgeted spending is forecast at `unbudgetedRate`, the average daily unbudgeted spending of the three complete months before the current one: over the days after today for the current month and over every day of a future month (`unbudgetedForecast`, included in `expenses`). The running balance starts at `startingBalance`: the balance recorded with PUT /users/me/balance, brought to the first day of the horizon by adding the operations accounted after its date and before the horizon, or by taking back out those accounted from the horizon start through its date when it is more recent (operations on the balance date are considered included in it); zero when no balance is recorded. Ignored operations are excluded and split operations count through their parts. Status is relative to the server's current date.")
+                    .description("Project income, expenses, savings, balance and running balance for `months` consecutive months (1 to 24) starting at fromYear/fromMonth. Past months use the operations accounted so far: budget-linked amounts under their budget's type, each unbudgeted operation under income or expenses by its own sign. The current month adds to its operations so far what each budget still expects (`committed`). Future months use the amounts the budgets expect. Unbudgeted spending is forecast at `unbudgetedRate`, the average daily unbudgeted spending of the three complete months before the current one: over the days after today for the current month and over every day of a future month (`unbudgetedForecast`, included in `expenses`). The running balance starts at `startingBalance`: the sum, over the imported checking accounts with a balance, of each one's most recent balance brought to the first day of the horizon by adding its operations accounted after the balance date and before the horizon, or by taking back out those accounted from the horizon start through that date when it is more recent (operations on the balance date are considered included in it); zero when no such account has a balance. Ignored operations are excluded and split operations count through their parts. Status is relative to the server's current date.")
                     .id("getForecast")
             }),
         )
@@ -673,7 +728,7 @@ where
             get_with(handlers::data::export_data, |op| {
                 op.tag("Data")
                     .summary("Export all budgets and operations")
-                    .description("Return the authenticated user's full data (recorded account balance, categories, budgets, operations and import profiles) as a versioned JSON payload. Suitable for backup or migration.")
+                    .description("Return the authenticated user's full data (accounts and their balances, categories, budgets, ignore rules, operations and import profiles) as a versioned JSON payload. Suitable for backup or migration.")
                     .id("exportData")
             }),
         )
@@ -682,7 +737,7 @@ where
             post_with(handlers::data::import_data, |op| {
                 op.tag("Data")
                     .summary("Import budgets and operations from a prior export")
-                    .description("Merge budgets and operations from a JSON payload previously obtained via /data/export into the authenticated user's account. Categories are deduplicated by name, budgets by label, ignore rules by pattern and amount, operations by (date, amount, label). Category, budget and ignore rule references are remapped to existing or newly-created ones. Returns 409, importing nothing, when the new categories would exceed MAX_CATEGORIES_PER_USER or the new ignore rules MAX_IGNORE_RULES_PER_USER. The payload's account balance, optional, is recorded only when the account has none.")
+                    .description("Merge budgets and operations from a JSON payload previously obtained via /data/export into the authenticated user's account. Categories are deduplicated by name, budgets by label, ignore rules by pattern and amount, accounts by name, operations by (account, date, amount, label). Category, budget and ignore rule references are remapped to existing or newly-created ones. Returns 409, importing nothing, when the new categories would exceed MAX_CATEGORIES_PER_USER or the new ignore rules MAX_IGNORE_RULES_PER_USER. Accounts the user lacks are created with their balances, those matched by name keep theirs. The operations and profiles of an export made before accounts existed go to the user's first imported checking account, or to a new one, which also gets that export's balance when it has none. Returns 400, importing nothing, when an operation or profile would land on an account that does not receive operations, 409 when the new accounts would exceed MAX_ACCOUNTS_PER_USER.")
                     .id("importData")
             }),
         )
@@ -741,11 +796,15 @@ pub(crate) mod test_util {
     use crate::{
         AppState, auth,
         config::Config,
-        domain::user::UserRole,
+        domain::{
+            account::{Account, AccountFields, AccountKind},
+            user::UserRole,
+        },
         handlers,
         repositories::{
-            MockBudgetRepository, MockCategoryRepository, MockIgnoreRuleRepository,
-            MockImportProfileRepository, MockOperationRepository, MockUserRepository,
+            MockAccountRepository, MockBudgetRepository, MockCategoryRepository,
+            MockIgnoreRuleRepository, MockImportProfileRepository, MockOperationRepository,
+            MockUserRepository,
         },
     };
     use axum::{Router, routing};
@@ -761,6 +820,7 @@ pub(crate) mod test_util {
         MockImportProfileRepository,
         MockCategoryRepository,
         MockIgnoreRuleRepository,
+        MockAccountRepository,
     >;
 
     pub fn make_test_config() -> Config {
@@ -778,6 +838,7 @@ pub(crate) mod test_util {
             max_import_profiles_per_user: 20,
             max_categories_per_user: 50,
             max_ignore_rules_per_user: 100,
+            max_accounts_per_user: 20,
             root_path: String::new(),
             webapp_url: "http://localhost:5173".to_string(),
         }
@@ -822,6 +883,7 @@ pub(crate) mod test_util {
             profile_repo,
             no_categories(),
             no_ignore_rules(),
+            main_accounts(),
         )
     }
 
@@ -839,6 +901,7 @@ pub(crate) mod test_util {
             no_import_profiles(),
             category_repo,
             no_ignore_rules(),
+            main_accounts(),
         )
     }
 
@@ -864,6 +927,50 @@ pub(crate) mod test_util {
             no_import_profiles(),
             no_categories(),
             ignore_rule_repo,
+            main_accounts(),
+        )
+    }
+
+    /// An imported checking account without balance.
+    pub fn main_account(id: Uuid, user_id: Uuid) -> Account {
+        Account {
+            id,
+            user_id,
+            fields: AccountFields {
+                name: "Main".to_string(),
+                kind: AccountKind::Checking,
+                imported: true,
+            },
+            balance: None,
+            current_balance: None,
+            created_at: chrono::Utc::now(),
+        }
+    }
+
+    /// An account repository holding a single [`main_account`] of nil id, which it also returns
+    /// for any id it is asked to find, for tests that only go through accounts in passing.
+    pub fn main_accounts() -> MockAccountRepository {
+        let mut repo = MockAccountRepository::new();
+        repo.expect_list().returning(|user_id| {
+            Box::pin(async move { Ok(vec![main_account(Uuid::nil(), user_id)]) })
+        });
+        repo.expect_find()
+            .returning(|id, user_id| Box::pin(async move { Ok(Some(main_account(id, user_id))) }));
+        repo.expect_list_balances()
+            .returning(|_, _| Box::pin(async { Ok(Vec::new()) }));
+        repo
+    }
+
+    /// Build a test state from mock repositories, accounts only.
+    pub fn make_test_state_with_accounts(account_repo: MockAccountRepository) -> TestState {
+        make_test_state_with_all(
+            MockUserRepository::new(),
+            MockOperationRepository::new(),
+            MockBudgetRepository::new(),
+            no_import_profiles(),
+            no_categories(),
+            no_ignore_rules(),
+            account_repo,
         )
     }
 
@@ -875,6 +982,7 @@ pub(crate) mod test_util {
         profile_repo: MockImportProfileRepository,
         category_repo: MockCategoryRepository,
         ignore_rule_repo: MockIgnoreRuleRepository,
+        account_repo: MockAccountRepository,
     ) -> TestState {
         AppState::new(
             user_repo,
@@ -883,6 +991,7 @@ pub(crate) mod test_util {
             profile_repo,
             category_repo,
             ignore_rule_repo,
+            account_repo,
             make_test_config(),
         )
     }
@@ -903,16 +1012,31 @@ pub(crate) mod test_util {
                 "/users/me/password",
                 routing::put(handlers::users::change_password),
             )
-            .route(
-                "/users/me/balance",
-                routing::get(handlers::users::get_balance)
-                    .put(handlers::users::update_balance)
-                    .delete(handlers::users::delete_balance),
-            )
             .route("/users/{id}", routing::delete(handlers::users::delete_user))
             .route(
                 "/users/reset-password",
                 routing::post(handlers::users::reset_password),
+            )
+            // Accounts
+            .route(
+                "/accounts",
+                routing::get(handlers::accounts::list_accounts)
+                    .post(handlers::accounts::create_account),
+            )
+            .route(
+                "/accounts/{id}",
+                routing::put(handlers::accounts::update_account)
+                    .delete(handlers::accounts::delete_account),
+            )
+            .route(
+                "/accounts/{id}/balances",
+                routing::get(handlers::accounts::list_balances)
+                    .post(handlers::accounts::add_balance),
+            )
+            .route(
+                "/accounts/{id}/balances/{balanceId}",
+                routing::put(handlers::accounts::update_balance)
+                    .delete(handlers::accounts::delete_balance),
             )
             // Operations
             .route(
@@ -1208,7 +1332,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn openapi_documents_account_balance() {
+    async fn openapi_documents_accounts_and_their_balances() {
         let app = build_router(make_test_state(
             MockUserRepository::new(),
             MockOperationRepository::new(),
@@ -1220,13 +1344,32 @@ mod tests {
             .unwrap();
         let doc: serde_json::Value = response_json(resp).await;
 
-        let path = &doc["paths"]["/users/me/balance"];
-        assert_eq!(path["get"]["operationId"], "getAccountBalance");
-        assert_eq!(path["put"]["operationId"], "updateAccountBalance");
-        assert_eq!(path["delete"]["operationId"], "deleteAccountBalance");
+        let paths = &doc["paths"];
+        assert_eq!(paths["/accounts"]["get"]["operationId"], "listAccounts");
+        assert_eq!(paths["/accounts"]["post"]["operationId"], "createAccount");
+        assert_eq!(
+            paths["/accounts/{id}"]["put"]["operationId"],
+            "updateAccount"
+        );
+        assert_eq!(
+            paths["/accounts/{id}/balances"]["post"]["operationId"],
+            "addAccountBalance"
+        );
+        assert_eq!(
+            paths["/accounts/{id}/balances/{balanceId}"]["delete"]["operationId"],
+            "deleteAccountBalance"
+        );
+        assert!(paths["/users/me/balance"].is_null());
         let schemas = &doc["components"]["schemas"];
-        for schema in ["UpdateAccountBalanceRequest", "AccountBalanceResponse"] {
-            for field in ["amount", "date"] {
+        for (schema, fields) in [
+            ("AccountBalanceRequest", &["amount", "date"][..]),
+            ("BalanceEntryResponse", &["id", "amount", "date"][..]),
+            (
+                "AccountResponse",
+                &["kind", "receivesOperations", "balance", "currentBalance"][..],
+            ),
+        ] {
+            for field in fields {
                 assert!(
                     schemas[schema]["properties"][field].is_object(),
                     "missing {schema}.{field}"

@@ -17,7 +17,7 @@ import {
 import { createFileRoute } from "@tanstack/react-router";
 import { type FormEvent, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { AccountBalanceSection } from "@/components/AccountBalanceSection";
+import { AccountsSection } from "@/components/AccountsSection";
 import { IgnoreRulesSection } from "@/components/IgnoreRulesSection";
 import { ImportProfilesSection } from "@/components/ImportProfilesSection";
 import { PageHeader } from "@/components/PageHeader";
@@ -166,7 +166,7 @@ export function SettingsPage() {
 					</form>
 				</Paper>
 
-				<AccountBalanceSection />
+				<AccountsSection />
 
 				<IgnoreRulesSection />
 
@@ -198,9 +198,12 @@ export function SettingsPage() {
 									skippedIgnoreRules: dataSuccess.skippedIgnoreRules,
 									operations: dataSuccess.importedOperations,
 									skippedOperations: dataSuccess.skippedOperations,
+								})}{" "}
+								{t("settings.data.importedAccounts", {
+									accounts: dataSuccess.importedAccounts,
+									skippedAccounts: dataSuccess.skippedAccounts,
+									balances: dataSuccess.importedBalances,
 								})}
-								{dataSuccess.importedBalance &&
-									` ${t("settings.data.importedBalance")}`}
 							</Alert>
 						)}
 

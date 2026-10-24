@@ -43,6 +43,7 @@ const mockMonthlyResponse: MonthlyOperationsResponse = {
 	operations: [
 		{
 			id: "op1",
+			accountId: "account-1",
 			amount: "-50.00",
 			date: "2026-04-05",
 			effectiveDate: null,
@@ -56,6 +57,7 @@ const mockMonthlyResponse: MonthlyOperationsResponse = {
 		},
 		{
 			id: "op2",
+			accountId: "account-1",
 			amount: "-30.00",
 			date: "2026-04-10",
 			effectiveDate: null,
@@ -69,6 +71,7 @@ const mockMonthlyResponse: MonthlyOperationsResponse = {
 		},
 		{
 			id: "op3",
+			accountId: "account-1",
 			amount: "-100.00",
 			date: "2026-04-15",
 			effectiveDate: null,
@@ -82,6 +85,7 @@ const mockMonthlyResponse: MonthlyOperationsResponse = {
 		},
 		{
 			id: "op4",
+			accountId: "account-1",
 			amount: "2000.00",
 			date: "2026-04-01",
 			effectiveDate: null,
@@ -205,6 +209,7 @@ function setupMocks(
 		if (ignoreMatch) {
 			return Promise.resolve({
 				id: ignoreMatch[1],
+				accountId: "account-1",
 				amount: "-50.00",
 				date: "2026-04-05",
 				effectiveDate: null,
@@ -223,6 +228,7 @@ function setupMocks(
 			const opId = budgetLinkMatch[1];
 			return Promise.resolve({
 				id: opId,
+				accountId: "account-1",
 				amount: "-50.00",
 				date: "2026-04-05",
 				effectiveDate: null,
@@ -568,6 +574,7 @@ describe("MonthlyOperationsPage", () => {
 			operations: [
 				{
 					id: "op1",
+					accountId: "account-1",
 					amount: "-50.00",
 					date: "2026-04-05",
 					effectiveDate: null,
@@ -581,6 +588,7 @@ describe("MonthlyOperationsPage", () => {
 				},
 				{
 					id: "op5",
+					accountId: "account-1",
 					amount: "-20.00",
 					date: "2026-04-06",
 					effectiveDate: null,
@@ -594,6 +602,7 @@ describe("MonthlyOperationsPage", () => {
 				},
 				{
 					id: "op4",
+					accountId: "account-1",
 					amount: "2000.00",
 					date: "2026-04-01",
 					effectiveDate: null,
@@ -607,6 +616,7 @@ describe("MonthlyOperationsPage", () => {
 				},
 				{
 					id: "op6",
+					accountId: "account-1",
 					amount: "500.00",
 					date: "2026-04-10",
 					effectiveDate: null,
@@ -686,6 +696,7 @@ describe("MonthlyOperationsPage", () => {
 			operations: [
 				{
 					id: "op1",
+					accountId: "account-1",
 					amount: "-50.00",
 					date: "2026-04-05",
 					effectiveDate: null,
@@ -699,6 +710,7 @@ describe("MonthlyOperationsPage", () => {
 				},
 				{
 					id: "op5",
+					accountId: "account-1",
 					amount: "-20.00",
 					date: "2026-04-06",
 					effectiveDate: null,
@@ -741,6 +753,7 @@ describe("MonthlyOperationsPage", () => {
 			operations: [
 				{
 					id: "op1",
+					accountId: "account-1",
 					amount: "-50.00",
 					date: "2026-04-05",
 					effectiveDate: "2026-04-20",
@@ -754,6 +767,7 @@ describe("MonthlyOperationsPage", () => {
 				},
 				{
 					id: "op2",
+					accountId: "account-1",
 					amount: "-30.00",
 					date: "2026-04-10",
 					effectiveDate: null,
@@ -788,6 +802,7 @@ describe("MonthlyOperationsPage", () => {
 			operations: [
 				{
 					id: "op1",
+					accountId: "account-1",
 					amount: "1500.00",
 					date: "2026-04-01",
 					effectiveDate: null,
@@ -801,6 +816,7 @@ describe("MonthlyOperationsPage", () => {
 				},
 				{
 					id: "op2",
+					accountId: "account-1",
 					amount: "-200.00",
 					date: "2026-04-05",
 					effectiveDate: null,
@@ -814,6 +830,7 @@ describe("MonthlyOperationsPage", () => {
 				},
 				{
 					id: "op3",
+					accountId: "account-1",
 					amount: "-50.00",
 					date: "2026-04-10",
 					effectiveDate: null,
@@ -908,6 +925,7 @@ describe("MonthlyOperationsPage", () => {
 			operations: [
 				{
 					id: "op1",
+					accountId: "account-1",
 					amount: "-260.00",
 					date: "2026-04-05",
 					effectiveDate: null,
@@ -935,6 +953,7 @@ describe("MonthlyOperationsPage", () => {
 			operations: [
 				{
 					id: "op4",
+					accountId: "account-1",
 					amount: "2500.00",
 					date: "2026-04-01",
 					effectiveDate: null,
@@ -961,6 +980,7 @@ describe("MonthlyOperationsPage", () => {
 			operations: [
 				{
 					id: "op1",
+					accountId: "account-1",
 					amount: "-50.00",
 					date: "2026-04-05",
 					effectiveDate: null,
@@ -974,6 +994,7 @@ describe("MonthlyOperationsPage", () => {
 				},
 				{
 					id: "op2",
+					accountId: "account-1",
 					amount: "-100.00",
 					date: "2026-04-08",
 					effectiveDate: null,
@@ -1004,6 +1025,7 @@ describe("MonthlyOperationsPage", () => {
 				},
 				{
 					id: "op3",
+					accountId: "account-1",
 					amount: "-20.00",
 					date: "2026-04-12",
 					effectiveDate: null,
@@ -1128,6 +1150,7 @@ describe("MonthlyOperationsPage", () => {
 				...mockMonthlyResponse.operations,
 				{
 					id: "op-ignored",
+					accountId: "account-1",
 					amount: "-999.00",
 					date: "2026-04-20",
 					effectiveDate: null,

@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { selectMantineOption } from "@/__tests__/mantine";
 import { ImportModal } from "@/components/ImportModal";
 import { i18n } from "@/i18n";
-import type { ImportProfileResponse } from "@/lib/types";
+import type { AccountResponse, ImportProfileResponse } from "@/lib/types";
 import { theme } from "@/theme";
 
 vi.mock("@/lib/api", () => ({
@@ -30,6 +30,7 @@ function makeProfile(
 	return {
 		id: "p1",
 		name: "Crédit Agricole",
+		accountId: "account-1",
 		labelCol: 1,
 		amountCol: 3,
 		dateCol: 0,
@@ -42,13 +43,25 @@ function makeProfile(
 	};
 }
 
-/** Answer the profile list with `profiles` and every import with `importResult`. */
+const account: AccountResponse = {
+	id: "account-1",
+	name: "Compte perso",
+	kind: "checking",
+	imported: true,
+	receivesOperations: true,
+	balance: null,
+	currentBalance: null,
+	createdAt: "2026-01-01T10:00:00Z",
+};
+
+/** Answer the profile list with `profiles`, the accounts with `account` and every import with `importResult`. */
 function mockApi(
 	profiles: ImportProfileResponse[],
 	importResult: unknown = { imported: 2, skipped: 0, errors: [] },
 ) {
 	apiFetchMock.mockImplementation(async (path) => {
 		if (path === "/import-profiles") return profiles;
+		if (path === "/accounts") return [account];
 		if (path === "/operations/import") {
 			if (importResult instanceof Error) throw importResult;
 			return importResult;
@@ -118,8 +131,9 @@ describe("ImportModal", () => {
 		mockApi([makeProfile(), makeProfile({ id: "p2", name: "Boursorama" })]);
 		renderModal();
 
-		expect(await screen.findByRole("combobox", { name: "Profil" })).toHaveValue(
-			"Crédit Agricole",
+		const profile = await screen.findByRole("combobox", { name: "Profil" });
+		await waitFor(() =>
+			expect(profile).toHaveValue("Crédit Agricole · Compte perso"),
 		);
 	});
 
@@ -142,8 +156,11 @@ describe("ImportModal", () => {
 		);
 		const { onSuccess } = renderModal();
 
-		await screen.findByRole("combobox", { name: "Profil" });
-		await selectMantineOption("Profil", "Boursorama");
+		const profile = await screen.findByRole("combobox", { name: "Profil" });
+		await waitFor(() =>
+			expect(profile).toHaveValue("Crédit Agricole · Compte perso"),
+		);
+		await selectMantineOption("Profil", "Boursorama · Compte perso");
 		const file = await uploadFile();
 		await userEvent
 			.setup()
@@ -153,6 +170,7 @@ describe("ImportModal", () => {
 		const body = importCall();
 		expect(body.get("file")).toEqual(file);
 		expect(body.get("profileId")).toBe("p2");
+		expect(body.get("accountId")).toBe("account-1");
 		expect(body.get("labelCol")).toBe("2");
 		expect(body.get("amountCol")).toBe("3");
 		expect(body.get("dateCol")).toBe("0");
@@ -198,7 +216,7 @@ describe("ImportModal", () => {
 
 		await user.click(screen.getByRole("button", { name: "Annuler" }));
 		expect(screen.getByRole("combobox", { name: "Profil" })).toHaveValue(
-			"Crédit Agricole",
+			"Crédit Agricole · Compte perso",
 		);
 	});
 });

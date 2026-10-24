@@ -157,8 +157,8 @@ pub async fn ensure_category_is_users(
 
 // ── Handlers ─────────────────────────────────────────────────────────────────
 
-pub async fn list_categories<U, O, B, P, C: CategoryRepository, R>(
-    State(state): State<AppState<U, O, B, P, C, R>>,
+pub async fn list_categories<U, O, B, P, C: CategoryRepository, R, A>(
+    State(state): State<AppState<U, O, B, P, C, R, A>>,
     auth_user: AuthUser,
 ) -> AppResult<Json<Vec<CategoryResponse>>> {
     let categories = state.category_repo.list(auth_user.id).await?;
@@ -167,8 +167,8 @@ pub async fn list_categories<U, O, B, P, C: CategoryRepository, R>(
     ))
 }
 
-pub async fn create_category<U, O, B, P, C: CategoryRepository, R>(
-    State(state): State<AppState<U, O, B, P, C, R>>,
+pub async fn create_category<U, O, B, P, C: CategoryRepository, R, A>(
+    State(state): State<AppState<U, O, B, P, C, R, A>>,
     auth_user: AuthUser,
     Json(body): Json<CategoryRequest>,
 ) -> AppResult<(StatusCode, Json<CategoryResponse>)> {
@@ -183,8 +183,8 @@ pub async fn create_category<U, O, B, P, C: CategoryRepository, R>(
     Ok((StatusCode::CREATED, Json(category.into())))
 }
 
-pub async fn update_category<U, O, B, P, C: CategoryRepository, R>(
-    State(state): State<AppState<U, O, B, P, C, R>>,
+pub async fn update_category<U, O, B, P, C: CategoryRepository, R, A>(
+    State(state): State<AppState<U, O, B, P, C, R, A>>,
     auth_user: AuthUser,
     Path(id): Path<Uuid>,
     Json(body): Json<CategoryRequest>,
@@ -198,8 +198,8 @@ pub async fn update_category<U, O, B, P, C: CategoryRepository, R>(
     Ok(Json(category.into()))
 }
 
-pub async fn delete_category<U, O, B, P, C: CategoryRepository, R>(
-    State(state): State<AppState<U, O, B, P, C, R>>,
+pub async fn delete_category<U, O, B, P, C: CategoryRepository, R, A>(
+    State(state): State<AppState<U, O, B, P, C, R, A>>,
     auth_user: AuthUser,
     Path(id): Path<Uuid>,
 ) -> AppResult<StatusCode> {
@@ -209,8 +209,8 @@ pub async fn delete_category<U, O, B, P, C: CategoryRepository, R>(
     Ok(StatusCode::NO_CONTENT)
 }
 
-pub async fn apply_category<U, O: OperationRepository, B, P, C: CategoryRepository, R>(
-    State(state): State<AppState<U, O, B, P, C, R>>,
+pub async fn apply_category<U, O: OperationRepository, B, P, C: CategoryRepository, R, A>(
+    State(state): State<AppState<U, O, B, P, C, R, A>>,
     auth_user: AuthUser,
     Path(id): Path<Uuid>,
     Json(body): Json<ApplyCategoryRequest>,
@@ -313,6 +313,7 @@ mod tests {
         Operation {
             id: Uuid::new_v4(),
             user_id: Uuid::new_v4(),
+            account_id: Uuid::nil(),
             amount: Decimal::new(-30, 0),
             date: NaiveDate::from_ymd_opt(2024, 1, 15).unwrap(),
             effective_date: None,

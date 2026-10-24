@@ -10,6 +10,8 @@ use uuid::Uuid;
 pub struct Operation {
     pub id: Uuid,
     pub user_id: Uuid,
+    /// Account the operation was recorded or imported on.
+    pub account_id: Uuid,
     pub amount: Decimal,
     pub date: NaiveDate,
     /// Optional override date used to attribute the operation to a different month.
@@ -64,6 +66,16 @@ impl OperationSplit {
     pub fn effective_category_id(&self) -> Option<Uuid> {
         self.category_id.or(self.budget_category_id)
     }
+}
+
+/// An operation to record, its budget link starting unlinked.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NewOperation {
+    pub account_id: Uuid,
+    pub amount: Decimal,
+    pub date: NaiveDate,
+    pub effective_date: Option<NaiveDate>,
+    pub label: String,
 }
 
 /// A part to store when (re)splitting an operation.
@@ -248,6 +260,7 @@ mod tests {
         let mut op = Operation {
             id: Uuid::nil(),
             user_id: Uuid::nil(),
+            account_id: Uuid::nil(),
             amount: dec!(-10),
             date: NaiveDate::from_ymd_opt(2024, 1, 1).unwrap(),
             effective_date: None,

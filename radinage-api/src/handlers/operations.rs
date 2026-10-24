@@ -2,14 +2,17 @@ use crate::{
     AppState,
     auth::middleware::AuthUser,
     domain::operation::{
-        BudgetLink, NewOperationSplit, Operation, OperationSplit, validate_splits,
+        BudgetLink, NewOperation, NewOperationSplit, Operation, OperationSplit, validate_splits,
     },
     error::{AppError, AppResult},
-    handlers::{categories::ensure_category_is_users, ignore_rules::auto_ignore_operation},
+    handlers::{
+        accounts::account_receiving_operations, categories::ensure_category_is_users,
+        ignore_rules::auto_ignore_operation,
+    },
     repositories::{
-        BudgetRepository, CategoryFilter, CategoryRepository, IgnoreRuleRepository, IgnoredFilter,
-        ListOperationsParams, OperationDirection, OperationRepository, OperationSortField,
-        OperationTotals, SortOrder,
+        AccountRepository, BudgetRepository, CategoryFilter, CategoryRepository,
+        IgnoreRuleRepository, IgnoredFilter, ListOperationsParams, OperationDirection,
+        OperationRepository, OperationSortField, OperationTotals, SortOrder,
     },
     services::matcher::{MatcherService, MatcherServiceImpl},
 };
@@ -33,6 +36,8 @@ use uuid::Uuid;
 pub struct OperationResponse {
     /// Unique identifier of the operation.
     pub id: Uuid,
+    /// Account the operation was recorded or imported on.
+    pub account_id: Uuid,
     /// Signed amount: negative for expenses, positive for income.
     #[schemars(with = "String")]
     pub amount: Decimal,
@@ -96,6 +101,7 @@ impl From<Operation> for OperationResponse {
         let effective_category_id = op.effective_category_id();
         Self {
             id: op.id,
+            account_id: op.account_id,
             amount: op.amount,
             date: op.date,
             effective_date: op.effective_date,
@@ -117,6 +123,8 @@ impl From<Operation> for OperationResponse {
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateOperationRequest {
+    /// Account to record the operation on: one of the user's imported checking accounts.
+    pub account_id: Uuid,
     /// Signed amount: negative for expenses, positive for income.
     #[schemars(with = "String")]
     pub amount: Decimal,
@@ -318,8 +326,8 @@ pub fn compute_max_page(total: i64, page_size: u32) -> u32 {
 
 // ── Handlers ─────────────────────────────────────────────────────────────────
 
-pub async fn list_operations<U, O: OperationRepository, B, P, C, R>(
-    State(state): State<AppState<U, O, B, P, C, R>>,
+pub async fn list_operations<U, O: OperationRepository, B, P, C, R, A>(
+    State(state): State<AppState<U, O, B, P, C, R, A>>,
     auth_user: AuthUser,
     Query(q): Query<ListOperationsQuery>,
 ) -> AppResult<Json<OperationListResponse>> {
@@ -365,8 +373,8 @@ pub async fn list_operations<U, O: OperationRepository, B, P, C, R>(
     }))
 }
 
-pub async fn get_operation<U, O: OperationRepository, B, P, C, R>(
-    State(state): State<AppState<U, O, B, P, C, R>>,
+pub async fn get_operation<U, O: OperationRepository, B, P, C, R, A>(
+    State(state): State<AppState<U, O, B, P, C, R, A>>,
     auth_user: AuthUser,
     Path(id): Path<Uuid>,
 ) -> AppResult<Json<OperationResponse>> {
@@ -381,28 +389,34 @@ pub async fn create_operation<
     P,
     C: CategoryRepository,
     R: IgnoreRuleRepository,
+    A: AccountRepository,
 >(
-    State(state): State<AppState<U, O, B, P, C, R>>,
+    State(state): State<AppState<U, O, B, P, C, R, A>>,
     auth_user: AuthUser,
     Json(body): Json<CreateOperationRequest>,
 ) -> AppResult<(StatusCode, Json<OperationResponse>)> {
     let user_id = auth_user.id;
+    account_receiving_operations(&state.account_repo, body.account_id, user_id).await?;
     let id = Uuid::new_v4();
     state
         .operation_repo
         .insert(
             id,
             user_id,
-            body.amount,
-            body.date,
-            body.effective_date,
-            &body.label,
+            &NewOperation {
+                account_id: body.account_id,
+                amount: body.amount,
+                date: body.date,
+                effective_date: body.effective_date,
+                label: body.label.clone(),
+            },
         )
         .await?;
 
     let op = Operation {
         id,
         user_id,
+        account_id: body.account_id,
         amount: body.amount,
         date: body.date,
         effective_date: body.effective_date,
@@ -428,8 +442,8 @@ pub async fn create_operation<
     Ok((StatusCode::CREATED, Json(updated.into())))
 }
 
-pub async fn update_operation<U, O: OperationRepository, B, P, C, R>(
-    State(state): State<AppState<U, O, B, P, C, R>>,
+pub async fn update_operation<U, O: OperationRepository, B, P, C, R, A>(
+    State(state): State<AppState<U, O, B, P, C, R, A>>,
     auth_user: AuthUser,
     Path(id): Path<Uuid>,
     Json(body): Json<UpdateOperationRequest>,
@@ -458,8 +472,8 @@ pub async fn update_operation<U, O: OperationRepository, B, P, C, R>(
     Ok(Json(op.into()))
 }
 
-pub async fn delete_operation<U, O: OperationRepository, B, P, C, R>(
-    State(state): State<AppState<U, O, B, P, C, R>>,
+pub async fn delete_operation<U, O: OperationRepository, B, P, C, R, A>(
+    State(state): State<AppState<U, O, B, P, C, R, A>>,
     auth_user: AuthUser,
     Path(id): Path<Uuid>,
 ) -> AppResult<StatusCode> {
@@ -470,8 +484,8 @@ pub async fn delete_operation<U, O: OperationRepository, B, P, C, R>(
     Ok(StatusCode::NO_CONTENT)
 }
 
-pub async fn link_budget<U, O: OperationRepository, B: BudgetRepository, P, C, R>(
-    State(state): State<AppState<U, O, B, P, C, R>>,
+pub async fn link_budget<U, O: OperationRepository, B: BudgetRepository, P, C, R, A>(
+    State(state): State<AppState<U, O, B, P, C, R, A>>,
     auth_user: AuthUser,
     Path(op_id): Path<Uuid>,
     Json(body): Json<LinkBudgetRequest>,
@@ -497,8 +511,8 @@ pub async fn link_budget<U, O: OperationRepository, B: BudgetRepository, P, C, R
     Ok(Json(op.into()))
 }
 
-pub async fn unlink_budget<U, O: OperationRepository, B, P, C, R>(
-    State(state): State<AppState<U, O, B, P, C, R>>,
+pub async fn unlink_budget<U, O: OperationRepository, B, P, C, R, A>(
+    State(state): State<AppState<U, O, B, P, C, R, A>>,
     auth_user: AuthUser,
     Path(id): Path<Uuid>,
 ) -> AppResult<Json<OperationResponse>> {
@@ -514,8 +528,8 @@ pub async fn unlink_budget<U, O: OperationRepository, B, P, C, R>(
     Ok(Json(op.into()))
 }
 
-pub async fn set_category<U, O: OperationRepository, B, P, C: CategoryRepository, R>(
-    State(state): State<AppState<U, O, B, P, C, R>>,
+pub async fn set_category<U, O: OperationRepository, B, P, C: CategoryRepository, R, A>(
+    State(state): State<AppState<U, O, B, P, C, R, A>>,
     auth_user: AuthUser,
     Path(id): Path<Uuid>,
     Json(body): Json<SetCategoryRequest>,
@@ -536,8 +550,8 @@ pub async fn set_category<U, O: OperationRepository, B, P, C: CategoryRepository
     .await
 }
 
-pub async fn clear_category<U, O: OperationRepository, B, P, C, R>(
-    State(state): State<AppState<U, O, B, P, C, R>>,
+pub async fn clear_category<U, O: OperationRepository, B, P, C, R, A>(
+    State(state): State<AppState<U, O, B, P, C, R, A>>,
     auth_user: AuthUser,
     Path(id): Path<Uuid>,
 ) -> AppResult<Json<OperationResponse>> {
@@ -559,8 +573,8 @@ async fn store_category(
     Ok(Json(op.into()))
 }
 
-pub async fn ignore_operation<U, O: OperationRepository, B, P, C, R>(
-    State(state): State<AppState<U, O, B, P, C, R>>,
+pub async fn ignore_operation<U, O: OperationRepository, B, P, C, R, A>(
+    State(state): State<AppState<U, O, B, P, C, R, A>>,
     auth_user: AuthUser,
     Path(id): Path<Uuid>,
 ) -> AppResult<Json<OperationResponse>> {
@@ -575,8 +589,8 @@ pub async fn ignore_operation<U, O: OperationRepository, B, P, C, R>(
     Ok(Json(op.into()))
 }
 
-pub async fn unignore_operation<U, O: OperationRepository, B, P, C, R>(
-    State(state): State<AppState<U, O, B, P, C, R>>,
+pub async fn unignore_operation<U, O: OperationRepository, B, P, C, R, A>(
+    State(state): State<AppState<U, O, B, P, C, R, A>>,
     auth_user: AuthUser,
     Path(id): Path<Uuid>,
 ) -> AppResult<Json<OperationResponse>> {
@@ -598,8 +612,9 @@ pub async fn replace_splits<
     P,
     C: CategoryRepository,
     R,
+    A,
 >(
-    State(state): State<AppState<U, O, B, P, C, R>>,
+    State(state): State<AppState<U, O, B, P, C, R, A>>,
     auth_user: AuthUser,
     Path(id): Path<Uuid>,
     Json(body): Json<ReplaceOperationSplitsRequest>,
@@ -636,8 +651,8 @@ pub async fn replace_splits<
     Ok(Json(op.into()))
 }
 
-pub async fn clear_splits<U, O: OperationRepository, B, P, C, R>(
-    State(state): State<AppState<U, O, B, P, C, R>>,
+pub async fn clear_splits<U, O: OperationRepository, B, P, C, R, A>(
+    State(state): State<AppState<U, O, B, P, C, R, A>>,
     auth_user: AuthUser,
     Path(id): Path<Uuid>,
 ) -> AppResult<Json<OperationResponse>> {
@@ -727,6 +742,7 @@ mod tests {
         Operation {
             id,
             user_id,
+            account_id: Uuid::nil(),
             amount: Decimal::new(-50, 0),
             date: NaiveDate::from_ymd_opt(2024, 1, 15).unwrap(),
             effective_date: None,
@@ -831,8 +847,9 @@ mod tests {
 
         op_repo
             .expect_insert()
+            .withf(|_, _, op| op.account_id.is_nil())
             .once()
-            .returning(|_, _, _, _, _, _| Box::pin(async { Ok(()) }));
+            .returning(|_, _, _| Box::pin(async { Ok(()) }));
         budget_repo
             .expect_list_all_for_user()
             .once()
@@ -852,6 +869,7 @@ mod tests {
 
         let auth = auth_header(user_id, UserRole::User);
         let body = serde_json::to_string(&CreateOperationRequest {
+            account_id: Uuid::nil(),
             amount: Decimal::new(-50, 0),
             date: NaiveDate::from_ymd_opt(2024, 1, 15).unwrap(),
             effective_date: None,
@@ -864,6 +882,57 @@ mod tests {
         assert_eq!(resp.status(), StatusCode::CREATED);
         let json: OperationResponse = response_json(resp).await;
         assert_eq!(json.label, "Test");
+    }
+
+    #[tokio::test]
+    async fn create_operation_on_an_account_not_receiving_operations_is_a_bad_request() {
+        use crate::{
+            domain::account::{Account, AccountFields, AccountKind},
+            repositories::MockAccountRepository,
+            test_util::{
+                make_test_state_with_all, no_categories, no_ignore_rules, no_import_profiles,
+            },
+        };
+
+        let mut accounts = MockAccountRepository::new();
+        accounts.expect_find().returning(|id, user_id| {
+            Box::pin(async move {
+                Ok(Some(Account {
+                    id,
+                    user_id,
+                    fields: AccountFields {
+                        name: "Compte pro".to_string(),
+                        kind: AccountKind::Checking,
+                        imported: false,
+                    },
+                    balance: None,
+                    current_balance: None,
+                    created_at: chrono::Utc::now(),
+                }))
+            })
+        });
+        let app = build_test_router(make_test_state_with_all(
+            MockUserRepository::new(),
+            MockOperationRepository::new(),
+            MockBudgetRepository::new(),
+            no_import_profiles(),
+            no_categories(),
+            no_ignore_rules(),
+            accounts,
+        ));
+        let auth = auth_header(Uuid::new_v4(), UserRole::User);
+        let body = serde_json::to_string(&CreateOperationRequest {
+            account_id: Uuid::new_v4(),
+            amount: Decimal::new(-50, 0),
+            date: NaiveDate::from_ymd_opt(2024, 1, 15).unwrap(),
+            effective_date: None,
+            label: "Groceries".to_string(),
+        })
+        .unwrap();
+        let req = json_request("POST", "/operations", Some(&body), Some(&auth));
+        let resp = app.oneshot(req).await.unwrap();
+
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
     }
 
     #[tokio::test]
@@ -903,7 +972,7 @@ mod tests {
         let mut op_repo = MockOperationRepository::new();
         op_repo
             .expect_insert()
-            .returning(|_, _, _, _, _, _| Box::pin(async { Ok(()) }));
+            .returning(|_, _, _| Box::pin(async { Ok(()) }));
         op_repo
             .expect_ignore_by_rule()
             .withf(move |_, r| *r == rule_id)
@@ -923,6 +992,7 @@ mod tests {
         ));
         let auth = auth_header(user_id, UserRole::User);
         let body = serde_json::to_string(&CreateOperationRequest {
+            account_id: Uuid::nil(),
             amount: Decimal::new(-500, 0),
             date: NaiveDate::from_ymd_opt(2026, 10, 14).unwrap(),
             effective_date: None,

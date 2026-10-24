@@ -3,11 +3,11 @@ use crate::{
     auth::middleware::AuthUser,
     domain::budget::{Budget, BudgetType, YearMonth},
     error::{AppError, AppResult},
-    repositories::{BudgetRepository, OperationRepository, SummaryRow, UserRepository},
+    repositories::{AccountRepository, BudgetRepository, OperationRepository, SummaryRow},
     services::forecast::{
         BudgetBreakdown, Flows, Forecast, ForecastInput, ForecastMonth, MonthBreakdown,
-        MonthStatus, UnbudgetedBreakdown, balance_adjustment_window, compute_forecast, horizon,
-        month_breakdown, starting_balance, unbudgeted_history,
+        MonthStatus, UnbudgetedBreakdown, accounts_adjustment_window, accounts_starting_balance,
+        compute_forecast, horizon, month_breakdown, unbudgeted_history,
     },
 };
 use axum::{
@@ -140,11 +140,12 @@ impl From<Flows> for ForecastTotalsResponse {
 pub struct ForecastResponse {
     pub months: Vec<ForecastMonthResponse>,
     pub totals: ForecastTotalsResponse,
-    /// Account balance at the start of the first day of the horizon, derived from the balance
-    /// recorded with `PUT /users/me/balance`: plus the operations accounted after its date and
-    /// before the horizon, or minus those accounted from the horizon start through its date
-    /// when it is more recent (operations on the balance date are included in it). Null when
-    /// no balance is recorded, in which case the running balance starts from zero.
+    /// Balance of the accounts receiving operations at the start of the first day of the
+    /// horizon: for each one with a balance, its most recent balance plus its operations
+    /// accounted after its date and before the horizon, or minus those accounted from the
+    /// horizon start through its date when it is more recent (operations on the balance date
+    /// are included in it), summed. Null when none has a balance, in which case the running
+    /// balance starts from zero.
     #[schemars(with = "Option<String>")]
     pub starting_balance: Option<Decimal>,
     /// Cumulative balance at the end of the last month.
@@ -192,8 +193,8 @@ struct ForecastData {
 }
 
 impl ForecastData {
-    async fn load<U, O: OperationRepository, B: BudgetRepository, P, C, R>(
-        state: &AppState<U, O, B, P, C, R>,
+    async fn load<U, O: OperationRepository, B: BudgetRepository, P, C, R, A>(
+        state: &AppState<U, O, B, P, C, R, A>,
         user_id: Uuid,
         (start, end): (NaiveDate, NaiveDate),
         today: NaiveDate,
@@ -246,14 +247,15 @@ fn horizon_dates(from: YearMonth, months: usize) -> Option<(NaiveDate, NaiveDate
 }
 
 pub async fn get_forecast<
-    U: UserRepository,
+    U,
     O: OperationRepository,
     B: BudgetRepository,
     P,
     C,
     R,
+    A: AccountRepository,
 >(
-    State(state): State<AppState<U, O, B, P, C, R>>,
+    State(state): State<AppState<U, O, B, P, C, R, A>>,
     auth_user: AuthUser,
     Query(q): Query<ForecastQuery>,
 ) -> AppResult<Json<ForecastResponse>> {
@@ -268,21 +270,23 @@ pub async fn get_forecast<
 
     let today = chrono::Local::now().date_naive();
     let data = ForecastData::load(&state, auth_user.id, (start, end), today).await?;
-    let starting_balance = match state.user_repo.find_balance(auth_user.id).await? {
-        None => None,
-        Some(balance) => Some(match balance_adjustment_window(balance.date, start) {
-            Some((first, last)) if start <= first && last <= end => {
-                starting_balance(balance, start, &data.rows)
-            }
-            Some((first, last)) => {
-                let between = state
-                    .operation_repo
-                    .list_for_summary(auth_user.id, first, last)
-                    .await?;
-                starting_balance(balance, start, &between)
-            }
-            None => balance.amount,
-        }),
+    let balances: Vec<_> = state
+        .account_repo
+        .list(auth_user.id)
+        .await?
+        .into_iter()
+        .filter(|account| account.fields.receives_operations())
+        .filter_map(|account| Some((account.id, account.balance?.balance)))
+        .collect();
+    let starting_balance = match accounts_adjustment_window(&balances, start) {
+        Some((first, last)) if !(start <= first && last <= end) => {
+            let between = state
+                .operation_repo
+                .list_for_summary(auth_user.id, first, last)
+                .await?;
+            accounts_starting_balance(&balances, start, &between)
+        }
+        _ => accounts_starting_balance(&balances, start, &data.rows),
     };
 
     let forecast = compute_forecast(&data.input(from, months, today, starting_balance));
@@ -393,8 +397,8 @@ impl From<MonthBreakdown> for ForecastMonthBreakdownResponse {
     }
 }
 
-pub async fn get_forecast_month<U, O: OperationRepository, B: BudgetRepository, P, C, R>(
-    State(state): State<AppState<U, O, B, P, C, R>>,
+pub async fn get_forecast_month<U, O: OperationRepository, B: BudgetRepository, P, C, R, A>(
+    State(state): State<AppState<U, O, B, P, C, R, A>>,
     auth_user: AuthUser,
     Path(path): Path<ForecastMonthPath>,
 ) -> AppResult<Json<ForecastMonthBreakdownResponse>> {
@@ -411,13 +415,19 @@ mod tests {
     use super::*;
     use crate::{
         domain::{
+            account::{Account, AccountBalance, AccountFields, AccountKind, BalanceEntry},
             budget::{Budget, BudgetKind, BudgetType, CurrentPeriod, Recurrence},
-            user::{AccountBalance, UserRole},
+            user::UserRole,
         },
         repositories::{
-            MockBudgetRepository, MockOperationRepository, MockUserRepository, SummaryRow,
+            MockAccountRepository, MockBudgetRepository, MockOperationRepository,
+            MockUserRepository, SummaryRow,
         },
-        test_util::{auth_header, build_test_router, json_request, make_test_state, response_json},
+        test_util::{
+            auth_header, build_test_router, json_request, make_test_state,
+            make_test_state_with_all, no_categories, no_ignore_rules, no_import_profiles,
+            response_json,
+        },
     };
     use axum::http::StatusCode;
     use chrono::NaiveDate;
@@ -448,6 +458,7 @@ mod tests {
 
     fn unlinked(date: NaiveDate, amount: Decimal) -> SummaryRow {
         SummaryRow {
+            account_id: Uuid::nil(),
             amount,
             date,
             budget_link_type: "unlinked".to_string(),
@@ -472,12 +483,49 @@ mod tests {
         expect_history(or, vec![]);
     }
 
-    fn users_with_balance(user_id: Uuid, balance: Option<AccountBalance>) -> MockUserRepository {
-        let mut ur = MockUserRepository::new();
-        ur.expect_find_balance()
+    fn account(id: Uuid, user_id: Uuid, kind: AccountKind, balance: AccountBalance) -> Account {
+        Account {
+            id,
+            user_id,
+            fields: AccountFields {
+                name: format!("{kind:?}"),
+                kind,
+                imported: kind == AccountKind::Checking,
+            },
+            balance: Some(BalanceEntry {
+                id: Uuid::new_v4(),
+                balance,
+            }),
+            current_balance: Some(balance.amount),
+            created_at: chrono::Utc::now(),
+        }
+    }
+
+    /// The user's imported checking account, holding the rows (whose account is nil) and the
+    /// given balance, next to a savings account whose balance the forecast must leave out.
+    fn accounts_with_balance(
+        user_id: Uuid,
+        balance: Option<AccountBalance>,
+    ) -> MockAccountRepository {
+        let livret = AccountBalance {
+            amount: dec!(99999),
+            date: NaiveDate::from_ymd_opt(2020, 1, 1).unwrap(),
+        };
+        let mut accounts = vec![account(
+            Uuid::new_v4(),
+            user_id,
+            AccountKind::Savings,
+            livret,
+        )];
+        accounts.extend(balance.map(|b| account(Uuid::nil(), user_id, AccountKind::Checking, b)));
+        let mut repo = MockAccountRepository::new();
+        repo.expect_list()
             .withf(move |uid| *uid == user_id)
-            .returning(move |_| Box::pin(async move { Ok(balance) }));
-        ur
+            .returning(move |_| {
+                let accounts = accounts.clone();
+                Box::pin(async move { Ok(accounts) })
+            });
+        repo
     }
 
     async fn get(
@@ -496,10 +544,14 @@ mod tests {
         balance: Option<AccountBalance>,
         query: &str,
     ) -> axum::response::Response {
-        let app = build_test_router(make_test_state(
-            users_with_balance(user_id, balance),
+        let app = build_test_router(make_test_state_with_all(
+            MockUserRepository::new(),
             operation_repo,
             budget_repo,
+            no_import_profiles(),
+            no_categories(),
+            no_ignore_rules(),
+            accounts_with_balance(user_id, balance),
         ));
         let auth = auth_header(user_id, UserRole::User);
         app.oneshot(json_request(
@@ -530,6 +582,7 @@ mod tests {
                         unlinked(nov, dec!(1200.00)),
                         unlinked(nov, dec!(-800.00)),
                         SummaryRow {
+                            account_id: Uuid::nil(),
                             amount: dec!(-300.00),
                             date: jan,
                             budget_link_type: "auto".to_string(),
@@ -618,6 +671,7 @@ mod tests {
         or.expect_list_for_summary().returning(move |_, start, _| {
             Box::pin(async move {
                 Ok(vec![SummaryRow {
+                    account_id: Uuid::nil(),
                     amount: dec!(-330),
                     date: start,
                     budget_link_type: "manual".to_string(),
@@ -990,6 +1044,7 @@ mod tests {
 
     fn linked(budget: &Budget, date: NaiveDate, amount: Decimal) -> SummaryRow {
         SummaryRow {
+            account_id: Uuid::nil(),
             amount,
             date,
             budget_link_type: "manual".to_string(),

@@ -41,11 +41,12 @@ handler → service → repository → database:
   breakdown behind `GET /forecast/{year}/{month}`. All are pure functions over
   domain values, with no I/O.
 - [src/repositories/](radinage-api/src/repositories/) define one trait per
-  aggregate (`UserRepository`, `OperationRepository`, `BudgetRepository`,
-  `ImportProfileRepository`, `CategoryRepository`), each
+  aggregate (`UserRepository`, `AccountRepository`, `OperationRepository`,
+  `BudgetRepository`, `ImportProfileRepository`, `CategoryRepository`,
+  `IgnoreRuleRepository`), each
   with a `Pg*` implementation and a mockall-generated mock for handler tests.
-- [src/domain/](radinage-api/src/domain/) holds users, operations, budgets,
-  categories and import profiles,
+- [src/domain/](radinage-api/src/domain/) holds users, accounts, operations,
+  budgets, categories, ignore rules and import profiles,
   including the `BudgetLink` and `BudgetKind` enums that carry most of the
   domain's shape.
 - [src/auth/](radinage-api/src/auth/) hashes passwords with Argon2 and issues
@@ -112,11 +113,13 @@ sequenceDiagram
     participant M as services/matcher.rs
     participant P as ImportProfileRepository
     participant G as IgnoreRuleRepository
-    SPA->>H: POST /operations/import (multipart: file + column mapping)
+    participant A as AccountRepository
+    SPA->>H: POST /operations/import (multipart: file + column mapping + account)
+    H->>A: find(account, user): must receive operations
     H->>I: parse_csv / parse_xlsx (by file extension)
     I-->>H: parsed rows + per-row errors
     loop each parsed row
-        H->>R: exists_by_fields(user, amount, date, label)
+        H->>R: exists_by_fields(user, account, amount, date, label)
     end
     H->>G: list(user)
     loop each non-duplicate row
@@ -162,8 +165,9 @@ that are not ignored yet; none of these paths ever changes how an already
 ignored operation was ignored. A failure to list or apply the rules during an
 import is logged and leaves the operations counted.
 
-The column mapping travels with every import request, even when the web app
-took it from an import profile: the profile only fills the form and, through
+The column mapping and the account travel with every import request, even when
+the web app took them from an import profile: the profile only fills the form
+and, through
 `profileId`, records its last use so the most recent one is offered first.
 The import itself stays self-contained, and a failure to record that use is
 logged without failing an import whose operations are already stored. The web
@@ -174,8 +178,11 @@ preview shows the cells exactly as the import will see them.
 ## State and persistence
 
 PostgreSQL is the only store, owned exclusively by `radinage-api`. Users own
-operations and budgets; budgets own their periods and matching rules; deleting
-a user or a budget cascades through foreign keys. An operation's budget link is
+accounts, operations and budgets; budgets own their periods and matching rules;
+deleting a user or a budget cascades through foreign keys. An account owns its
+balances, at most one per date (`account_balances`). Every operation and every
+import profile points at one of its owner's accounts, through a foreign key on
+(account id, user id), so an account holding either cannot be deleted. An operation's budget link is
 two columns (link type and budget id) that encode `BudgetLink`: unlinked,
 manual, or auto. An operation can instead be split: `operation_splits` holds
 its ordered parts, each with an amount, an optional date that attributes it
@@ -195,8 +202,8 @@ browser keeps the JWT and role in `localStorage`.
 
 ## Design decisions
 
-**Static dispatch over repository traits.** `AppState<U, O, B, P, C, R>` is generic
-over the six repository types and handlers are generic functions. Tests swap
+**Static dispatch over repository traits.** `AppState<U, O, B, P, C, R, A>` is generic
+over the seven repository types and handlers are generic functions. Tests swap
 in mocks with no `dyn` and no runtime cost, at the price of generic parameters
 on every handler signature.
 
@@ -269,13 +276,15 @@ daily operations' forecast, use the same rate. Budget-linked amounts count under
 their budget's type; an operation outside any budget counts as income or as an
 expense by its own sign, so a salary and a grocery run in the same month never
 cancel each other out. The running balance starts at `startingBalance`, the
-account's balance on the first day of the horizon. It is derived from the one
-balance a user may record with its date (`PUT /users/me/balance`, two nullable
-columns on `users`): operations accounted on that date are taken as already in
-it, so the operations accounted after it and before the horizon are added, or,
-when it is more recent than the horizon start, those accounted from the start
-through its date are taken back out. A user who records none starts at zero
-and `startingBalance` is null. Bringing the balance to the horizon start rather
+balance of the imported checking accounts on the first day of the horizon. It
+is the sum, over those of them with a balance, of each one's most recent
+balance brought to that day with its own operations: operations accounted on
+the balance date are taken as already in it, so the operations accounted after
+it and before the horizon are added, or, when it is more recent than the
+horizon start, those accounted from the start through its date are taken back
+out. A user with no such balance starts at zero and `startingBalance` is null.
+Savings accounts and checking accounts whose statements are not imported are
+left out: their money is not what the operations and budgets move. Bringing the balance to the horizon start rather
 than starting the horizon at the balance date keeps every month of the horizon
 computed the same way, whatever the balance date. The response also carries
 `dailyBudget`: the end balance before the
@@ -298,6 +307,20 @@ the same per-month projection as `GET /forecast` over the same data, so its
 second sum that could drift. Keeping this in the API gives
 a single, tested definition of the numbers; the web app only formats them.
 
+**An account's balance follows the bank; the forecast follows the accounts.**
+An imported checking account is set up once, with the balance its bank showed
+on one day; `currentBalance` then adds every operation of the account dated
+after that day, ignored ones included and by bank date, because an ignored
+transfer between two accounts still moved the money and the bank books it on
+its own date. The forecast's starting balance instead brings each account to
+the horizon with the same rows as its months: by accounting date and without
+ignored operations, so that an operation moved to another month or left out is
+not counted twice or once too many. Summed over the accounts, an ignored
+transfer between two of them cancels out either way. Other accounts hold no
+operations and are worth their most recent balance. Correcting an account's
+starting point is recording a newer balance; the older ones stay in its
+history.
+
 **Same-origin web app.** nginx serves the SPA and proxies `/api/` on the same
 origin, so the browser needs no CORS and the API address is a deployment
 setting of the web app image rather than a build-time constant.
@@ -317,6 +340,9 @@ that defines flags, environment variables and defaults together.
   row id (such as `set_auto_link`) are called on rows already loaded that
   way.
 - **No response exposes `user_id`.**
+- **Only an imported checking account holds operations.** Recording,
+  importing and pointing an import profile at another account is refused, and
+  an account holding operations or profiles stays an imported checking account.
 - **A manual budget link is never overwritten by auto-matching**; only an
   explicit `force` on apply replaces it.
 - **A split operation's parts sum exactly to its amount**, share its sign and
@@ -336,6 +362,7 @@ that defines flags, environment variables and defaults together.
 - Imports run one duplicate-check query per row and one budget and one
   category listing per inserted row; large statements are slow rather than
   failing.
-- Duplicate detection is exact on (date, amount, label); two genuinely
-  distinct operations sharing all three are treated as one.
+- Duplicate detection is exact on (account, date, amount, label); two
+  genuinely distinct operations of one account sharing all three are treated
+  as one.
 - Tokens cannot be revoked before expiry.

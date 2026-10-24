@@ -7,16 +7,19 @@ import {
 	useQuery,
 	useQueryClient,
 } from "@tanstack/react-query";
-import { ApiError, apiFetch } from "@/lib/api";
+import { apiFetch } from "@/lib/api";
 import {
 	type OperationFilters,
 	operationSearchQuery,
 } from "@/lib/operation-search";
 import type {
 	AccountBalance,
+	AccountRequest,
+	AccountResponse,
 	ApplyBudgetResponse,
 	ApplyCategoryResponse,
 	ApplyIgnoreRuleResponse,
+	BalanceEntry,
 	BudgetResponse,
 	BudgetSummaryResponse,
 	CategoryRequest,
@@ -189,7 +192,10 @@ export function useUpdateBudget() {
 }
 
 /** Everything computed from operations, to refetch once one of them changes. */
+const accountsKey = ["accounts"];
+
 const operationDataKeys = [
+	accountsKey,
 	["monthly-operations"],
 	["operation-search"],
 	["summary"],
@@ -336,49 +342,85 @@ export function useChangePassword() {
 	});
 }
 
-const accountBalanceKey = ["account-balance"];
-
-/** The recorded account balance, null when none is recorded. */
-export function useAccountBalance() {
+/** Accounts, checking ones first, then by name. */
+export function useAccounts() {
 	return useQuery({
-		queryKey: accountBalanceKey,
-		queryFn: async () => {
-			try {
-				return await apiFetch<AccountBalance>("/users/me/balance");
-			} catch (err) {
-				if (err instanceof ApiError && err.status === 404) {
-					return null;
-				}
-				throw err;
-			}
-		},
+		queryKey: accountsKey,
+		queryFn: () => apiFetch<AccountResponse[]>("/accounts"),
 	});
 }
 
-function useInvalidateAccountBalance() {
+function useInvalidateAccounts() {
 	const queryClient = useQueryClient();
 	return () => {
-		queryClient.invalidateQueries({ queryKey: accountBalanceKey });
+		queryClient.invalidateQueries({ queryKey: accountsKey });
 		queryClient.invalidateQueries({ queryKey: ["forecast"] });
 	};
 }
 
-export function useUpdateAccountBalance() {
-	const invalidate = useInvalidateAccountBalance();
+export function useSaveAccount() {
+	const invalidate = useInvalidateAccounts();
 	return useMutation({
-		mutationFn: (body: AccountBalance) =>
-			apiFetch<AccountBalance>("/users/me/balance", {
-				method: "PUT",
-				body: JSON.stringify(body),
-			}),
+		mutationFn: ({ id, body }: { id?: string; body: AccountRequest }) =>
+			apiFetch<AccountResponse>(
+				id === undefined ? "/accounts" : `/accounts/${id}`,
+				{
+					method: id === undefined ? "POST" : "PUT",
+					body: JSON.stringify(body),
+				},
+			),
+		onSuccess: invalidate,
+	});
+}
+
+export function useDeleteAccount() {
+	const invalidate = useInvalidateAccounts();
+	return useMutation({
+		mutationFn: (id: string) =>
+			apiFetch<void>(`/accounts/${id}`, { method: "DELETE" }),
+		onSuccess: invalidate,
+	});
+}
+
+/** Record a balance of an account, or correct the one `balanceId` names. */
+export function useSaveAccountBalance() {
+	const invalidate = useInvalidateAccounts();
+	return useMutation({
+		mutationFn: ({
+			accountId,
+			balanceId,
+			body,
+		}: {
+			accountId: string;
+			balanceId?: string;
+			body: AccountBalance;
+		}) =>
+			apiFetch<BalanceEntry>(
+				balanceId === undefined
+					? `/accounts/${accountId}/balances`
+					: `/accounts/${accountId}/balances/${balanceId}`,
+				{
+					method: balanceId === undefined ? "POST" : "PUT",
+					body: JSON.stringify(body),
+				},
+			),
 		onSuccess: invalidate,
 	});
 }
 
 export function useDeleteAccountBalance() {
-	const invalidate = useInvalidateAccountBalance();
+	const invalidate = useInvalidateAccounts();
 	return useMutation({
-		mutationFn: () => apiFetch<void>("/users/me/balance", { method: "DELETE" }),
+		mutationFn: ({
+			accountId,
+			balanceId,
+		}: {
+			accountId: string;
+			balanceId: string;
+		}) =>
+			apiFetch<void>(`/accounts/${accountId}/balances/${balanceId}`, {
+				method: "DELETE",
+			}),
 		onSuccess: invalidate,
 	});
 }
@@ -443,7 +485,8 @@ export function useImportData() {
 			queryClient.invalidateQueries({ queryKey: ignoreRulesKey });
 			queryClient.invalidateQueries({ queryKey: ["summary"] });
 			queryClient.invalidateQueries({ queryKey: ["forecast"] });
-			queryClient.invalidateQueries({ queryKey: accountBalanceKey });
+			queryClient.invalidateQueries({ queryKey: accountsKey });
+			queryClient.invalidateQueries({ queryKey: importProfilesKey });
 		},
 	});
 }
@@ -537,6 +580,7 @@ export function useImportOperations() {
 			body.append("skipLines", String(profile.skipLines));
 			body.append("csvDelimiter", profile.csvDelimiter);
 			body.append("profileId", profile.id);
+			body.append("accountId", profile.accountId);
 			return apiFetch<ImportResult>("/operations/import", {
 				method: "POST",
 				body,

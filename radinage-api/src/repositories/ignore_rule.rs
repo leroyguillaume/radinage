@@ -168,9 +168,15 @@ impl IgnoreRuleRepository for PgIgnoreRuleRepository {
 mod tests {
     use super::*;
     use crate::{
-        domain::{budget::LabelPattern, user::UserRole},
+        domain::{
+            account::{AccountFields, AccountKind},
+            budget::LabelPattern,
+            operation::NewOperation,
+            user::UserRole,
+        },
         repositories::{
-            OperationRepository, PgOperationRepository, PgUserRepository, UserRepository,
+            AccountRepository, OperationRepository, PgAccountRepository, PgOperationRepository,
+            PgUserRepository, UserRepository,
         },
     };
     use chrono::NaiveDate;
@@ -183,6 +189,19 @@ mod tests {
             .await
             .unwrap();
         id
+    }
+
+    async fn make_account(pool: &PgPool, user_id: Uuid) -> Uuid {
+        let fields = AccountFields {
+            name: "Main".to_string(),
+            kind: AccountKind::Checking,
+            imported: true,
+        };
+        PgAccountRepository::new(pool.clone())
+            .create(user_id, &fields)
+            .await
+            .unwrap()
+            .id
     }
 
     fn contains(value: &str) -> IgnoreRuleFields {
@@ -246,15 +265,26 @@ mod tests {
         let alice = make_user(&pool, "alice").await;
         let bob = make_user(&pool, "bob").await;
         let repo = PgIgnoreRuleRepository::new(pool.clone());
+        let account = make_account(&pool, alice).await;
         let ops = PgOperationRepository::new(pool);
         let rule = repo.create(alice, &contains("VIR")).await.unwrap();
         let date = NaiveDate::from_ymd_opt(2026, 10, 1).unwrap();
         let by_rule = Uuid::new_v4();
         let by_hand = Uuid::new_v4();
         for id in [by_rule, by_hand] {
-            ops.insert(id, alice, dec!(-10), date, None, "VIR")
-                .await
-                .unwrap();
+            ops.insert(
+                id,
+                alice,
+                &NewOperation {
+                    account_id: account,
+                    amount: dec!(-10),
+                    date,
+                    effective_date: None,
+                    label: "VIR".to_string(),
+                },
+            )
+            .await
+            .unwrap();
         }
         ops.ignore_by_rule(by_rule, rule.id).await.unwrap();
         ops.set_ignored(by_hand, alice, true).await.unwrap();
@@ -274,15 +304,26 @@ mod tests {
     async fn a_rule_never_overrides_how_an_operation_is_already_ignored(pool: PgPool) {
         let alice = make_user(&pool, "alice").await;
         let repo = PgIgnoreRuleRepository::new(pool.clone());
+        let account = make_account(&pool, alice).await;
         let ops = PgOperationRepository::new(pool);
         let first = repo.create(alice, &contains("VIR")).await.unwrap();
         let second = repo.create(alice, &contains("VIR INTERNE")).await.unwrap();
         let date = NaiveDate::from_ymd_opt(2026, 10, 1).unwrap();
         let (by_hand, by_rule) = (Uuid::new_v4(), Uuid::new_v4());
         for id in [by_hand, by_rule] {
-            ops.insert(id, alice, dec!(-10), date, None, "VIR INTERNE")
-                .await
-                .unwrap();
+            ops.insert(
+                id,
+                alice,
+                &NewOperation {
+                    account_id: account,
+                    amount: dec!(-10),
+                    date,
+                    effective_date: None,
+                    label: "VIR INTERNE".to_string(),
+                },
+            )
+            .await
+            .unwrap();
         }
         ops.set_ignored(by_hand, alice, true).await.unwrap();
         ops.ignore_by_rule(by_rule, first.id).await.unwrap();

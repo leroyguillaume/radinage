@@ -1,7 +1,7 @@
 use crate::{
     domain::{
         budget::BudgetType,
-        operation::{BudgetLink, NewOperationSplit, Operation, OperationSplit},
+        operation::{BudgetLink, NewOperation, NewOperationSplit, Operation, OperationSplit},
     },
     error::{AppError, AppResult},
     repositories::SortOrder,
@@ -132,6 +132,8 @@ pub struct CategoryTotal {
 /// part reported as `manual` when it has a budget and `unlinked` otherwise.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SummaryRow {
+    /// Account of the operation the amount comes from.
+    pub account_id: Uuid,
     pub amount: Decimal,
     /// Accounting date of the operation (its effective date if set, otherwise its date).
     pub date: NaiveDate,
@@ -188,10 +190,7 @@ pub trait OperationRepository: Send + Sync + 'static {
         &self,
         id: Uuid,
         user_id: Uuid,
-        amount: Decimal,
-        date: NaiveDate,
-        effective_date: Option<NaiveDate>,
-        label: &str,
+        operation: &NewOperation,
     ) -> impl std::future::Future<Output = AppResult<()>> + Send;
 
     /// Update an existing operation's fields. Returns `true` if found, `false` if not.
@@ -261,10 +260,12 @@ pub trait OperationRepository: Send + Sync + 'static {
         ignored: bool,
     ) -> impl std::future::Future<Output = AppResult<bool>> + Send;
 
-    /// Check whether an operation with the same (user_id, date, label, amount) already exists.
+    /// Check whether an operation with the same date, label and amount already exists on the
+    /// account.
     fn exists_by_fields(
         &self,
         user_id: Uuid,
+        account_id: Uuid,
         amount: Decimal,
         date: NaiveDate,
         label: &str,
@@ -321,7 +322,7 @@ impl PgOperationRepository {
 }
 
 /// Columns read into an [`Operation`], from `operations o`.
-const OPERATION_COLUMNS: &str = "o.id, o.user_id, o.amount, o.date, o.effective_date, o.label, \
+const OPERATION_COLUMNS: &str = "o.id, o.user_id, o.account_id, o.amount, o.date, o.effective_date, o.label, \
      o.budget_link_type, o.budget_link_id, o.ignored, o.ignore_rule_id, o.category_id, \
      (SELECT b.category_id FROM budgets b WHERE b.id = o.budget_link_id) AS budget_category_id";
 
@@ -437,6 +438,7 @@ fn row_to_operation(row: &sqlx::postgres::PgRow) -> AppResult<Operation> {
     Ok(Operation {
         id: row.try_get("id")?,
         user_id: row.try_get("user_id")?,
+        account_id: row.try_get("account_id")?,
         amount: row.try_get("amount")?,
         date: row.try_get("date")?,
         effective_date: row.try_get("effective_date").unwrap_or(None),
@@ -553,24 +555,18 @@ impl OperationRepository for PgOperationRepository {
         Ok((ops, totals))
     }
 
-    async fn insert(
-        &self,
-        id: Uuid,
-        user_id: Uuid,
-        amount: Decimal,
-        date: NaiveDate,
-        effective_date: Option<NaiveDate>,
-        label: &str,
-    ) -> AppResult<()> {
+    async fn insert(&self, id: Uuid, user_id: Uuid, operation: &NewOperation) -> AppResult<()> {
         sqlx::query(
-            "INSERT INTO operations (id, user_id, amount, date, effective_date, label) VALUES ($1, $2, $3, $4, $5, $6)",
+            "INSERT INTO operations (id, user_id, account_id, amount, date, effective_date, label) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7)",
         )
         .bind(id)
         .bind(user_id)
-        .bind(amount)
-        .bind(date)
-        .bind(effective_date)
-        .bind(label)
+        .bind(operation.account_id)
+        .bind(operation.amount)
+        .bind(operation.date)
+        .bind(operation.effective_date)
+        .bind(&operation.label)
         .execute(&self.pool)
         .await?;
         Ok(())
@@ -702,14 +698,17 @@ impl OperationRepository for PgOperationRepository {
     async fn exists_by_fields(
         &self,
         user_id: Uuid,
+        account_id: Uuid,
         amount: Decimal,
         date: NaiveDate,
         label: &str,
     ) -> AppResult<bool> {
         let row = sqlx::query(
-            "SELECT EXISTS(SELECT 1 FROM operations WHERE user_id = $1 AND amount = $2 AND date = $3 AND label = $4) AS found",
+            "SELECT EXISTS(SELECT 1 FROM operations WHERE user_id = $1 AND account_id = $2 \
+             AND amount = $3 AND date = $4 AND label = $5) AS found",
         )
         .bind(user_id)
+        .bind(account_id)
         .bind(amount)
         .bind(date)
         .bind(label)
@@ -787,7 +786,7 @@ impl OperationRepository for PgOperationRepository {
         month_end: NaiveDate,
     ) -> AppResult<Vec<SummaryRow>> {
         let rows = sqlx::query(&format!(
-            "SELECT o.amount, {OPERATION_DATE} AS accounting_date,
+            "SELECT o.account_id, o.amount, {OPERATION_DATE} AS accounting_date,
                     o.budget_link_type, o.budget_link_id AS budget_id, b.budget_type
              FROM operations o
              LEFT JOIN budgets b ON b.id = o.budget_link_id
@@ -796,7 +795,7 @@ impl OperationRepository for PgOperationRepository {
                AND o.ignored = FALSE
                AND NOT EXISTS (SELECT 1 FROM operation_splits s WHERE s.operation_id = o.id)
              UNION ALL
-             SELECT s.amount, {SPLIT_DATE},
+             SELECT o.account_id, s.amount, {SPLIT_DATE},
                     CASE WHEN s.budget_id IS NULL THEN 'unlinked' ELSE 'manual' END,
                     s.budget_id, b.budget_type
              FROM operation_splits s
@@ -816,6 +815,7 @@ impl OperationRepository for PgOperationRepository {
             .iter()
             .map(|r| {
                 Ok(SummaryRow {
+                    account_id: r.try_get("account_id")?,
                     amount: r.try_get("amount")?,
                     date: r.try_get("accounting_date")?,
                     budget_link_type: r.try_get("budget_link_type")?,
@@ -930,6 +930,8 @@ mod integration_tests {
     use rust_decimal_macros::dec;
     use sqlx::PgPool;
 
+    /// A user with one imported checking account sharing its id, so that the tests insert
+    /// their operations with `user_id` as the account.
     async fn setup_user(pool: &PgPool) -> Uuid {
         let user_id = Uuid::new_v4();
         sqlx::query(
@@ -938,6 +940,14 @@ mod integration_tests {
         .bind(user_id)
         .bind(format!("user_{user_id}"))
         .bind("hash")
+        .execute(pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO accounts (id, user_id, name, kind, imported) \
+             VALUES ($1, $1, 'Main', 'checking', TRUE)",
+        )
+        .bind(user_id)
         .execute(pool)
         .await
         .unwrap();
@@ -953,10 +963,13 @@ mod integration_tests {
         repo.insert(
             op_id,
             user_id,
-            dec!(-50),
-            NaiveDate::from_ymd_opt(2024, 1, 15).unwrap(),
-            None,
-            "Groceries",
+            &NewOperation {
+                account_id: user_id,
+                amount: dec!(-50),
+                date: NaiveDate::from_ymd_opt(2024, 1, 15).unwrap(),
+                effective_date: None,
+                label: "Groceries".to_string(),
+            },
         )
         .await
         .unwrap();
@@ -978,10 +991,13 @@ mod integration_tests {
         repo.insert(
             op_id,
             user_id,
-            dec!(-10),
-            NaiveDate::from_ymd_opt(2024, 1, 1).unwrap(),
-            None,
-            "Test",
+            &NewOperation {
+                account_id: user_id,
+                amount: dec!(-10),
+                date: NaiveDate::from_ymd_opt(2024, 1, 1).unwrap(),
+                effective_date: None,
+                label: "Test".to_string(),
+            },
         )
         .await
         .unwrap();
@@ -999,10 +1015,13 @@ mod integration_tests {
         repo.insert(
             op_id,
             user_id,
-            dec!(-100),
-            NaiveDate::from_ymd_opt(2024, 1, 1).unwrap(),
-            None,
-            "Original",
+            &NewOperation {
+                account_id: user_id,
+                amount: dec!(-100),
+                date: NaiveDate::from_ymd_opt(2024, 1, 1).unwrap(),
+                effective_date: None,
+                label: "Original".to_string(),
+            },
         )
         .await
         .unwrap();
@@ -1052,10 +1071,13 @@ mod integration_tests {
         repo.insert(
             op_id,
             user_id,
-            dec!(-50),
-            NaiveDate::from_ymd_opt(2024, 1, 1).unwrap(),
-            None,
-            "ToDelete",
+            &NewOperation {
+                account_id: user_id,
+                amount: dec!(-50),
+                date: NaiveDate::from_ymd_opt(2024, 1, 1).unwrap(),
+                effective_date: None,
+                label: "ToDelete".to_string(),
+            },
         )
         .await
         .unwrap();
@@ -1073,10 +1095,13 @@ mod integration_tests {
             repo.insert(
                 Uuid::new_v4(),
                 user_id,
-                Decimal::from(i),
-                NaiveDate::from_ymd_opt(2024, 1, i as u32 + 1).unwrap(),
-                None,
-                &format!("Op {i}"),
+                &NewOperation {
+                    account_id: user_id,
+                    amount: Decimal::from(i),
+                    date: NaiveDate::from_ymd_opt(2024, 1, i as u32 + 1).unwrap(),
+                    effective_date: None,
+                    label: format!("Op {i}"),
+                },
             )
             .await
             .unwrap();
@@ -1104,10 +1129,13 @@ mod integration_tests {
         repo.insert(
             id_a,
             user_id,
-            dec!(-10),
-            NaiveDate::from_ymd_opt(2024, 1, 10).unwrap(),
-            None,
-            "A",
+            &NewOperation {
+                account_id: user_id,
+                amount: dec!(-10),
+                date: NaiveDate::from_ymd_opt(2024, 1, 10).unwrap(),
+                effective_date: None,
+                label: "A".to_string(),
+            },
         )
         .await
         .unwrap();
@@ -1117,10 +1145,13 @@ mod integration_tests {
         repo.insert(
             id_b,
             user_id,
-            dec!(-20),
-            NaiveDate::from_ymd_opt(2024, 1, 5).unwrap(),
-            Some(NaiveDate::from_ymd_opt(2024, 1, 20).unwrap()),
-            "B",
+            &NewOperation {
+                account_id: user_id,
+                amount: dec!(-20),
+                date: NaiveDate::from_ymd_opt(2024, 1, 5).unwrap(),
+                effective_date: Some(NaiveDate::from_ymd_opt(2024, 1, 20).unwrap()),
+                label: "B".to_string(),
+            },
         )
         .await
         .unwrap();
@@ -1130,10 +1161,13 @@ mod integration_tests {
         repo.insert(
             id_c,
             user_id,
-            dec!(-30),
-            NaiveDate::from_ymd_opt(2024, 1, 15).unwrap(),
-            None,
-            "C",
+            &NewOperation {
+                account_id: user_id,
+                amount: dec!(-30),
+                date: NaiveDate::from_ymd_opt(2024, 1, 15).unwrap(),
+                effective_date: None,
+                label: "C".to_string(),
+            },
         )
         .await
         .unwrap();
@@ -1173,10 +1207,13 @@ mod integration_tests {
         repo.insert(
             op_id,
             user_id,
-            amount,
-            NaiveDate::from_ymd_opt(2024, 3, 10).unwrap(),
-            None,
-            "Cash withdrawal",
+            &NewOperation {
+                account_id: user_id,
+                amount,
+                date: NaiveDate::from_ymd_opt(2024, 3, 10).unwrap(),
+                effective_date: None,
+                label: "Cash withdrawal".to_string(),
+            },
         )
         .await
         .unwrap();
@@ -1493,10 +1530,13 @@ mod integration_tests {
         repo.insert(
             deferred_id,
             user_id,
-            dec!(-12),
-            NaiveDate::from_ymd_opt(2024, 2, 28).unwrap(),
-            NaiveDate::from_ymd_opt(2024, 3, 2),
-            "Card",
+            &NewOperation {
+                account_id: user_id,
+                amount: dec!(-12),
+                date: NaiveDate::from_ymd_opt(2024, 2, 28).unwrap(),
+                effective_date: NaiveDate::from_ymd_opt(2024, 3, 2),
+                label: "Card".to_string(),
+            },
         )
         .await
         .unwrap();
@@ -1522,6 +1562,7 @@ mod integration_tests {
             rows,
             vec![
                 SummaryRow {
+                    account_id: user_id,
                     amount: dec!(-60),
                     date: march(10),
                     budget_link_type: "manual".to_string(),
@@ -1529,6 +1570,7 @@ mod integration_tests {
                     budget_type: Some("expense".to_string()),
                 },
                 SummaryRow {
+                    account_id: user_id,
                     amount: dec!(-40),
                     date: march(10),
                     budget_link_type: "unlinked".to_string(),
@@ -1536,6 +1578,7 @@ mod integration_tests {
                     budget_type: None,
                 },
                 SummaryRow {
+                    account_id: user_id,
                     amount: dec!(-12),
                     date: march(2),
                     budget_link_type: "auto".to_string(),
@@ -1549,6 +1592,7 @@ mod integration_tests {
     #[test]
     fn summary_row_category() {
         let row = |link: &str, budget_type: Option<&str>| SummaryRow {
+            account_id: Uuid::nil(),
             amount: dec!(-1),
             date: NaiveDate::from_ymd_opt(2024, 1, 1).unwrap(),
             budget_link_type: link.to_string(),
@@ -1597,10 +1641,13 @@ mod integration_tests {
         repo.insert(
             op_id,
             user_id,
-            dec!(-10),
-            NaiveDate::from_ymd_opt(2024, 1, 1).unwrap(),
-            None,
-            "Op",
+            &NewOperation {
+                account_id: user_id,
+                amount: dec!(-10),
+                date: NaiveDate::from_ymd_opt(2024, 1, 1).unwrap(),
+                effective_date: None,
+                label: "Op".to_string(),
+            },
         )
         .await
         .unwrap();
@@ -1892,10 +1939,13 @@ mod integration_tests {
             repo.insert(
                 Uuid::new_v4(),
                 user_id,
-                amount,
-                NaiveDate::from_ymd_opt(2024, 3, day).unwrap(),
-                None,
-                "Op",
+                &NewOperation {
+                    account_id: user_id,
+                    amount,
+                    date: NaiveDate::from_ymd_opt(2024, 3, day).unwrap(),
+                    effective_date: None,
+                    label: "Op".to_string(),
+                },
             )
             .await
             .unwrap();
@@ -2004,10 +2054,13 @@ mod integration_tests {
         repo.insert(
             Uuid::new_v4(),
             user_id,
-            dec!(-500),
-            NaiveDate::from_ymd_opt(2024, 4, 1).unwrap(),
-            None,
-            "Next month",
+            &NewOperation {
+                account_id: user_id,
+                amount: dec!(-500),
+                date: NaiveDate::from_ymd_opt(2024, 4, 1).unwrap(),
+                effective_date: None,
+                label: "Next month".to_string(),
+            },
         )
         .await
         .unwrap();
