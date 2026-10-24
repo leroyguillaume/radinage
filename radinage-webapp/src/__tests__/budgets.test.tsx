@@ -13,8 +13,10 @@ import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { i18n } from "@/i18n";
+import { formatAmount } from "@/lib/format";
 import type {
 	BudgetResponse,
+	BudgetSummaryEntry,
 	BudgetType,
 	OperationResponse,
 	Recurrence,
@@ -116,6 +118,7 @@ function makeLinkedOperation(
 function setupBudgetsMock(
 	budgets: BudgetResponse[],
 	operations: OperationResponse[] = [],
+	summary: BudgetSummaryEntry[] = [],
 ) {
 	apiCalls = [];
 	apiFetchMock.mockImplementation((path: string, options?: unknown) => {
@@ -134,11 +137,14 @@ function setupBudgetsMock(
 		if (path.startsWith("/operations/monthly/")) {
 			return Promise.resolve({ operations });
 		}
+		if (path.startsWith("/summary/budgets")) {
+			return Promise.resolve({ budgets: summary });
+		}
 		return Promise.reject(new Error(`Unexpected path: ${path}`));
 	});
 }
 
-async function renderBudgetsPage() {
+async function renderBudgetsPage(initialEntry = "/budgets") {
 	const queryClient = new QueryClient({
 		defaultOptions: { queries: { retry: false } },
 	});
@@ -150,13 +156,14 @@ async function renderBudgetsPage() {
 		getParentRoute: () => rootRoute,
 		path: "/budgets",
 		component: Route.options.component,
+		validateSearch: Route.options.validateSearch,
 	});
 	rootRoute.addChildren([budgetsRoute]);
 
 	const router = createRouter({
 		routeTree: rootRoute,
 		history: createMemoryHistory({
-			initialEntries: ["/budgets"],
+			initialEntries: [initialEntry],
 		}),
 	});
 
@@ -687,5 +694,108 @@ describe("BudgetsPage", () => {
 		).toBeInTheDocument();
 		const loisirs = within(screen.getByRole("article", { name: "Loisirs" }));
 		expect(loisirs.getByText(/^0,00\s€ sur 200,00\s€/)).toBeInTheDocument();
+	});
+
+	describe("year view", () => {
+		/** `formatAmount` with the whitespace Testing Library normalises text to. */
+		const amount = (value: number) => formatAmount(value).replace(/\s/g, " ");
+
+		beforeEach(() => {
+			vi.useFakeTimers({ toFake: ["Date"] });
+			vi.setSystemTime(new Date(2026, 9, 24));
+		});
+
+		afterEach(() => {
+			vi.useRealTimers();
+		});
+
+		const groceries: BudgetSummaryEntry = {
+			budgetId: "b1",
+			months: Array.from({ length: 12 }, (_, i) => ({
+				year: 2026,
+				month: i + 1,
+				expected: "-450.00",
+				actual: i < 10 ? "-470.00" : "0",
+			})),
+		};
+
+		it("switches from the month to the year of each budget", async () => {
+			setupBudgetsMock(
+				[makeBudget("b1", "Courses", "monthly", "-450.00")],
+				[],
+				[groceries],
+			);
+			await renderBudgetsPage();
+			const user = userEvent.setup();
+
+			await user.click(await screen.findByText("Année"));
+
+			const card = within(
+				await screen.findByRole("article", { name: "Courses" }),
+			);
+			expect(
+				await card.findByText(`${amount(4700)} sur ${amount(4500)} attendus`),
+			).toBeInTheDocument();
+			expect(
+				apiCalls.some(
+					(c) =>
+						c.path ===
+						"/summary/budgets?fromYear=2026&fromMonth=1&toYear=2026&toMonth=12",
+				),
+			).toBe(true);
+		});
+
+		it("shows the yearly amount, the gap so far and the months", async () => {
+			setupBudgetsMock(
+				[makeBudget("b1", "Courses", "monthly", "-450.00")],
+				[],
+				[groceries],
+			);
+			await renderBudgetsPage("/budgets?period=year&year=2026");
+
+			const card = within(
+				await screen.findByRole("article", { name: "Courses" }),
+			);
+			expect(await card.findByText(amount(5400))).toBeInTheDocument();
+			expect(card.getByText("/ an")).toBeInTheDocument();
+			expect(card.getByText(`+${amount(200)}`)).toBeInTheDocument();
+			const months = within(card.getByRole("list", { name: "Mois par mois" }));
+			expect(months.getAllByRole("listitem")).toHaveLength(12);
+			expect(months.getByText(/septembre : .* — Dépassé/)).toBeInTheDocument();
+			expect(months.getByText(/octobre : .* — En cours/)).toBeInTheDocument();
+		});
+
+		it("sums the year by type above the budgets", async () => {
+			setupBudgetsMock(
+				[makeBudget("b1", "Courses", "monthly", "-450.00")],
+				[],
+				[groceries],
+			);
+			await renderBudgetsPage("/budgets?period=year&year=2026");
+
+			const overview = within(
+				await screen.findByRole("region", { name: "Bilan 2026" }),
+			);
+			expect(
+				overview.getByRole("heading", { name: "Ce qui dépasse" }),
+			).toBeInTheDocument();
+			expect(overview.getByText("Courses")).toBeInTheDocument();
+			expect(overview.getByText("À dépenser")).toBeInTheDocument();
+		});
+
+		it("links each budget to its year", async () => {
+			setupBudgetsMock(
+				[makeBudget("b1", "Courses", "monthly", "-450.00")],
+				[],
+				[groceries],
+			);
+			await renderBudgetsPage("/budgets?period=year&year=2025");
+
+			expect(
+				await screen.findByRole("link", {
+					name: "Ouvrir le budget Courses sur l'année",
+				}),
+			).toHaveAttribute("href", "/budgets/b1?year=2025");
+		});
 	});
 });

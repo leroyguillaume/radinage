@@ -1,5 +1,7 @@
 {
 	"common": {
+		"previousYear": "Année précédente",
+		"nextYear": "Année suivante",
 		"appName": "Radinage",
 		"loading": "Chargement…",
 		"error": "Une erreur est survenue",
@@ -230,7 +232,89 @@
 			"noDue": "Pas d'échéance ce mois-ci"
 		},
 		"noRules": "Aucune règle de correspondance",
-		"deleteConfirmMessage": "Le budget « {{label}} » sera supprimé définitivement."
+		"deleteConfirmMessage": "Le budget « {{label}} » sera supprimé définitivement.",
+		"periodLabel": "Période",
+		"periods": {
+			"month": "Mois",
+			"year": "Année"
+		},
+		"yearSubtitle": "{{year}}, arrêtée au {{date}}",
+		"yearSubtitlePast": "Année {{year}}",
+		"yearSubtitleFuture": "Année {{year}}, prévisions",
+		"yearProgress": {
+			"amounts": "{{real}} sur {{expected}} attendus",
+			"perYear": "/ an",
+			"projection": "À ce rythme : ≈ {{amount}} fin décembre ({{gap}})",
+			"noDue": "Pas d'échéance cette année",
+			"months": "Mois par mois",
+			"expectedMark": "Attendu à date",
+			"states": {
+				"within": "Dans le budget",
+				"over": "Dépassé",
+				"short": "Pas atteint",
+				"current": "En cours",
+				"future": "Prévu",
+				"none": "Rien de prévu"
+			},
+			"monthTooltip": "{{month}} : {{actual}} sur {{expected}}",
+			"monthTooltipNone": "{{month}} : {{actual}}, rien de prévu"
+		},
+		"overview": {
+			"title": "Bilan {{year}}",
+			"byType": "Par type de budget",
+			"ofYear": "/ {{amount}} prévus sur l'année",
+			"deltaNote": "{{gap}} par rapport à l'attendu à date",
+			"monthlyExpenses": "Dépenses par mois",
+			"monthlyChart": "Dépenses mois par mois, comparées au prévu",
+			"underPlan": "Sous le prévu",
+			"overPlan": "Au-dessus",
+			"plannedOfMonth": "Prévu du mois",
+			"overTitle": "Ce qui dépasse",
+			"overEmpty": "Aucun budget de dépense ne dépasse pour l'instant.",
+			"overMonths": "{{over}} mois sur {{due}} au-dessus",
+			"remainingTitle": "D'ici fin décembre",
+			"remaining": {
+				"expense": "À dépenser",
+				"income": "À recevoir",
+				"savings": "À épargner"
+			}
+		},
+		"detail": {
+			"back": "Retour aux budgets",
+			"notFound": "Ce budget n'existe pas.",
+			"realTitle": {
+				"expense": "Dépensé en {{year}}",
+				"income": "Reçu en {{year}}",
+				"savings": "Épargné en {{year}}"
+			},
+			"expectedSoFar": "sur {{expected}} attendus à date · {{planned}} sur l'année",
+			"monthsTitle": "Mois par mois",
+			"monthsChart": "{{label}} mois par mois, comparé au prévu",
+			"average": "Moyenne",
+			"peak": "Pic · {{month}}",
+			"missed": "Mois ratés",
+			"missedValue": "{{missed}} / {{due}}",
+			"cumulativeTitle": "Cumul sur l'année",
+			"cumulativeChart": "Cumul de {{label}} comparé au cumul prévu",
+			"real": "Réel",
+			"planned": "Prévu",
+			"projection": "Projection",
+			"projectionAbove": "À ce rythme, ≈ {{amount}} fin décembre : {{gap}} au-dessus du budget annuel.",
+			"projectionBelow": "À ce rythme, ≈ {{amount}} fin décembre : {{gap}} en dessous du budget annuel.",
+			"projectionOnTarget": "À ce rythme, ≈ {{amount}} fin décembre, pile le budget annuel.",
+			"left": "Encore {{amount}} attendus d'ici décembre.",
+			"periodsTitle": "Périodes",
+			"since": "Depuis {{start}}",
+			"range": "{{start}} → {{end}}",
+			"perRecurrence": {
+				"weekly": "{{amount}} / semaine",
+				"monthly": "{{amount}} / mois",
+				"quarterly": "{{amount}} / trimestre",
+				"yearly": "{{amount}} / an"
+			},
+			"open": "Ouvrir le budget {{label}} sur l'année",
+			"cumulativeTooltip": "{{month}} : {{real}} cumulés, {{planned}} prévus"
+		}
 	},
 	"categories": {
 		"title": "Catégories",
@@ -401,8 +485,6 @@
 		"remainingDays_other": "{{count}} jours restants",
 		"subtitleInfo": "Comment c'est calculé",
 		"subtitle": "Réel pour les mois passés, réel plus ce que tes budgets attendent encore pour le mois en cours, prévision ensuite à partir de tes budgets. Les dépenses hors budget à venir suivent ta moyenne des 3 derniers mois.",
-		"previousYear": "Année précédente",
-		"nextYear": "Année suivante",
 		"surplusTitle": "Excédent {{year}}",
 		"rollingSurplusTitle": "Excédent sur {{count}} mois",
 		"surplusHint": "Ce qui reste de tes revenus une fois les dépenses payées, si tes budgets tiennent.",

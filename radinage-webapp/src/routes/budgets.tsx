@@ -22,21 +22,31 @@ import {
 	IconSearch,
 	IconTrash,
 } from "@tabler/icons-react";
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import type { TFunction } from "i18next";
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { AnchorLink } from "@/components/AnchorLink";
 import { BudgetModal } from "@/components/BudgetModal";
+import { BudgetYearOverview } from "@/components/BudgetYearOverview";
+import {
+	BudgetMonthLegend,
+	BudgetYearProgress,
+} from "@/components/BudgetYearProgress";
 import { CardAction } from "@/components/CardAction";
 import { ConfirmModal } from "@/components/ConfirmModal";
 import { PageHeader } from "@/components/PageHeader";
+import { YearStepper } from "@/components/YearStepper";
 import {
 	type BudgetProgress,
 	computeBudgetProgress,
 	sumOperationsByBudget,
 } from "@/lib/budget-progress";
+import { type BudgetYear, toBudgetYear } from "@/lib/budget-year";
 import { formatAmount } from "@/lib/format";
 import {
 	useApplyBudget,
+	useBudgetSummary,
 	useBudgets,
 	useDeleteBudget,
 	useMonthlyOperations,
@@ -49,8 +59,22 @@ import type {
 } from "@/lib/types";
 import { headingFont, palette } from "@/theme";
 
+type BudgetPeriod = "month" | "year";
+
+interface BudgetsSearch {
+	period?: BudgetPeriod;
+	year?: number;
+}
+
 export const Route = createFileRoute("/budgets")({
 	component: BudgetsPage,
+	validateSearch: (search: Record<string, unknown>): BudgetsSearch => {
+		const year = Number(search.year);
+		return {
+			...(search.period === "year" ? { period: "year" } : {}),
+			...(Number.isInteger(year) && year > 0 ? { year } : {}),
+		};
+	},
 });
 
 type BudgetSortKey = "label" | "type" | "amount";
@@ -77,9 +101,14 @@ function BudgetsPage() {
 	const [now] = useState(() => new Date());
 	const year = now.getFullYear();
 	const month = now.getMonth() + 1;
+	const navigate = useNavigate();
+	const search = Route.useSearch();
+	const yearMode = search.period === "year";
+	const selectedYear = search.year ?? year;
 
 	const budgetsQuery = useBudgets();
 	const operationsQuery = useMonthlyOperations(year, month);
+	const summaryQuery = useBudgetSummary(selectedYear, yearMode);
 	const deleteBudget = useDeleteBudget();
 	const applyBudget = useApplyBudget();
 
@@ -96,7 +125,7 @@ function BudgetsPage() {
 	);
 	const [sortKey, setSortKey] = useState<BudgetSortKey>("label");
 	const [typeFilter, setTypeFilter] = useState<BudgetTypeFilter>("all");
-	const [search, setSearch] = useState("");
+	const [query, setQuery] = useState("");
 
 	function handleEdit(budget: BudgetResponse) {
 		setEditingBudget(budget);
@@ -133,11 +162,11 @@ function BudgetsPage() {
 	);
 
 	const budgets = useMemo(() => {
-		const query = search.toLowerCase();
+		const needle = query.toLowerCase();
 		const filtered = (budgetsQuery.data ?? []).filter(
 			(b) =>
 				(typeFilter === "all" || b.budgetType === typeFilter) &&
-				b.label.toLowerCase().includes(query),
+				b.label.toLowerCase().includes(needle),
 		);
 
 		return filtered.sort((a, b) => {
@@ -150,7 +179,27 @@ function BudgetsPage() {
 					return a.label.localeCompare(b.label);
 			}
 		});
-	}, [budgetsQuery.data, sortKey, typeFilter, search]);
+	}, [budgetsQuery.data, sortKey, typeFilter, query]);
+
+	const yearEntries = useMemo(() => {
+		if (!yearMode || !summaryQuery.data) return null;
+		const months = new Map(
+			summaryQuery.data.budgets.map((b) => [b.budgetId, b.months]),
+		);
+		return (budgetsQuery.data ?? []).map((budget) => ({
+			budget,
+			year: toBudgetYear(budget, months.get(budget.id) ?? [], now),
+		}));
+	}, [yearMode, summaryQuery.data, budgetsQuery.data, now]);
+
+	const budgetYears = useMemo(
+		() => new Map(yearEntries?.map((e) => [e.budget.id, e.year])),
+		[yearEntries],
+	);
+
+	function showPeriod(next: BudgetsSearch) {
+		navigate({ to: "/budgets", search: next });
+	}
 
 	if (budgetsQuery.isLoading) {
 		return (
@@ -241,7 +290,11 @@ function BudgetsPage() {
 			>
 				<PageHeader
 					title={t("budgets.title")}
-					subtitle={t("budgets.subtitle", { month: monthLabel })}
+					subtitle={
+						yearMode
+							? yearSubtitle(t, selectedYear, now, i18n.language)
+							: t("budgets.subtitle", { month: monthLabel })
+					}
 					actions={
 						<Button leftSection={<IconPlus size={20} />} onClick={handleCreate}>
 							{t("budgets.create")}
@@ -249,13 +302,49 @@ function BudgetsPage() {
 					}
 				/>
 
+				<Group gap="sm" wrap="nowrap" align="center">
+					<SegmentedControl
+						radius="xl"
+						size="md"
+						flex={1}
+						maw={320}
+						aria-label={t("budgets.periodLabel")}
+						value={yearMode ? "year" : "month"}
+						onChange={(v) =>
+							showPeriod(
+								v === "year" ? { period: "year", year: selectedYear } : {},
+							)
+						}
+						data={[
+							{ value: "month", label: t("budgets.periods.month") },
+							{ value: "year", label: t("budgets.periods.year") },
+						]}
+					/>
+					{yearMode && (
+						<YearStepper
+							year={selectedYear}
+							onChange={(delta) =>
+								showPeriod({ period: "year", year: selectedYear + delta })
+							}
+						/>
+					)}
+				</Group>
+
+				{yearEntries && (
+					<BudgetYearOverview
+						entries={yearEntries}
+						year={selectedYear}
+						today={now}
+					/>
+				)}
+
 				<Group gap="sm" wrap="wrap" align="center">
 					<TextInput
 						placeholder={t("common.search")}
 						aria-label={t("common.search")}
 						leftSection={<IconSearch size={20} />}
-						value={search}
-						onChange={(e) => setSearch(e.currentTarget.value)}
+						value={query}
+						onChange={(e) => setQuery(e.currentTarget.value)}
 						style={{ flex: "1 1 280px" }}
 					/>
 					<SegmentedControl
@@ -311,13 +400,34 @@ function BudgetsPage() {
 								onDelete={() => setDeleteConfirm(budget)}
 								onApply={() => setApplyConfirm(budget)}
 								applyResult={applyResults[budget.id] ?? null}
+								budgetYear={budgetYears.get(budget.id) ?? null}
+								detailYear={selectedYear}
 							/>
 						))}
 					</SimpleGrid>
 				)}
+				{yearEntries && budgets.length > 0 && <BudgetMonthLegend />}
 			</Stack>
 		</div>
 	);
+}
+
+function yearSubtitle(
+	t: TFunction,
+	year: number,
+	today: Date,
+	locale: string,
+): string {
+	if (year < today.getFullYear()) {
+		return t("budgets.yearSubtitlePast", { year });
+	}
+	if (year > today.getFullYear()) {
+		return t("budgets.yearSubtitleFuture", { year });
+	}
+	return t("budgets.yearSubtitle", {
+		year,
+		date: today.toLocaleDateString(locale, { day: "numeric", month: "long" }),
+	});
 }
 
 function BudgetCard({
@@ -327,9 +437,14 @@ function BudgetCard({
 	onDelete,
 	onApply,
 	applyResult,
+	budgetYear,
+	detailYear,
 }: {
 	budget: BudgetResponse;
 	progress: BudgetProgress | null;
+	/** Shown instead of `progress` in the year view. */
+	budgetYear: BudgetYear | null;
+	detailYear: number;
 	onEdit: () => void;
 	onDelete: () => void;
 	onApply: () => void;
@@ -377,7 +492,16 @@ function BudgetCard({
 
 				<Group justify="space-between" align="baseline" wrap="nowrap" gap="sm">
 					<Title order={2} fz={22} fw={700} lh={1.2}>
-						{budget.label}
+						<AnchorLink
+							to="/budgets/$budgetId"
+							params={{ budgetId: budget.id }}
+							search={{ year: detailYear }}
+							c="inherit"
+							inherit
+							aria-label={t("budgets.detail.open", { label: budget.label })}
+						>
+							{budget.label}
+						</AnchorLink>
 					</Title>
 					<Text
 						ff={headingFont}
@@ -386,12 +510,28 @@ function BudgetCard({
 						className="tabular-nums"
 						style={{ whiteSpace: "nowrap" }}
 					>
-						{formatAmount(Math.abs(getCurrentAmount(budget)))}
+						{formatAmount(
+							budgetYear
+								? budgetYear.planned
+								: Math.abs(getCurrentAmount(budget)),
+						)}
+						{budgetYear && (
+							<Text component="span" fz={13} fw={500} c="dimmed">
+								{` ${t("budgets.yearProgress.perYear")}`}
+							</Text>
+						)}
 					</Text>
 				</Group>
 
-				{progress && (
-					<BudgetProgressBar progress={progress} toneColor={tone.color} />
+				{budgetYear ? (
+					<BudgetYearProgress
+						budgetType={budget.budgetType}
+						year={budgetYear}
+					/>
+				) : (
+					progress && (
+						<BudgetProgressBar progress={progress} toneColor={tone.color} />
+					)
 				)}
 
 				<Group gap={6} wrap="nowrap">

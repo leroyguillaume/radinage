@@ -18,6 +18,7 @@ import type {
 	ApplyCategoryResponse,
 	ApplyIgnoreRuleResponse,
 	BudgetResponse,
+	BudgetSummaryResponse,
 	CategoryRequest,
 	CategoryResponse,
 	CategorySummaryResponse,
@@ -109,6 +110,21 @@ export function useCategorySummary(
 	});
 }
 
+/** Under `["budgets"]`, so editing a budget refreshes what it expects. */
+const budgetSummaryKey = ["budgets", "summary"];
+
+/** Every budget, month by month over `year`. */
+export function useBudgetSummary(year: number, enabled = true) {
+	return useQuery({
+		queryKey: [...budgetSummaryKey, year],
+		enabled,
+		queryFn: () =>
+			apiFetch<BudgetSummaryResponse>(
+				`/summary/budgets?fromYear=${year}&fromMonth=1&toYear=${year}&toMonth=12`,
+			),
+	});
+}
+
 export function useForecast(
 	fromYear: number,
 	fromMonth: number,
@@ -179,6 +195,7 @@ const operationDataKeys = [
 	["summary"],
 	["category-summary"],
 	["forecast"],
+	budgetSummaryKey,
 ];
 
 function useInvalidateOperationData() {
