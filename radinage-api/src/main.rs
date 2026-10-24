@@ -425,6 +425,24 @@ where
             }),
         )
         .api_route(
+            "/operations/account",
+            put_with(handlers::operations::set_operations_account, |op| {
+                op.tag("Operations")
+                    .summary("Move several operations to another account")
+                    .description("Put each of `operationIds` (1 to 1000) on another of the caller's imported checking accounts, like moving them one by one, in a single request. Identifiers that are not the caller's operations are left out. Returns how many operations changed, 400 if the account is not one of the caller's imported checking accounts or the number of operations is out of bounds.")
+                    .id("setOperationsAccount")
+            }),
+        )
+        .api_route(
+            "/operations/category",
+            put_with(handlers::operations::set_operations_category, |op| {
+                op.tag("Operations")
+                    .summary("Put several operations in a category")
+                    .description("Set the own category of each of `operationIds` (1 to 1000), or clear it when `categoryId` is null, in a single request. Split operations are left out, their parts carry their categories, as are identifiers that are not the caller's operations. Returns how many operations changed, 400 if the category is not one of the caller's or the number of operations is out of bounds.")
+                    .id("setOperationsCategory")
+            }),
+        )
+        .api_route(
             "/operations/{id}",
             get_with(handlers::operations::get_operation, |op| {
                 op.tag("Operations")
@@ -1118,6 +1136,14 @@ pub(crate) mod test_util {
             .route(
                 "/operations/{id}/account",
                 routing::put(handlers::operations::set_account),
+            )
+            .route(
+                "/operations/account",
+                routing::put(handlers::operations::set_operations_account),
+            )
+            .route(
+                "/operations/category",
+                routing::put(handlers::operations::set_operations_category),
             )
             .route(
                 "/operations/{id}/splits",

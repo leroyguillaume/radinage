@@ -41,6 +41,7 @@ import type {
 	OperationResponse,
 	OperationSearchResponse,
 	OperationSplitRequest,
+	OperationsUpdatedResponse,
 	ResetPasswordResponse,
 	SummaryResponse,
 	YearMonth,
@@ -299,6 +300,30 @@ export function useSetOperationAccount() {
 			apiFetch<OperationResponse>(`/operations/${opId}/account`, {
 				method: "PUT",
 				body: JSON.stringify({ accountId }),
+			}),
+		onSuccess: invalidate,
+	});
+}
+
+export function useSetOperationsAccount() {
+	const invalidate = useInvalidateOperationData();
+	return useMutation({
+		mutationFn: (body: { operationIds: string[]; accountId: string }) =>
+			apiFetch<OperationsUpdatedResponse>("/operations/account", {
+				method: "PUT",
+				body: JSON.stringify(body),
+			}),
+		onSuccess: invalidate,
+	});
+}
+
+export function useSetOperationsCategory() {
+	const invalidate = useInvalidateOperationData();
+	return useMutation({
+		mutationFn: (body: { operationIds: string[]; categoryId: string | null }) =>
+			apiFetch<OperationsUpdatedResponse>("/operations/category", {
+				method: "PUT",
+				body: JSON.stringify(body),
 			}),
 		onSuccess: invalidate,
 	});

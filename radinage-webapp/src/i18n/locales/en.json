@@ -744,7 +744,27 @@
 			"title": "No matching operations",
 			"hint": "Try a shorter label or fewer filters."
 		},
-		"fetchError": "Failed to search operations"
+		"fetchError": "Failed to search operations",
+		"selection": {
+			"start": "Select",
+			"region": "Selected operations",
+			"count_one": "{{count}} selected",
+			"count_other": "{{count}} selected",
+			"selectAll": "Select all",
+			"selectNone": "Deselect all",
+			"done": "Done",
+			"account": "Account",
+			"category": "Category",
+			"accountTitle_one": "Change the account of one operation",
+			"accountTitle_other": "Change the account of {{count}} operations",
+			"categoryTitle_one": "Change the category of one operation",
+			"categoryTitle_other": "Change the category of {{count}} operations",
+			"pick": "Pick one",
+			"noCategory": "No category",
+			"apply": "Apply",
+			"splitKept_one": "A split operation keeps the categories of its parts.",
+			"splitKept_other": "{{count}} split operations keep the categories of their parts."
+		}
 	},
 	"ignoreRules": {
 		"title": "Ignore rules",

@@ -181,6 +181,9 @@ function setupMocks(
 		if (path === "/accounts") return Promise.resolve(accounts);
 		if (path === "/ignore-rules") return Promise.resolve([refundRule]);
 		if (path.startsWith("/budgets")) return Promise.resolve(budgets);
+		if (path === "/operations/account" || path === "/operations/category") {
+			return Promise.resolve({ updated: 2 });
+		}
 		if (/^\/operations\/[^/?]+\/(category|account)$/.test(path)) {
 			return Promise.resolve(salary);
 		}
@@ -329,6 +332,107 @@ describe("SearchPage", () => {
 		await waitFor(() =>
 			expect(lastSearch().getAll("accountId")).toEqual(["account-2"]),
 		);
+	});
+
+	it("moves the selected operations to another account at once", async () => {
+		await renderSearchPage();
+		await screen.findByText("LOYER FEVRIER");
+
+		fireEvent.click(screen.getByRole("button", { name: "Sélectionner" }));
+		fireEvent.click(screen.getByRole("checkbox", { name: /SALAIRE/ }));
+		fireEvent.click(screen.getByRole("checkbox", { name: /SUPERMARCHE/ }));
+		const bar = within(
+			screen.getByRole("region", { name: "Opérations sélectionnées" }),
+		);
+		expect(bar.getByText("2 sélectionnées")).toBeInTheDocument();
+
+		fireEvent.click(bar.getByRole("button", { name: "Compte" }));
+		await screen.findByRole("dialog", {
+			name: "Changer le compte de 2 opérations",
+		});
+		await pickOption("Compte", "Compte joint");
+		fireEvent.click(screen.getByRole("button", { name: "Appliquer" }));
+
+		await waitFor(() => {
+			expect(apiFetchMock).toHaveBeenCalledWith("/operations/account", {
+				method: "PUT",
+				body: JSON.stringify({
+					operationIds: ["op-groceries", "op-salary"],
+					accountId: "account-2",
+				}),
+			});
+		});
+		await waitFor(() =>
+			expect(bar.getByText("0 sélectionnée")).toBeInTheDocument(),
+		);
+	});
+
+	it("clears the category of every selected operation but the split ones", async () => {
+		const split = operation({
+			id: "op-split",
+			label: "RETRAIT DAB",
+			splits: [
+				{
+					id: "s1",
+					amount: "-6.00",
+					effectiveDate: null,
+					budgetId: null,
+					categoryId: "c-food",
+					effectiveCategoryId: "c-food",
+				},
+				{
+					id: "s2",
+					amount: "-4.00",
+					effectiveDate: null,
+					budgetId: null,
+					categoryId: null,
+					effectiveCategoryId: null,
+				},
+			],
+		});
+		setupMocks(() => page([rent, groceries, split]));
+		await renderSearchPage();
+		await screen.findByText("RETRAIT DAB");
+
+		fireEvent.click(screen.getByRole("button", { name: "Sélectionner" }));
+		fireEvent.click(screen.getByRole("button", { name: "Tout sélectionner" }));
+		fireEvent.click(screen.getByRole("button", { name: "Catégorie" }));
+		const dialog = within(
+			await screen.findByRole("dialog", {
+				name: "Changer la catégorie de 3 opérations",
+			}),
+		);
+		expect(
+			dialog.getByText(
+				"Une opération ventilée garde les catégories de ses parts.",
+			),
+		).toBeInTheDocument();
+		await pickOption("Catégorie", "Aucune catégorie");
+		fireEvent.click(dialog.getByRole("button", { name: "Appliquer" }));
+
+		await waitFor(() => {
+			expect(apiFetchMock).toHaveBeenCalledWith("/operations/category", {
+				method: "PUT",
+				body: JSON.stringify({
+					operationIds: ["op-rent", "op-groceries"],
+					categoryId: null,
+				}),
+			});
+		});
+	});
+
+	it("leaves the selection mode for the sheet again", async () => {
+		await renderSearchPage();
+		await screen.findByText("LOYER FEVRIER");
+
+		fireEvent.click(screen.getByRole("button", { name: "Sélectionner" }));
+		fireEvent.click(screen.getByRole("button", { name: "Terminer" }));
+		fireEvent.click(screen.getByRole("button", { name: /SALAIRE/ }));
+
+		expect(await screen.findByRole("dialog")).toBeInTheDocument();
+		expect(
+			screen.queryByRole("region", { name: "Opérations sélectionnées" }),
+		).not.toBeInTheDocument();
 	});
 
 	it("maps the no-category option to uncategorized", async () => {
