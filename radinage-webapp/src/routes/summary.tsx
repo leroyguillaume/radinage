@@ -1,6 +1,7 @@
 import {
 	Alert,
 	Anchor,
+	alpha,
 	Badge,
 	Box,
 	Group,
@@ -892,22 +893,32 @@ function DailyBudgetCard({
 			title={t("forecast.dailyBudget")}
 			titleAside={<RemainingDaysBadge count={daysLeft} />}
 		>
-			<BigAmount
-				value={dailyBudget === null ? "—" : formatAmount(dailyBudget)}
-				color={
-					dailyBudget !== null && dailyBudget < 0 ? "tangerine.3" : undefined
-				}
-				fz={compact ? 36 : undefined}
-			/>
-			<Text size="sm" c="forest.1">
-				{dailyBudget === null
-					? t("forecast.dailyBudgetOver")
-					: dailyBudget < 0
-						? t("forecast.dailyBudgetNegativeHint")
-						: t("forecast.dailyBudgetHint")}
-			</Text>
-			{dailyBudget !== null && dailyBudget >= 0 && unbudgetedRate !== null && (
-				<SpendingPace dailyBudget={dailyBudget} spent={-unbudgetedRate} />
+			{dailyBudget !== null && unbudgetedRate !== null ? (
+				<SpendingComparison
+					dailyBudget={dailyBudget}
+					spent={-unbudgetedRate}
+					daysLeft={daysLeft}
+					compact={compact}
+				/>
+			) : (
+				<>
+					<BigAmount
+						value={dailyBudget === null ? "—" : formatAmount(dailyBudget)}
+						color={
+							dailyBudget !== null && dailyBudget < 0
+								? "tangerine.3"
+								: undefined
+						}
+						fz={compact ? 36 : undefined}
+					/>
+					<Text size="sm" c="forest.1">
+						{dailyBudget === null
+							? t("forecast.dailyBudgetOver")
+							: dailyBudget < 0
+								? t("forecast.dailyBudgetNegativeHint")
+								: t("forecast.dailyBudgetHint")}
+					</Text>
+				</>
 			)}
 			<Stack gap={6} mt="auto">
 				<Text size="sm" c="forest.1">
@@ -926,28 +937,129 @@ function DailyBudgetCard({
 	);
 }
 
-interface SpendingPaceProps {
+interface SpendingComparisonProps {
 	dailyBudget: number;
+	/** Average daily unbudgeted spending, positive. */
 	spent: number;
+	daysLeft: number;
+	compact: boolean;
 }
 
-function SpendingPace({ dailyBudget, spent }: SpendingPaceProps) {
+function SpendingComparison({
+	dailyBudget,
+	spent,
+	daysLeft,
+	compact,
+}: SpendingComparisonProps) {
 	const { t } = useTranslation();
-	const over = spent - dailyBudget;
-	if (over > 0) {
-		return (
-			<Text size="sm" fw={700} c="tangerine.3">
-				{t("forecast.dailyBudgetOverPace", {
-					spent: formatAmount(spent),
-					over: formatAmount(over),
-				})}
-			</Text>
-		);
-	}
+	const margin = dailyBudget - spent;
 	return (
-		<Text size="sm" c="forest.1">
-			{t("forecast.dailyBudgetPace", { spent: formatAmount(spent) })}
-		</Text>
+		<>
+			<SimpleGrid cols={2} spacing={0}>
+				<PerDayAmount
+					label={compact ? t("forecast.canSpendShort") : t("forecast.canSpend")}
+					amount={dailyBudget}
+					over={dailyBudget < 0}
+					hint={
+						compact
+							? undefined
+							: dailyBudget < 0
+								? t("forecast.canSpendNegativeHint")
+								: t("forecast.canSpendHint")
+					}
+					compact={compact}
+				/>
+				<Box
+					pl="md"
+					style={{
+						borderLeft: `1px solid ${alpha("var(--mantine-color-forest-1)", 0.25)}`,
+					}}
+				>
+					<PerDayAmount
+						label={t("forecast.spending")}
+						amount={spent}
+						over={margin < 0}
+						hint={compact ? undefined : t("forecast.spendingHint")}
+						compact={compact}
+					/>
+				</Box>
+			</SimpleGrid>
+			<PaceVerdict margin={margin} daysLeft={daysLeft} compact={compact} />
+		</>
+	);
+}
+
+interface PerDayAmountProps {
+	label: string;
+	amount: number;
+	over: boolean;
+	hint: string | undefined;
+	compact: boolean;
+}
+
+function PerDayAmount({
+	label,
+	amount,
+	over,
+	hint,
+	compact,
+}: PerDayAmountProps) {
+	return (
+		// Its own container, so BigAmount fits the column rather than the card.
+		<Stack gap={6} miw={0} className="@container">
+			<Text size="sm" fw={600} c="forest.1">
+				{label}
+			</Text>
+			<BigAmount
+				value={formatAmount(amount)}
+				color={over ? "tangerine.3" : undefined}
+				fz={compact ? 28 : 38}
+			/>
+			{hint !== undefined && (
+				<Text size="xs" c="forest.2">
+					{hint}
+				</Text>
+			)}
+		</Stack>
+	);
+}
+
+interface PaceVerdictProps {
+	margin: number;
+	daysLeft: number;
+	compact: boolean;
+}
+
+function PaceVerdict({ margin, daysLeft, compact }: PaceVerdictProps) {
+	const { t } = useTranslation();
+	const ok = margin >= 0;
+	const tone = ok ? "leaf" : "tangerine";
+	const amounts = {
+		amount: formatAmount(Math.abs(margin)),
+		total: formatAmount(Math.abs(margin * daysLeft)),
+	};
+	const key = ok ? "forecast.margin" : "forecast.overspend";
+	return (
+		<Group
+			gap={8}
+			wrap="nowrap"
+			align="flex-start"
+			px={12}
+			py={10}
+			bg={alpha(`var(--mantine-color-${tone}-3)`, 0.16)}
+			style={{ borderRadius: "var(--mantine-radius-md)" }}
+		>
+			<Box
+				w={8}
+				h={8}
+				mt={6}
+				bg={`${tone}.3`}
+				style={{ borderRadius: 3, flex: "none" }}
+			/>
+			<Text size="sm" fw={600} c={ok ? "forest.0" : "tangerine.1"}>
+				{compact ? t(key, amounts) : t(`${key}Total`, amounts)}
+			</Text>
+		</Group>
 	);
 }
 
@@ -957,7 +1069,6 @@ interface SurplusCardProps {
 	expenses: number;
 	savings: number;
 	withdrawals: number;
-	unbudgetedRate: number | null;
 	compact: boolean;
 }
 
@@ -967,7 +1078,6 @@ function SurplusCard({
 	expenses,
 	savings,
 	withdrawals,
-	unbudgetedRate,
 	compact,
 }: SurplusCardProps) {
 	const { t } = useTranslation();
@@ -1023,13 +1133,6 @@ function SurplusCard({
 								withdrawn: formatAmount(withdrawals),
 							})}
 							{net < 0 && ` · ${t("forecast.negativeSavings")}`}
-						</Text>
-					)}
-					{unbudgetedRate !== null && (
-						<Text size="sm" c="dimmed" mt="auto">
-							{t("forecast.unbudgetedRate", {
-								amount: formatAmount(-unbudgetedRate),
-							})}
 						</Text>
 					)}
 				</>
@@ -1166,7 +1269,6 @@ function ForecastPage() {
 			expenses={Number(totals?.expenses ?? 0)}
 			savings={Number(totals?.savings ?? 0)}
 			withdrawals={Number(totals?.withdrawals ?? 0)}
-			unbudgetedRate={unbudgetedRate}
 			compact={isMobile}
 		/>
 	);

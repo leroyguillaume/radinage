@@ -573,9 +573,61 @@ describe("SummaryPage", () => {
 			/dont-280,00€horsbudgetestimés/,
 		);
 		const totals = screen.getByRole("region", { name: /^Excédent/ });
-		expect((totals.textContent ?? "").replace(/\s/g, "")).toMatch(
-			/estiméesà10,00€parjour/,
+		expect(totals.textContent ?? "").not.toMatch(/par jour/);
+	});
+
+	it("sets what can be spent each day against what is spent", async () => {
+		setupMocks((year) =>
+			makeForecast(
+				year,
+				() => ({ ...typicalMonth(), unbudgetedForecast: -300 }),
+				{ unbudgetedRate: "-10.0000", dailyBudget: "12.34", daysLeft: 100 },
+			),
 		);
+
+		await renderSummaryPage();
+
+		const card = await screen.findByRole("region", { name: "Budget / jour" });
+		const text = (card.textContent ?? "").replace(/\s/g, "");
+		expect(text).toMatch(/Tupeuxdépenser12,34€sansfinirl'annéeendéficit/);
+		expect(text).toMatch(/Tudépenses10,00€horsbudget,moyenne/);
+		expect(text).toMatch(
+			/2,34€demargeparjour,soit≈234,00€d'excédentenfind'année\./,
+		);
+	});
+
+	it("says how much too much is spent each day at the current pace", async () => {
+		setupMocks((year) =>
+			makeForecast(
+				year,
+				() => ({ ...typicalMonth(), unbudgetedForecast: -300 }),
+				{ unbudgetedRate: "-10.0000", dailyBudget: "8.00", daysLeft: 100 },
+			),
+		);
+
+		await renderSummaryPage();
+
+		const card = await screen.findByRole("region", { name: "Budget / jour" });
+		expect((card.textContent ?? "").replace(/\s/g, "")).toMatch(
+			/2,00€detropparjour:àcerythme,≈200,00€dedéficitenfind'année\./,
+		);
+	});
+
+	it("counts the whole pace as too much when the budgets alone end in deficit", async () => {
+		setupMocks((year) =>
+			makeForecast(
+				year,
+				() => ({ ...typicalMonth(), unbudgetedForecast: -300 }),
+				{ unbudgetedRate: "-10.0000", dailyBudget: "-9.50", daysLeft: 100 },
+			),
+		);
+
+		await renderSummaryPage();
+
+		const card = await screen.findByRole("region", { name: "Budget / jour" });
+		const text = (card.textContent ?? "").replace(/\s/g, "");
+		expect(text).toMatch(/-9,50€tesbudgetsseulsfinissentendéficit/);
+		expect(text).toMatch(/19,50€detropparjour/);
 	});
 
 	it("says nothing about unbudgeted spending for a past year", async () => {
@@ -622,41 +674,6 @@ describe("SummaryPage", () => {
 		expect(
 			within(card).getByText(/tes budgets seuls finissent déjà/),
 		).toBeInTheDocument();
-	});
-
-	it("compares the daily budget with the current spending pace", async () => {
-		setupMocks((year) =>
-			makeForecast(
-				year,
-				() => ({ ...typicalMonth(), unbudgetedForecast: -300 }),
-				{ unbudgetedRate: "-10.0000", dailyBudget: "12.34" },
-			),
-		);
-
-		await renderSummaryPage();
-
-		const card = await screen.findByRole("region", { name: "Budget / jour" });
-		expect((card.textContent ?? "").replace(/\s/g, "")).toMatch(
-			/Tudépensesenmoyenne10,00€parjourhorsbudget\./,
-		);
-		expect(within(card).queryByText(/de trop/)).not.toBeInTheDocument();
-	});
-
-	it("says how much too much is spent when the pace exceeds the daily budget", async () => {
-		setupMocks((year) =>
-			makeForecast(
-				year,
-				() => ({ ...typicalMonth(), unbudgetedForecast: -300 }),
-				{ unbudgetedRate: "-10.0000", dailyBudget: "8.00" },
-			),
-		);
-
-		await renderSummaryPage();
-
-		const card = await screen.findByRole("region", { name: "Budget / jour" });
-		expect((card.textContent ?? "").replace(/\s/g, "")).toMatch(
-			/10,00€parjourhorsbudget:2,00€detrop/,
-		);
 	});
 
 	it("shows no daily budget once the period is over", async () => {
@@ -963,6 +980,24 @@ describe("SummaryPage on a phone", () => {
 		expect(
 			screen.getByRole("button", { name: "Année suivante" }),
 		).toBeInTheDocument();
+	});
+
+	it("keeps the daily comparison short", async () => {
+		setupMocks((year, month, count) =>
+			makeForecastFrom(
+				{ year, month },
+				count,
+				() => ({ ...typicalMonth(), unbudgetedForecast: -300 }),
+				{ unbudgetedRate: "-10.0000", dailyBudget: "12.34" },
+			),
+		);
+		await renderSummaryPage("?year=2026");
+
+		const daily = await screen.findByRole("region", { name: "Budget / jour" });
+		expect(compact(daily)).toMatch(
+			/Tupeux12,34€Tudépenses10,00€2,34€demargeparjour/,
+		);
+		expect(compact(daily)).not.toMatch(/sansfinir|moyenne|≈/);
 	});
 
 	it("lists the months instead of the wide table", async () => {
