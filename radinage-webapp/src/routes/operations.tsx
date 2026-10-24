@@ -6,16 +6,13 @@ import {
 	Button,
 	Group,
 	Loader,
-	Menu,
 	Paper,
-	Popover,
 	Progress,
 	Select,
 	SimpleGrid,
 	Stack,
 	Switch,
 	Text,
-	TextInput,
 	Title,
 	Tooltip,
 	UnstyledButton,
@@ -23,22 +20,15 @@ import {
 import { MonthPickerInput } from "@mantine/dates";
 import {
 	IconAlertCircle,
-	IconCalendar,
 	IconCheck,
 	IconChevronDown,
 	IconChevronLeft,
 	IconChevronRight,
-	IconEye,
 	IconEyeOff,
-	IconLink,
-	IconLinkOff,
-	IconPlus,
-	IconScissors,
 	IconSortAscending,
 	IconSortDescending,
 	IconTag,
 	IconUpload,
-	IconX,
 } from "@tabler/icons-react";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import type { TFunction } from "i18next";
@@ -47,29 +37,21 @@ import { useTranslation } from "react-i18next";
 import { CategoryBadge, CategorySelect } from "@/components/CategoryBadge";
 import { ImportModal } from "@/components/ImportModal";
 import { useOperationActions } from "@/components/OperationActions";
-import {
-	EffectiveDatePicker,
-	type OperationHandlers,
-} from "@/components/OperationSheet";
+import { OperationRow } from "@/components/OperationRow";
+import type { OperationHandlers } from "@/components/OperationSheet";
 import { StatTile } from "@/components/StatTile";
 import {
-	budgetFitsAmount,
 	getBudgetedAmountForMonth,
 	getUnbudgetedForecastForMonth,
 } from "@/lib/budget-utils";
-import { formatAmount, formatIsoDate, formatSignedAmount } from "@/lib/format";
+import { formatAmount, formatSignedAmount } from "@/lib/format";
 import {
-	useBelowBreakpoint,
 	useBudgets,
 	useCategories,
 	useForecast,
 	useMonthlyOperations,
 } from "@/lib/hooks";
-import {
-	isSplit,
-	type OperationEntry,
-	operationEntries,
-} from "@/lib/operation-parts";
+import { type OperationEntry, operationEntries } from "@/lib/operation-parts";
 import {
 	balanceTextColor,
 	budgetTypeTones,
@@ -79,7 +61,6 @@ import {
 import type {
 	BudgetResponse,
 	BudgetType,
-	CategoryResponse,
 	ImportResult,
 	OperationResponse,
 } from "@/lib/types";
@@ -375,14 +356,6 @@ function groupOperationsByBudget(
 	return result;
 }
 
-function accountingDate(op: OperationResponse): string {
-	return op.effectiveDate ?? op.date;
-}
-
-function formatDate(iso: string, locale: string): string {
-	return formatIsoDate(iso, locale, { day: "2-digit", month: "2-digit" });
-}
-
 function MonthlyOperationsPage() {
 	const { year, month } = Route.useSearch();
 	const navigate = useNavigate();
@@ -629,7 +602,6 @@ function MonthlyOperationsPage() {
 							<SectionCard
 								key={section.type}
 								section={section}
-								locale={i18n.language}
 								handlers={handlers}
 							/>
 						))}
@@ -640,7 +612,6 @@ function MonthlyOperationsPage() {
 					<IgnoredOperationsCard
 						operations={ignoredOperations}
 						loading={operationsQuery.isPlaceholderData}
-						locale={i18n.language}
 						handlers={handlers}
 					/>
 				)}
@@ -716,11 +687,9 @@ function SortControl({
 
 function SectionCard({
 	section,
-	locale,
 	handlers,
 }: {
 	section: BudgetSection;
-	locale: string;
 	handlers: OperationHandlers;
 }) {
 	const { t } = useTranslation();
@@ -806,7 +775,6 @@ function SectionCard({
 						key={group.budgetId ?? "__unlinked"}
 						group={group}
 						tone={tone}
-						locale={locale}
 						handlers={handlers}
 					/>
 				))}
@@ -873,12 +841,10 @@ function groupMeta(group: BudgetGroup, t: TFunction): string {
 function BudgetGroupRow({
 	group,
 	tone,
-	locale,
 	handlers,
 }: {
 	group: BudgetGroup;
 	tone: Tone;
-	locale: string;
 	handlers: OperationHandlers;
 }) {
 	const { t } = useTranslation();
@@ -988,36 +954,20 @@ function BudgetGroupRow({
 				<Box className={GROUP_ROW_CLASS}>{cells}</Box>
 			)}
 			{opened && hasOps && (
-				<OperationList
-					entries={group.entries}
-					locale={locale}
-					handlers={handlers}
-				/>
+				<OperationList entries={group.entries} handlers={handlers} />
 			)}
 		</Box>
 	);
 }
 
-const DESKTOP_ACTION_SIZE = 36;
-const TOUCH_ACTION_SIZE = 44;
-
-/** Fixed columns so amounts and actions line up whatever each row holds. */
-const OPERATION_ROW_CLASS =
-	"grid grid-cols-[56px_minmax(0,1fr)_120px_auto] items-center gap-x-4 py-2";
-const OPERATION_ACTIONS_CLASS =
-	"grid grid-cols-[180px_36px_88px_36px_36px_36px] items-center gap-x-0.5";
-
 function OperationList({
 	entries,
-	locale,
 	handlers,
 }: {
 	entries: OperationEntry[];
-	locale: string;
 	handlers: OperationHandlers;
 }) {
-	const isDesktop = !useBelowBreakpoint("sm");
-	const Row = isDesktop ? OperationRow : TappableOperationRow;
+	const { t } = useTranslation();
 	return (
 		<Box
 			component="ul"
@@ -1026,440 +976,50 @@ function OperationList({
 			className="list-none px-4 pt-1 pb-3 sm:pr-5 sm:pl-14"
 			style={{ borderTop: `1px solid ${palette.divider}` }}
 		>
-			{entries.map((entry) => (
-				<Row
-					key={entry.key}
-					entry={entry}
-					locale={locale}
-					handlers={handlers}
-				/>
-			))}
-		</Box>
-	);
-}
-
-interface OperationRowProps {
-	entry: OperationEntry;
-	locale: string;
-	handlers: OperationHandlers;
-}
-
-/** Badges telling how an entry was linked and which part of its operation it is. */
-function LinkBadges({ entry }: { entry: OperationEntry }) {
-	const { t } = useTranslation();
-	const { operation: op, part } = entry;
-	return (
-		<>
-			{op.budgetLink.type === "auto" && (
-				<Badge size="sm" color="leaf" c="leaf.9" tt="none" flex="none">
-					{t("operations.auto")}
-				</Badge>
-			)}
-			{part && (
-				<Tooltip label={t("operations.split.splitInto", { count: part.count })}>
-					<Badge size="sm" color="forest" c="forest.8" tt="none" flex="none">
-						{t("operations.split.partBadge", part)}
-					</Badge>
-				</Tooltip>
-			)}
-		</>
-	);
-}
-
-/** A whole-row button opening the operation sheet, for a phone. */
-function TappableOperationRow({ entry, locale, handlers }: OperationRowProps) {
-	const { t } = useTranslation();
-	const { operation: op, amount } = entry;
-	const category = entry.categoryId
-		? handlers.categories.find((c) => c.id === entry.categoryId)
-		: undefined;
-	const date = accountingDate(op);
-
-	return (
-		<Box
-			component="li"
-			style={{ borderBottom: `1px dashed ${palette.border}` }}
-		>
-			<UnstyledButton
-				onClick={() => handlers.onOpen(op)}
-				className="grid min-h-[44px] w-full grid-cols-[36px_minmax(0,1fr)_auto] items-start gap-x-3 py-3 text-left"
-			>
-				<Stack gap={0} align="center" className="tabular-nums">
-					<Text fw={700} lh={1.2}>
-						{formatIsoDate(date, locale, { day: "2-digit" })}
-					</Text>
-					<Text size="xs" c="dimmed" lh={1.2}>
-						{formatIsoDate(date, locale, { month: "short" })}
-					</Text>
-				</Stack>
-				<Stack gap={6} miw={0}>
-					<Text
-						fw={600}
-						lh={1.3}
-						className="line-clamp-2 [overflow-wrap:anywhere]"
-					>
-						{op.label}
-					</Text>
-					<Group gap={6} wrap="wrap">
-						{category ? (
-							<CategoryBadge
-								category={category}
-								inherited={entry.categoryFromBudget}
-							/>
-						) : (
-							<Badge size="sm" color="tangerine" c="tangerine.8" tt="none">
-								{t("operations.sheet.unclassified")}
-							</Badge>
-						)}
-						<LinkBadges entry={entry} />
-						{op.effectiveDate && (
-							<Badge size="sm" color="gold" c="gold.8" tt="none">
-								{t("operations.sheet.bankDateBadge", {
-									date: formatDate(op.date, locale),
-								})}
-							</Badge>
-						)}
-					</Group>
-				</Stack>
-				<Text
-					fw={700}
-					className="tabular-nums"
-					c={amount > 0 ? budgetTypeTones.income.text : undefined}
-					style={{ whiteSpace: "nowrap" }}
-				>
-					{formatSignedAmount(amount)}
-				</Text>
-			</UnstyledButton>
-		</Box>
-	);
-}
-
-function OperationAction({
-	label,
-	icon,
-	size,
-	onClick,
-}: {
-	label: string;
-	icon: ReactNode;
-	size: number;
-	onClick: () => void;
-}) {
-	return (
-		<Tooltip label={label}>
-			<ActionIcon
-				variant="subtle"
-				color="gray"
-				c="dimmed"
-				size={size}
-				radius="md"
-				onClick={onClick}
-				aria-label={label}
-			>
-				{icon}
-			</ActionIcon>
-		</Tooltip>
-	);
-}
-
-function LinkBudgetMenu({
-	budgets,
-	height,
-	onSelect,
-}: {
-	budgets: BudgetResponse[];
-	height: number;
-	onSelect: (budgetId: string) => void;
-}) {
-	const { t } = useTranslation();
-	const [search, setSearch] = useState("");
-
-	const filtered = search
-		? budgets.filter((b) =>
-				b.label.toLowerCase().includes(search.toLowerCase()),
-			)
-		: budgets;
-
-	return (
-		<Menu position="bottom-end" withinPortal onClose={() => setSearch("")}>
-			<Menu.Target>
-				<Button
-					variant="default"
-					size="xs"
-					h={height}
-					radius="md"
-					c="forest.8"
-					fullWidth
-					leftSection={<IconLink size={16} />}
-					aria-label={t("operations.linkBudget")}
-				>
-					{t("operations.link")}
-				</Button>
-			</Menu.Target>
-			<Menu.Dropdown>
-				<TextInput
-					placeholder={t("common.search")}
-					size="xs"
-					value={search}
-					onChange={(e) => setSearch(e.currentTarget.value)}
-					onClick={(e: React.MouseEvent) => e.stopPropagation()}
-					onKeyDown={(e: React.KeyboardEvent) => e.stopPropagation()}
-					mb="xs"
-				/>
-				{filtered.length === 0 ? (
-					<Menu.Item disabled>{t("common.noResults")}</Menu.Item>
-				) : (
-					filtered.map((b) => (
-						<Menu.Item key={b.id} onClick={() => onSelect(b.id)}>
-							{b.label}
-						</Menu.Item>
-					))
-				)}
-			</Menu.Dropdown>
-		</Menu>
-	);
-}
-
-function CategoryMenu({
-	categories,
-	entry,
-	height,
-	onSelect,
-}: {
-	categories: CategoryResponse[];
-	entry: OperationEntry;
-	height: number;
-	onSelect: (categoryId: string | null) => void;
-}) {
-	const { t } = useTranslation();
-	const [search, setSearch] = useState("");
-	const current = categories.find((c) => c.id === entry.categoryId);
-	const ownCategory = entry.operation.categoryId;
-
-	const filtered = search
-		? categories.filter((c) =>
-				c.name.toLowerCase().includes(search.toLowerCase()),
-			)
-		: categories;
-
-	return (
-		<Menu position="bottom-end" withinPortal onClose={() => setSearch("")}>
-			<Menu.Target>
-				<Tooltip
-					label={
-						entry.categoryFromBudget
-							? t("operations.category.fromBudget")
-							: t("operations.category.change")
-					}
-				>
-					<Button
-						variant="default"
-						size="xs"
-						h={height}
-						radius="md"
-						fullWidth
-						justify="flex-start"
-						leftSection={current ? undefined : <IconTag size={16} />}
-						aria-label={
-							current
-								? `${t("operations.category.change")} (${current.name})`
-								: t("operations.category.change")
+			{entries.map((entry) => {
+				const category = entry.categoryId
+					? handlers.categories.find((c) => c.id === entry.categoryId)
+					: undefined;
+				const budget = entry.budgetId
+					? handlers.budgets.find((b) => b.id === entry.budgetId)
+					: undefined;
+				return (
+					<OperationRow
+						key={entry.key}
+						op={entry.operation}
+						amount={entry.amount}
+						category={
+							category && (
+								<CategoryBadge
+									category={category}
+									inherited={entry.categoryFromBudget}
+								/>
+							)
 						}
-					>
-						{current ? (
-							<CategoryBadge
-								category={current}
-								inherited={entry.categoryFromBudget}
-							/>
-						) : (
-							t("operations.category.set")
-						)}
-					</Button>
-				</Tooltip>
-			</Menu.Target>
-			<Menu.Dropdown>
-				{categories.length === 0 ? (
-					<Menu.Item disabled maw={260} style={{ whiteSpace: "normal" }}>
-						{t("operations.category.noneYet")}
-					</Menu.Item>
-				) : (
-					<>
-						<TextInput
-							placeholder={t("common.search")}
-							size="xs"
-							value={search}
-							onChange={(e) => setSearch(e.currentTarget.value)}
-							onClick={(e: React.MouseEvent) => e.stopPropagation()}
-							onKeyDown={(e: React.KeyboardEvent) => e.stopPropagation()}
-							mb="xs"
-						/>
-						{filtered.length === 0 ? (
-							<Menu.Item disabled>{t("common.noResults")}</Menu.Item>
-						) : (
-							filtered.map((c) => (
-								<Menu.Item key={c.id} onClick={() => onSelect(c.id)}>
-									<CategoryBadge category={c} />
-								</Menu.Item>
-							))
-						)}
-						{ownCategory !== null && (
-							<>
-								<Menu.Divider />
-								<Menu.Item
-									leftSection={<IconX size={14} />}
-									onClick={() => onSelect(null)}
+						budget={budget?.label ?? ""}
+						badge={
+							entry.part && (
+								<Tooltip
+									label={t("operations.split.splitInto", {
+										count: entry.part.count,
+									})}
 								>
-									{t("operations.category.clear")}
-								</Menu.Item>
-							</>
-						)}
-					</>
-				)}
-			</Menu.Dropdown>
-		</Menu>
-	);
-}
-
-/** A row with every action inline, for a wide screen; its label opens the sheet. */
-function OperationRow({ entry, locale, handlers }: OperationRowProps) {
-	const { t } = useTranslation();
-	const [datePopoverOpened, setDatePopoverOpened] = useState(false);
-	const { operation: op, amount, part } = entry;
-	const split = isSplit(op);
-	const actionSize = DESKTOP_ACTION_SIZE;
-	const partCategory = part
-		? handlers.categories.find((c) => c.id === entry.categoryId)
-		: undefined;
-
-	return (
-		<Box
-			component="li"
-			className={OPERATION_ROW_CLASS}
-			style={{ borderBottom: `1px dashed ${palette.border}` }}
-		>
-			<Text size="sm" c="dimmed" className="tabular-nums">
-				{formatDate(accountingDate(op), locale)}
-			</Text>
-			<Group gap={8} wrap="nowrap" miw={0}>
-				<UnstyledButton
-					onClick={() => handlers.onOpen(op)}
-					miw={0}
-					mih={actionSize}
-					className="hover:underline"
-				>
-					<Text fw={500} truncate title={op.label}>
-						{op.label}
-					</Text>
-				</UnstyledButton>
-				<LinkBadges entry={entry} />
-			</Group>
-			<Text
-				fw={700}
-				className="text-right tabular-nums"
-				c={amount > 0 ? budgetTypeTones.income.text : undefined}
-				style={{ whiteSpace: "nowrap" }}
-			>
-				{formatSignedAmount(amount)}
-			</Text>
-			<Box className={OPERATION_ACTIONS_CLASS}>
-				{split ? (
-					// 14px button padding + 1px border: lines the dot up with the category buttons'.
-					<Box pl={15} miw={0}>
-						{partCategory && (
-							<CategoryBadge
-								category={partCategory}
-								inherited={entry.categoryFromBudget}
-							/>
-						)}
-					</Box>
-				) : (
-					<CategoryMenu
-						categories={handlers.categories}
-						entry={entry}
-						height={actionSize}
-						onSelect={(categoryId) => handlers.onSetCategory(op.id, categoryId)}
+									<Badge
+										size="sm"
+										color="forest"
+										c="forest.8"
+										tt="none"
+										flex="none"
+									>
+										{t("operations.split.partBadge", entry.part)}
+									</Badge>
+								</Tooltip>
+							)
+						}
+						onOpen={handlers.onOpen}
 					/>
-				)}
-				<Popover
-					opened={datePopoverOpened}
-					onChange={setDatePopoverOpened}
-					position="bottom"
-					withArrow
-				>
-					<Popover.Target>
-						<Tooltip label={t("operations.editEffectiveDate")}>
-							<ActionIcon
-								variant={op.effectiveDate ? "light" : "subtle"}
-								color={op.effectiveDate ? "gold" : "gray"}
-								c={op.effectiveDate ? "gold.8" : "dimmed"}
-								size={actionSize}
-								radius="md"
-								onClick={() => setDatePopoverOpened((o) => !o)}
-								aria-label={t("operations.editEffectiveDate")}
-							>
-								<IconCalendar size={18} />
-							</ActionIcon>
-						</Tooltip>
-					</Popover.Target>
-					<Popover.Dropdown>
-						<EffectiveDatePicker
-							op={op}
-							onChange={(date) => {
-								handlers.onEditEffectiveDate(op, date);
-								setDatePopoverOpened(false);
-							}}
-						/>
-					</Popover.Dropdown>
-				</Popover>
-				{split ? (
-					<>
-						<span />
-						<span />
-					</>
-				) : op.budgetLink.type === "unlinked" ? (
-					<>
-						<LinkBudgetMenu
-							budgets={handlers.budgets.filter((b) =>
-								budgetFitsAmount(b, amount),
-							)}
-							height={actionSize}
-							onSelect={(budgetId) => handlers.onLink(op.id, budgetId)}
-						/>
-						<OperationAction
-							label={t("operations.createBudget")}
-							icon={<IconPlus size={18} />}
-							size={actionSize}
-							onClick={() => handlers.onCreateBudget(op)}
-						/>
-					</>
-				) : (
-					<>
-						<OperationAction
-							label={t("operations.unlinkBudget")}
-							icon={<IconLinkOff size={18} />}
-							size={actionSize}
-							onClick={() => handlers.onUnlink(op.id)}
-						/>
-						<span />
-					</>
-				)}
-				<OperationAction
-					label={
-						split
-							? t("operations.split.editAction")
-							: t("operations.split.action")
-					}
-					icon={<IconScissors size={18} />}
-					size={actionSize}
-					onClick={() => handlers.onSplit(op)}
-				/>
-				<OperationAction
-					label={t("operations.ignoreOperation")}
-					icon={<IconEyeOff size={18} />}
-					size={actionSize}
-					onClick={() => handlers.onSetIgnored(op.id, true)}
-				/>
-			</Box>
+				);
+			})}
 		</Box>
 	);
 }
@@ -1467,19 +1027,14 @@ function OperationRow({ entry, locale, handlers }: OperationRowProps) {
 function IgnoredOperationsCard({
 	operations,
 	loading,
-	locale,
 	handlers,
 }: {
 	operations: OperationResponse[];
 	loading: boolean;
-	locale: string;
 	handlers: OperationHandlers;
 }) {
 	const { t } = useTranslation();
 	const titleId = useId();
-	const actionSize = useBelowBreakpoint("sm")
-		? TOUCH_ACTION_SIZE
-		: DESKTOP_ACTION_SIZE;
 
 	return (
 		<Paper
@@ -1508,49 +1063,10 @@ function IgnoredOperationsCard({
 					{t("operations.ignored.empty")}
 				</Text>
 			) : (
-				<Box
-					component="ul"
-					m={0}
-					bg={palette.surfaceMuted}
-					className="list-none px-4 pt-1 pb-3 sm:px-5"
-					style={{ borderTop: `1px solid ${palette.divider}` }}
-				>
-					{operations.map((op) => (
-						<Box
-							component="li"
-							key={op.id}
-							className="grid grid-cols-[48px_minmax(0,1fr)_auto_auto] items-center gap-x-3 py-2 sm:grid-cols-[56px_minmax(0,1fr)_auto_auto] sm:gap-x-4"
-							style={{ borderBottom: `1px dashed ${palette.border}` }}
-						>
-							<Text size="sm" c="dimmed" className="tabular-nums">
-								{formatDate(accountingDate(op), locale)}
-							</Text>
-							<Text
-								c="dimmed"
-								td="line-through"
-								lineClamp={2}
-								title={op.label}
-								className="[overflow-wrap:anywhere]"
-							>
-								{op.label}
-							</Text>
-							<Text
-								c="dimmed"
-								td="line-through"
-								className="tabular-nums"
-								style={{ whiteSpace: "nowrap" }}
-							>
-								{formatSignedAmount(Number(op.amount))}
-							</Text>
-							<OperationAction
-								label={t("operations.unignoreOperation")}
-								icon={<IconEye size={18} />}
-								size={actionSize}
-								onClick={() => handlers.onSetIgnored(op.id, false)}
-							/>
-						</Box>
-					))}
-				</Box>
+				<OperationList
+					entries={operations.flatMap(operationEntries)}
+					handlers={handlers}
+				/>
 			)}
 		</Paper>
 	);

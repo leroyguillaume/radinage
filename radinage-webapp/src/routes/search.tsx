@@ -21,7 +21,6 @@ import {
 	TextInput,
 	Title,
 	Tooltip,
-	UnstyledButton,
 } from "@mantine/core";
 import { DatePickerInput } from "@mantine/dates";
 import { useDebouncedValue, useDisclosure } from "@mantine/hooks";
@@ -40,13 +39,13 @@ import { useEffect, useId, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { CategoryBadge, CategoryDot } from "@/components/CategoryBadge";
 import { useOperationActions } from "@/components/OperationActions";
+import { accountingDate, OperationRow } from "@/components/OperationRow";
 import { PageHeader } from "@/components/PageHeader";
 import { StatTile } from "@/components/StatTile";
 import {
 	centsToDecimal,
 	formatAmount,
 	formatIsoDate,
-	formatSignedAmount,
 	parseCents,
 } from "@/lib/format";
 import { useBudgets, useCategories, useOperationSearch } from "@/lib/hooks";
@@ -61,7 +60,7 @@ import {
 	type OperationSort,
 	parseOperationFilters,
 } from "@/lib/operation-search";
-import { balanceTextColor, budgetTypeTones } from "@/lib/tones";
+import { budgetTypeTones } from "@/lib/tones";
 import type {
 	BudgetResponse,
 	CategoryLook,
@@ -507,10 +506,6 @@ function SearchTotals({
 	);
 }
 
-function accountingDate(op: OperationResponse): string {
-	return op.effectiveDate ?? op.date;
-}
-
 function OperationCategories({
 	op,
 	categoryById,
@@ -565,13 +560,6 @@ function budgetNames(
 	return [...ids].map((id) => budgetById.get(id)?.label ?? "?").join(", ");
 }
 
-/**
- * Fixed column tracks from `sm` up, so every row of the list lines its
- * columns up whatever their content.
- */
-const RESULT_ROW_CLASS =
-	"grid min-h-[44px] w-full items-center gap-x-3 py-2 text-left [grid-template-areas:'label_amount'_'meta_meta'] grid-cols-[minmax(0,1fr)_auto] sm:gap-x-4 sm:py-1 sm:[grid-template-areas:'date_label_category_budget_amount'] sm:grid-cols-[96px_minmax(0,1fr)_180px_160px_136px]";
-
 function ResultRow({
 	op,
 	categoryById,
@@ -583,58 +571,14 @@ function ResultRow({
 	budgetById: Map<string, BudgetResponse>;
 	onOpen: (op: OperationResponse) => void;
 }) {
-	const { t, i18n } = useTranslation();
-	const amount = Number(op.amount);
-
 	return (
-		<Box
-			component="li"
-			style={{ borderBottom: `1px dashed ${palette.border}` }}
-		>
-			<UnstyledButton onClick={() => onOpen(op)} className={RESULT_ROW_CLASS}>
-				<Box className="flex min-w-0 items-center gap-2 [grid-area:label]">
-					<Text
-						fw={500}
-						c={op.ignored ? "dimmed" : undefined}
-						td={op.ignored ? "line-through" : undefined}
-						className="line-clamp-2 [overflow-wrap:anywhere] sm:line-clamp-1"
-						title={op.label}
-					>
-						{op.label}
-					</Text>
-					{op.ignored && (
-						<Badge size="sm" color="gray" tt="none" flex="none">
-							{t("search.ignored")}
-						</Badge>
-					)}
-				</Box>
-				<Text
-					fw={700}
-					className="tabular-nums [grid-area:amount] sm:text-right"
-					c={op.ignored ? "dimmed" : balanceTextColor(amount)}
-					td={op.ignored ? "line-through" : undefined}
-					style={{ whiteSpace: "nowrap" }}
-				>
-					{formatSignedAmount(amount)}
-				</Text>
-				<Box className="flex min-w-0 flex-wrap items-center gap-x-3 [grid-area:meta] sm:contents">
-					<Text
-						span
-						size="sm"
-						c="dimmed"
-						className="tabular-nums sm:[grid-area:date]"
-					>
-						{formatIsoDate(accountingDate(op), i18n.language)}
-					</Text>
-					<Box miw={0} className="overflow-hidden sm:[grid-area:category]">
-						<OperationCategories op={op} categoryById={categoryById} />
-					</Box>
-					<Text size="sm" c="dimmed" truncate className="sm:[grid-area:budget]">
-						{budgetNames(op, budgetById)}
-					</Text>
-				</Box>
-			</UnstyledButton>
-		</Box>
+		<OperationRow
+			op={op}
+			amount={Number(op.amount)}
+			category={<OperationCategories op={op} categoryById={categoryById} />}
+			budget={budgetNames(op, budgetById)}
+			onOpen={onOpen}
+		/>
 	);
 }
 

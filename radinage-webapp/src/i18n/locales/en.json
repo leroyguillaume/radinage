@@ -21,7 +21,6 @@
 		"dailyOperations": "Daily operations",
 		"fetchError": "Failed to load operations",
 		"createBudget": "Create budget",
-		"linkBudget": "Link to budget",
 		"unlinkBudget": "Unlink from budget",
 		"ignoreOperation": "Ignore",
 		"unignoreOperation": "Stop ignoring",
@@ -31,7 +30,6 @@
 			"hint": "Left out of totals, budgets and forecasts",
 			"empty": "No ignored operations this month"
 		},
-		"editEffectiveDate": "Edit effective date",
 		"clearEffectiveDate": "Clear effective date",
 		"previousMonth": "Previous month",
 		"nextMonth": "Next month",
@@ -40,8 +38,6 @@
 		"forecastHint": "3-month forecast",
 		"ofBudgeted": "of {{amount}} budgeted",
 		"ofForecast": "of {{amount}} forecast",
-		"link": "Link",
-		"auto": "auto",
 		"sortBy": "Sort by",
 		"sortAscending": "Ascending order",
 		"sortDescending": "Descending order",
@@ -90,10 +86,6 @@
 			"noCategory": "No category"
 		},
 		"category": {
-			"set": "Category",
-			"change": "Change the category",
-			"fromBudget": "The budget's default category",
-			"clear": "Remove the category",
 			"filter": "Filter by category",
 			"all": "All categories",
 			"none": "Uncategorized",
@@ -107,10 +99,8 @@
 			"autoLinked": "Linked automatically by a budget rule",
 			"countOn": "Count on",
 			"bankDate": "{{date}} (bank date)",
-			"bankDateBadge": "bank date {{date}}",
 			"openMonth": "See {{month}} in operations",
 			"parts": "Parts",
-			"unclassified": "To sort",
 			"ignored": "Ignored: left out of totals, budgets and forecasts"
 		}
 	},
