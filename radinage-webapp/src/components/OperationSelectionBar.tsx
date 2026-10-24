@@ -1,11 +1,14 @@
 import {
+	ActionIcon,
 	Button,
+	Checkbox,
 	Group,
 	Modal,
 	Paper,
 	Select,
 	Stack,
 	Text,
+	Tooltip,
 } from "@mantine/core";
 import {
 	IconBuildingBank,
@@ -73,29 +76,34 @@ export function OperationSelectionBar({
 			>
 				<Stack gap="xs">
 					<Group justify="space-between" wrap="nowrap" gap="xs">
-						<Text fw={700} aria-live="polite">
-							{t("selection.count", { count })}
-						</Text>
-						<Group gap={4} wrap="nowrap">
-							<Button
-								variant="subtle"
-								h={44}
-								onClick={allSelected ? onClear : onSelectAll}
-							>
-								{allSelected
+						<Checkbox
+							size="md"
+							checked={count > 0 && allSelected}
+							indeterminate={count > 0 && !allSelected}
+							onChange={allSelected ? onClear : onSelectAll}
+							aria-label={
+								allSelected
 									? t("selection.selectNone")
-									: t("selection.selectAll")}
-							</Button>
-							<Button
+									: t("selection.selectAll")
+							}
+							label={
+								<Text span fw={700} aria-live="polite">
+									{t("selection.count", { count })}
+								</Text>
+							}
+							styles={{ body: { alignItems: "center", minHeight: 44 } }}
+						/>
+						<Tooltip label={t("selection.done")}>
+							<ActionIcon
 								variant="subtle"
 								color="gray"
-								h={44}
-								leftSection={<IconX size={18} />}
+								size={44}
+								aria-label={t("selection.done")}
 								onClick={onDone}
 							>
-								{t("selection.done")}
-							</Button>
-						</Group>
+								<IconX size={20} />
+							</ActionIcon>
+						</Tooltip>
 					</Group>
 					<Group grow gap="xs">
 						<Button

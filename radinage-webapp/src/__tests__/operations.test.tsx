@@ -1389,6 +1389,9 @@ describe("MonthlyOperationsPage", () => {
 				screen.getByRole("region", { name: "Opérations sélectionnées" }),
 			);
 			expect(bar.getByText("2 sélectionnées")).toBeInTheDocument();
+			expect(
+				bar.getByRole("checkbox", { name: "Tout désélectionner" }),
+			).toBeChecked();
 
 			fireEvent.click(bar.getByRole("button", { name: "Compte" }));
 			await screen.findByRole("dialog", {
@@ -1425,7 +1428,7 @@ describe("MonthlyOperationsPage", () => {
 			).toBeInTheDocument();
 
 			fireEvent.click(
-				screen.getByRole("button", { name: "Tout sélectionner" }),
+				screen.getByRole("checkbox", { name: "Tout sélectionner" }),
 			);
 			fireEvent.click(screen.getByRole("button", { name: "Catégorie" }));
 			await screen.findByRole("dialog", {

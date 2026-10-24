@@ -742,7 +742,7 @@ function SortControl({
 					label: t(`search.sort.${s === "label" ? "labelKey" : s}`),
 				}))}
 				allowDeselect={false}
-				w={150}
+				w={{ base: 112, sm: 150 }}
 				comboboxProps={{ withinPortal: true }}
 			/>
 			<Tooltip
@@ -950,7 +950,7 @@ function SearchPage() {
 							style={{ opacity: query.isPlaceholderData ? 0.6 : 1 }}
 						>
 							<SearchTotals total={total} totals={firstPage.totals} />
-							<Group justify="flex-end" gap="xs">
+							<Group justify="flex-end" gap="xs" wrap="nowrap">
 								{selectedIds === null && (
 									<Button
 										variant="default"
