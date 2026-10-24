@@ -47,7 +47,12 @@ import {
 	formatIsoDate,
 	parseCents,
 } from "@/lib/format";
-import { useBudgets, useCategories, useOperationSearch } from "@/lib/hooks";
+import {
+	useAccounts,
+	useBudgets,
+	useCategories,
+	useOperationSearch,
+} from "@/lib/hooks";
 import {
 	accountingDate,
 	isSplit,
@@ -66,6 +71,7 @@ import {
 } from "@/lib/operation-search";
 import { budgetTypeTones } from "@/lib/tones";
 import type {
+	AccountResponse,
 	BudgetResponse,
 	CategoryLook,
 	CategoryResponse,
@@ -160,6 +166,7 @@ function AmountInput({
 
 interface FilterControlsProps {
 	filters: OperationFilters;
+	accounts: AccountResponse[];
 	categories: CategoryResponse[];
 	budgets: BudgetResponse[];
 	onChange: UpdateFilters;
@@ -174,6 +181,7 @@ function categorySelection(filters: OperationFilters): string[] {
 
 function FilterControls({
 	filters,
+	accounts,
 	categories,
 	budgets,
 	onChange,
@@ -288,6 +296,22 @@ function FilterControls({
 				size="md"
 				comboboxProps={{ withinPortal: true }}
 			/>
+			<MultiSelect
+				label={t("search.accounts")}
+				placeholder={
+					(filters.accountIds?.length ?? 0) === 0
+						? t("search.allAccounts")
+						: undefined
+				}
+				value={filters.accountIds ?? []}
+				onChange={(accountIds) => onChange({ accountIds })}
+				data={accounts
+					.filter((a) => a.receivesOperations)
+					.map((a) => ({ value: a.id, label: a.name }))}
+				clearable
+				size="md"
+				comboboxProps={{ withinPortal: true }}
+			/>
 			<DatePickerInput
 				type="range"
 				label={t("search.dates")}
@@ -337,6 +361,7 @@ interface FilterChip {
 
 function useFilterChips(
 	filters: OperationFilters,
+	accounts: AccountResponse[],
 	categories: CategoryResponse[],
 	budgets: BudgetResponse[],
 ): FilterChip[] {
@@ -370,6 +395,13 @@ function useFilterChips(
 			key: `budget:${id}`,
 			label: budgets.find((b) => b.id === id)?.label ?? "?",
 			patch: { budgetIds: filters.budgetIds?.filter((b) => b !== id) },
+		});
+	}
+	for (const id of filters.accountIds ?? []) {
+		chips.push({
+			key: `account:${id}`,
+			label: accounts.find((a) => a.id === id)?.name ?? "?",
+			patch: { accountIds: filters.accountIds?.filter((a) => a !== id) },
 		});
 	}
 	const { amountMin, amountMax } = filters;
@@ -730,8 +762,9 @@ function SearchPage() {
 	const [drawerOpened, drawer] = useDisclosure(false);
 	const categories = useCategories().data ?? [];
 	const budgets = useBudgets().data ?? [];
+	const accounts = useAccounts().data ?? [];
 	const query = useOperationSearch(filters);
-	const chips = useFilterChips(filters, categories, budgets);
+	const chips = useFilterChips(filters, accounts, categories, budgets);
 
 	const update: UpdateFilters = (patch, replace = false) => {
 		navigate({ search: (prev) => mergeFilters(prev, patch), replace });
@@ -766,6 +799,7 @@ function SearchPage() {
 	const controls = (
 		<FilterControls
 			filters={filters}
+			accounts={accounts}
 			categories={categories}
 			budgets={budgets}
 			onChange={update}

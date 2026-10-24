@@ -18,6 +18,7 @@ export interface OperationFilters {
 	/** Also keeps the operations without a category, on top of `categoryIds`. */
 	uncategorized?: boolean;
 	budgetIds?: string[];
+	accountIds?: string[];
 	direction?: OperationDirection;
 	/** Inclusive bounds on the absolute amount, as API decimals ("12.50"). */
 	amountMin?: string;
@@ -98,6 +99,7 @@ export function parseOperationFilters(
 		categoryIds: asIdList(search.categoryIds),
 		uncategorized: asFlag(search.uncategorized),
 		budgetIds: asIdList(search.budgetIds),
+		accountIds: asIdList(search.accountIds),
 		direction: asOneOf(search.direction, OPERATION_DIRECTIONS),
 		amountMin: asMatching(search.amountMin, DECIMAL_PATTERN),
 		amountMax: asMatching(search.amountMax, DECIMAL_PATTERN),
@@ -121,6 +123,7 @@ export function operationSearchQuery(
 	for (const id of filters.categoryIds ?? []) params.append("categoryId", id);
 	if (filters.uncategorized) params.set("uncategorized", "true");
 	for (const id of filters.budgetIds ?? []) params.append("budgetId", id);
+	for (const id of filters.accountIds ?? []) params.append("accountId", id);
 	if (filters.direction) params.set("direction", filters.direction);
 	if (filters.amountMin) params.set("amountMin", filters.amountMin);
 	if (filters.amountMax) params.set("amountMax", filters.amountMax);
@@ -139,6 +142,7 @@ export function activeFilterCount(filters: OperationFilters): number {
 	return [
 		(filters.categoryIds?.length ?? 0) + (filters.uncategorized ? 1 : 0),
 		filters.budgetIds?.length ?? 0,
+		filters.accountIds?.length ?? 0,
 		filters.direction ? 1 : 0,
 		filters.amountMin || filters.amountMax ? 1 : 0,
 		filters.dateFrom || filters.dateTo ? 1 : 0,

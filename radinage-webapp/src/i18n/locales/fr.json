@@ -705,6 +705,8 @@
 		"noCategory": "Sans catégorie",
 		"budgets": "Budgets",
 		"allBudgets": "Tous les budgets",
+		"accounts": "Comptes",
+		"allAccounts": "Tous les comptes",
 		"dates": "Dates",
 		"allDates": "Toutes les dates",
 		"ignoredFilter": {

@@ -13,6 +13,7 @@ describe("parseOperationFilters", () => {
 				label: "  loyer ",
 				categoryIds: ["a", 3, ""],
 				budgetIds: "b",
+				accountIds: ["acc", 7],
 				direction: "sideways",
 				amountMin: 12.5,
 				amountMax: "abc",
@@ -26,6 +27,7 @@ describe("parseOperationFilters", () => {
 		).toEqual({
 			label: "loyer",
 			categoryIds: ["a"],
+			accountIds: ["acc"],
 			amountMin: "12.5",
 			dateFrom: "2026-01-01",
 			ignored: "only",
@@ -54,7 +56,12 @@ describe("operationSearchQuery", () => {
 	it("repeats the list filters and omits a blank label", () => {
 		const params = new URLSearchParams(
 			operationSearchQuery(
-				{ label: " ", categoryIds: ["a", "b"], budgetIds: ["c"] },
+				{
+					label: " ",
+					categoryIds: ["a", "b"],
+					budgetIds: ["c"],
+					accountIds: ["d", "e"],
+				},
 				2,
 				50,
 			),
@@ -62,6 +69,7 @@ describe("operationSearchQuery", () => {
 		expect(params.has("label")).toBe(false);
 		expect(params.getAll("categoryId")).toEqual(["a", "b"]);
 		expect(params.getAll("budgetId")).toEqual(["c"]);
+		expect(params.getAll("accountId")).toEqual(["d", "e"]);
 		expect(params.get("page")).toBe("2");
 		expect(params.get("pageSize")).toBe("50");
 	});
@@ -75,9 +83,10 @@ describe("activeFilterCount", () => {
 				sort: "label",
 				categoryIds: ["a", "b"],
 				uncategorized: true,
+				accountIds: ["c"],
 				amountMin: "1",
 				amountMax: "2",
 			}),
-		).toBe(4);
+		).toBe(5);
 	});
 });
