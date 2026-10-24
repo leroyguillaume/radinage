@@ -61,6 +61,8 @@ pub struct ListOperationsParams {
     /// When not empty, keeps the operations linked to one of these budgets, a split operation
     /// through any of its parts.
     pub budget_ids: Vec<Uuid>,
+    /// When not empty, keeps the operations of one of these accounts.
+    pub account_ids: Vec<Uuid>,
 }
 
 /// Which operations a listing keeps by their ignored flag.
@@ -361,7 +363,7 @@ fn whole_or_any_part(operation_test: &str, split_test: &str) -> String {
     )
 }
 
-/// Filters shared by the listing and its totals, binding `$1` to `$9` as [`bind_list_filters`]
+/// Filters shared by the listing and its totals, binding `$1` to `$10` as [`bind_list_filters`]
 /// does.
 fn list_filters_sql(params: &ListOperationsParams) -> String {
     let ignored = match params.ignored {
@@ -403,6 +405,7 @@ fn list_filters_sql(params: &ListOperationsParams) -> String {
            AND ($5::numeric IS NULL OR o.amount = $5)
            AND ($8::numeric IS NULL OR ABS(o.amount) >= $8)
            AND ($9::numeric IS NULL OR ABS(o.amount) <= $9)
+           AND (cardinality($10::uuid[]) = 0 OR o.account_id = ANY($10))
            {ignored}
            {direction}
            {category}
@@ -425,6 +428,7 @@ fn bind_list_filters<'q>(
         .bind(&params.budget_ids)
         .bind(params.amount_min)
         .bind(params.amount_max)
+        .bind(&params.account_ids)
 }
 
 /// Build a `BudgetLink` from the raw database columns.
@@ -526,7 +530,7 @@ impl OperationRepository for PgOperationRepository {
             "SELECT {OPERATION_COLUMNS} FROM operations o
              {filters}
              ORDER BY {sort_col} {sort_dir}, o.id DESC
-             LIMIT $10 OFFSET $11",
+             LIMIT $11 OFFSET $12",
             sort_col = params.sort.as_sql(),
             sort_dir = params.order.as_sql(),
         );
@@ -1941,6 +1945,44 @@ mod integration_tests {
             repo.find_by_id(op, user_id).await.unwrap().account_id,
             joint
         );
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn list_filters_by_account(pool: PgPool) {
+        let repo = PgOperationRepository::new(pool.clone());
+        let user_id = setup_user(&pool).await;
+        let joint = Uuid::new_v4();
+        sqlx::query(
+            "INSERT INTO accounts (id, user_id, name, kind, imported) \
+             VALUES ($1, $2, 'Joint', 'checking', TRUE)",
+        )
+        .bind(joint)
+        .bind(user_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+        let on_main = insert_op(&repo, user_id, dec!(-1)).await;
+        let on_joint = insert_op(&repo, user_id, dec!(-2)).await;
+        sqlx::query("UPDATE operations SET account_id = $1 WHERE id = $2")
+            .bind(joint)
+            .bind(on_joint)
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let by_accounts = |account_ids: Vec<Uuid>| ListOperationsParams {
+            account_ids,
+            ..sorted_params()
+        };
+        assert_eq!(
+            listed_ids(&repo, user_id, by_accounts(vec![joint])).await,
+            (vec![on_joint], 1)
+        );
+        assert_eq!(
+            listed_ids(&repo, user_id, by_accounts(vec![user_id])).await,
+            (vec![on_main], 1)
+        );
+        assert_eq!(listed_ids(&repo, user_id, by_accounts(vec![])).await.1, 2);
     }
 
     #[sqlx::test(migrations = "./migrations")]

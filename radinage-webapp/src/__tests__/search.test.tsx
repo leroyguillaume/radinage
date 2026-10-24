@@ -312,6 +312,25 @@ describe("SearchPage", () => {
 		});
 	});
 
+	it("sends each picked account, offering only those holding operations", async () => {
+		await renderSearchPage();
+		await screen.findByText("LOYER FEVRIER");
+
+		const input = screen.getByRole("combobox", { name: "Comptes" });
+		fireEvent.focus(input);
+		fireEvent.click(input);
+		expect(
+			screen.queryByRole("option", { name: "Livret A" }),
+		).not.toBeInTheDocument();
+		fireEvent.click(
+			await screen.findByRole("option", { name: "Compte joint" }),
+		);
+
+		await waitFor(() =>
+			expect(lastSearch().getAll("accountId")).toEqual(["account-2"]),
+		);
+	});
+
 	it("maps the no-category option to uncategorized", async () => {
 		await renderSearchPage();
 		await screen.findByText("LOYER FEVRIER");

@@ -268,6 +268,10 @@ pub struct ListOperationsQuery {
     /// of its parts. Repeat the parameter for several budgets.
     #[serde(default)]
     pub budget_id: Vec<Uuid>,
+    /// Include only operations of one of these accounts. Repeat the parameter for several
+    /// accounts.
+    #[serde(default)]
+    pub account_id: Vec<Uuid>,
 }
 
 fn default_page() -> Option<u32> {
@@ -364,6 +368,7 @@ pub async fn list_operations<U, O: OperationRepository, B, P, C, R, A>(
             uncategorized: q.uncategorized,
         },
         budget_ids: q.budget_id,
+        account_ids: q.account_id,
     };
 
     let (ops, totals) = state.operation_repo.list(auth_user.id, &params).await?;
@@ -2014,6 +2019,18 @@ mod tests {
         .await;
 
         assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn list_operations_passes_the_accounts() {
+        let perso = Uuid::new_v4();
+        let joint = Uuid::new_v4();
+        expect_list_params(
+            &format!("accountId={perso}&accountId={joint}"),
+            move |params| params.account_ids == [perso, joint],
+        )
+        .await;
+        expect_list_params("", |params| params.account_ids.is_empty()).await;
     }
 
     #[tokio::test]
