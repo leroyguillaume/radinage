@@ -872,6 +872,7 @@ function RemainingDaysBadge({ count }: { count: number }) {
 
 interface DailyBudgetCardProps {
 	dailyBudget: number | null;
+	unbudgetedRate: number | null;
 	daysLeft: number;
 	yearProgress: number;
 	compact: boolean;
@@ -879,6 +880,7 @@ interface DailyBudgetCardProps {
 
 function DailyBudgetCard({
 	dailyBudget,
+	unbudgetedRate,
 	daysLeft,
 	yearProgress,
 	compact,
@@ -904,6 +906,9 @@ function DailyBudgetCard({
 						? t("forecast.dailyBudgetNegativeHint")
 						: t("forecast.dailyBudgetHint")}
 			</Text>
+			{dailyBudget !== null && dailyBudget >= 0 && unbudgetedRate !== null && (
+				<SpendingPace dailyBudget={dailyBudget} spent={-unbudgetedRate} />
+			)}
 			<Stack gap={6} mt="auto">
 				<Text size="sm" c="forest.1">
 					{t("forecast.yearProgress", { percent: Math.round(yearProgress) })}
@@ -918,6 +923,31 @@ function DailyBudgetCard({
 				/>
 			</Stack>
 		</HeroCard>
+	);
+}
+
+interface SpendingPaceProps {
+	dailyBudget: number;
+	spent: number;
+}
+
+function SpendingPace({ dailyBudget, spent }: SpendingPaceProps) {
+	const { t } = useTranslation();
+	const over = spent - dailyBudget;
+	if (over > 0) {
+		return (
+			<Text size="sm" fw={700} c="tangerine.3">
+				{t("forecast.dailyBudgetOverPace", {
+					spent: formatAmount(spent),
+					over: formatAmount(over),
+				})}
+			</Text>
+		);
+	}
+	return (
+		<Text size="sm" c="forest.1">
+			{t("forecast.dailyBudgetPace", { spent: formatAmount(spent) })}
+		</Text>
 	);
 }
 
@@ -1123,6 +1153,7 @@ function ForecastPage() {
 	const dailyBudgetCard = (
 		<DailyBudgetCard
 			dailyBudget={dailyBudget}
+			unbudgetedRate={unbudgetedRate}
 			daysLeft={daysLeft}
 			yearProgress={yearProgress}
 			compact={isMobile}
