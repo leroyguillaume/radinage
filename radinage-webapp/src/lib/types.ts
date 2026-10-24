@@ -260,6 +260,9 @@ export interface ImportDataResponse {
 	importedBalance: boolean;
 }
 
+/** Field separator of a CSV file; spreadsheets ignore it. */
+export type CsvDelimiter = "comma" | "semicolon" | "tab" | "pipe";
+
 /** A named bank statement layout; columns are 0-based indexes. */
 export interface ImportProfileResponse {
 	id: string;
@@ -269,6 +272,7 @@ export interface ImportProfileResponse {
 	dateCol: number;
 	dateFormat: string;
 	skipLines: number;
+	csvDelimiter: CsvDelimiter;
 	lastUsedAt: string | null;
 	createdAt: string;
 }

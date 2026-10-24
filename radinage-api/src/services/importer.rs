@@ -1,3 +1,4 @@
+use crate::domain::import_profile::CsvDelimiter;
 use chrono::{Datelike, NaiveDate};
 use rust_decimal::Decimal;
 use schemars::JsonSchema;
@@ -14,6 +15,9 @@ pub struct ImportParams {
     /// Number of leading rows to skip before the first data row (default 0).
     /// This count includes the header row if present.
     pub skip_lines: usize,
+    /// Field separator of CSV files (default `comma`); spreadsheets ignore it.
+    #[serde(default)]
+    pub csv_delimiter: CsvDelimiter,
 }
 
 #[derive(Debug, Clone)]
@@ -45,10 +49,7 @@ pub fn parse_csv(data: &[u8], params: &ImportParams) -> ImportResult {
     // Skip the first `skip_lines` lines before handing data to the CSV reader.
     let effective_data = skip_leading_lines(data, params.skip_lines);
 
-    let mut reader = csv::ReaderBuilder::new()
-        .has_headers(false)
-        .flexible(true)
-        .from_reader(effective_data);
+    let mut reader = csv_reader(effective_data, params.csv_delimiter);
 
     let mut rows = Vec::new();
     let mut errors = Vec::new();
@@ -103,11 +104,20 @@ pub fn parse_xlsx(data: &[u8], params: &ImportParams) -> ImportResult {
     ImportResult { rows, errors }
 }
 
+fn csv_reader(data: &[u8], delimiter: CsvDelimiter) -> csv::Reader<&[u8]> {
+    csv::ReaderBuilder::new()
+        .has_headers(false)
+        .flexible(true)
+        .delimiter(delimiter.as_byte())
+        .from_reader(data)
+}
+
 /// The first `limit` rows of a file as text, cell by cell, with nothing skipped: what an import
-/// reads before the profile picks its columns.
+/// reads before the profile picks its columns. `delimiter` only applies to CSV.
 pub fn preview_rows(
     data: &[u8],
     spreadsheet: bool,
+    delimiter: CsvDelimiter,
     limit: usize,
 ) -> Result<Vec<Vec<String>>, String> {
     if spreadsheet {
@@ -118,10 +128,7 @@ pub fn preview_rows(
             .map(|row| row.iter().map(xlsx_cell_text).collect())
             .collect());
     }
-    csv::ReaderBuilder::new()
-        .has_headers(false)
-        .flexible(true)
-        .from_reader(data)
+    csv_reader(data, delimiter)
         .records()
         .take(limit)
         .map(|record| {
@@ -352,6 +359,7 @@ mod tests {
             date_col: 2,
             date_format: "%d/%m/%Y".to_string(),
             skip_lines: 1, // skip header row
+            csv_delimiter: CsvDelimiter::Comma,
         }
     }
 
@@ -453,6 +461,7 @@ mod tests {
             date_col: 1,
             date_format: "%d/%m/%Y".to_string(),
             skip_lines: 0,
+            csv_delimiter: CsvDelimiter::Comma,
         };
         let csv = b"amount,date,label\n100.00,15/06/2024,Salaire\n";
         let result = parse_csv(csv, &params);
@@ -464,7 +473,7 @@ mod tests {
     #[test]
     fn preview_csv_keeps_header_and_stops_at_limit() {
         let data = b"Date,Label,Amount\n01/01/2024, Coffee ,-3.50\n02/01/2024,Rent,-800\n";
-        let rows = preview_rows(data, false, 2).unwrap();
+        let rows = preview_rows(data, false, CsvDelimiter::Comma, 2).unwrap();
         assert_eq!(
             rows,
             vec![
@@ -476,13 +485,49 @@ mod tests {
 
     #[test]
     fn preview_csv_keeps_ragged_rows() {
-        let rows = preview_rows(b"Account statement\na,b,c\n", false, 10).unwrap();
+        let rows = preview_rows(
+            b"Account statement\na,b,c\n",
+            false,
+            CsvDelimiter::Comma,
+            10,
+        )
+        .unwrap();
         assert_eq!(rows, vec![vec!["Account statement"], vec!["a", "b", "c"]]);
     }
 
     #[test]
+    fn preview_csv_splits_on_the_given_delimiter() {
+        let rows = preview_rows(b"a;b,c;d\n", false, CsvDelimiter::Semicolon, 10).unwrap();
+        assert_eq!(rows, vec![vec!["a", "b,c", "d"]]);
+    }
+
+    #[test]
+    fn parse_csv_with_semicolon_delimiter_keeps_comma_decimals() {
+        let params = ImportParams {
+            csv_delimiter: CsvDelimiter::Semicolon,
+            ..default_params()
+        };
+        let csv = b"label;amount;date\nCourses;-42,50;01/01/2024\n";
+        let result = parse_csv(csv, &params);
+        assert!(result.errors.is_empty(), "{:?}", result.errors);
+        assert_eq!(result.rows[0].amount, Decimal::new(-4250, 2));
+    }
+
+    #[test]
+    fn parse_csv_with_tab_delimiter() {
+        let params = ImportParams {
+            csv_delimiter: CsvDelimiter::Tab,
+            ..default_params()
+        };
+        let csv = b"label\tamount\tdate\nLoyer\t-800\t05/02/2024\n";
+        let result = parse_csv(csv, &params);
+        assert!(result.errors.is_empty(), "{:?}", result.errors);
+        assert_eq!(result.rows[0].label, "Loyer");
+    }
+
+    #[test]
     fn preview_invalid_spreadsheet_is_an_error() {
-        assert!(preview_rows(b"not a workbook", true, 10).is_err());
+        assert!(preview_rows(b"not a workbook", true, CsvDelimiter::Comma, 10).is_err());
     }
 
     #[test]

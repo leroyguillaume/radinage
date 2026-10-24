@@ -151,6 +151,14 @@
 		"dateCol": "Date column",
 		"skipLines": "Skipped lines",
 		"dateFormat": "Date format",
+		"csvDelimiter": "Separator",
+		"csvDelimiterHint": "CSV files only",
+		"csvDelimiters": {
+			"comma": "Comma ( , )",
+			"semicolon": "Semicolon ( ; )",
+			"tab": "Tab",
+			"pipe": "Pipe ( | )"
+		},
 		"nameTaken": "A profile already has this name, or the maximum number of profiles is reached",
 		"saveError": "Could not save the profile",
 		"deleteConfirm": "Confirm deletion",

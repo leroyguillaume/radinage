@@ -35,6 +35,7 @@ function makeProfile(
 		dateCol: 0,
 		dateFormat: "%d/%m/%Y",
 		skipLines: 1,
+		csvDelimiter: "comma",
 		lastUsedAt: "2026-10-20T10:00:00Z",
 		createdAt: "2026-01-01T10:00:00Z",
 		...overrides,

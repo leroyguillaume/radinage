@@ -151,6 +151,14 @@
 		"dateCol": "Colonne de la date",
 		"skipLines": "Lignes ignorées",
 		"dateFormat": "Format de date",
+		"csvDelimiter": "Séparateur",
+		"csvDelimiterHint": "Fichiers CSV uniquement",
+		"csvDelimiters": {
+			"comma": "Virgule ( , )",
+			"semicolon": "Point-virgule ( ; )",
+			"tab": "Tabulation",
+			"pipe": "Barre verticale ( | )"
+		},
 		"nameTaken": "Un profil porte déjà ce nom, ou le nombre maximal de profils est atteint",
 		"saveError": "Erreur lors de l'enregistrement du profil",
 		"deleteConfirm": "Confirmer la suppression",
