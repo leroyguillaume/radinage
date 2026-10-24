@@ -14,6 +14,7 @@ import {
 import { DatePicker } from "@mantine/dates";
 import {
 	IconArrowRight,
+	IconArrowsExchange,
 	IconBuildingBank,
 	IconCalendar,
 	IconChevronDown,
@@ -36,6 +37,7 @@ import {
 	CategorySelect,
 } from "@/components/CategoryBadge";
 import { useDescribeIgnoreRule } from "@/components/IgnoreRuleForm";
+import { TransferField } from "@/components/TransferField";
 import { budgetFitsAmount } from "@/lib/budget-utils";
 import {
 	formatIsoDate,
@@ -49,12 +51,19 @@ import {
 	operationEntries,
 } from "@/lib/operation-parts";
 import { budgetTypeTones } from "@/lib/tones";
+import {
+	budgetsForTransfer,
+	transferFlow,
+	transferTone,
+} from "@/lib/transfers";
 import type {
 	AccountResponse,
 	BudgetResponse,
 	CategoryResponse,
 	IgnoreRuleResponse,
 	OperationResponse,
+	SetTransferRequest,
+	TransferRuleResponse,
 } from "@/lib/types";
 import { headingFont, palette } from "@/theme";
 
@@ -66,6 +75,8 @@ export interface OperationHandlers {
 	categories: CategoryResponse[];
 	/** The user's ignore rules, to name the one that ignored an operation. */
 	ignoreRules: IgnoreRuleResponse[];
+	/** The user's transfer rules, to name the one that made an operation a transfer. */
+	transferRules: TransferRuleResponse[];
 	onOpen: (op: OperationResponse) => void;
 	onSetAccount: (opId: string, accountId: string) => void;
 	onSetCategory: (opId: string, categoryId: string | null) => void;
@@ -75,6 +86,10 @@ export interface OperationHandlers {
 	onSetIgnored: (opId: string, ignored: boolean) => void;
 	/** Opens a new ignore rule pre-filled from the operation's label. */
 	onIgnoreAlways: (op: OperationResponse) => void;
+	/** Makes the operation a transfer with another account, or an ordinary one with `null`. */
+	onSetTransfer: (opId: string, transfer: SetTransferRequest | null) => void;
+	/** Opens a new transfer rule pre-filled from the operation's account, label and transfer. */
+	onTransferAlways: (op: OperationResponse) => void;
 	onSplit: (op: OperationResponse) => void;
 	onEditEffectiveDate: (
 		op: OperationResponse,
@@ -152,6 +167,12 @@ export function OperationSheet({
 	if (operation !== null && operation !== shown) setShown(operation);
 
 	const amount = shown ? Number(shown.amount) : 0;
+	const flow = shown ? transferFlow(shown, handlers.accounts) : null;
+	const amountColor = flow
+		? transferTone(flow).text
+		: amount > 0
+			? budgetTypeTones.income.text
+			: undefined;
 	const title = shown && (
 		<Stack component="span" gap={2}>
 			<Text component="span" size="sm" c="dimmed" fw={600}>
@@ -166,7 +187,7 @@ export function OperationSheet({
 				fz={32}
 				lh={1.1}
 				className="tabular-nums"
-				c={amount > 0 ? budgetTypeTones.income.text : undefined}
+				c={amountColor}
 			>
 				{formatSignedAmount(amount)}
 			</Text>
@@ -245,6 +266,10 @@ function SheetBody({
 }) {
 	const { t, i18n } = useTranslation();
 	const split = isSplit(op);
+	const other = handlers.accounts.find((a) => a.id === op.transfer?.accountId);
+	const transferBudgets = other
+		? budgetsForTransfer(handlers.budgets, other, Number(op.amount))
+		: [];
 	const closeThen = (action: () => void) => () => {
 		onClose();
 		action();
@@ -276,15 +301,39 @@ function SheetBody({
 				) : (
 					<>
 						<SheetRow first={false}>
-							<CategoryField op={op} handlers={handlers} />
-						</SheetRow>
-						<SheetRow first={false}>
-							<BudgetField
+							<TransferField
 								op={op}
-								handlers={handlers}
-								onCreate={closeThen(() => handlers.onCreateBudget(op))}
+								accounts={handlers.accounts}
+								transferRules={handlers.transferRules}
+								onChange={(transfer) => handlers.onSetTransfer(op.id, transfer)}
 							/>
 						</SheetRow>
+						{op.transfer === null ? (
+							<>
+								<SheetRow first={false}>
+									<CategoryField op={op} handlers={handlers} />
+								</SheetRow>
+								<SheetRow first={false}>
+									<BudgetField
+										op={op}
+										handlers={handlers}
+										onCreate={closeThen(() => handlers.onCreateBudget(op))}
+									/>
+								</SheetRow>
+							</>
+						) : (
+							transferBudgets.length > 0 && (
+								<SheetRow first={false}>
+									<BudgetField
+										op={op}
+										handlers={handlers}
+										options={transferBudgets}
+										label={t("transfers.savingsBudget")}
+										description={t("transfers.savingsBudgetHint")}
+									/>
+								</SheetRow>
+							)
+						)}
 					</>
 				)}
 				<SheetRow first={false}>
@@ -318,6 +367,17 @@ function SheetBody({
 						? t("operations.unignoreOperation")
 						: t("operations.ignoreOperation")}
 				</Button>
+				{op.transfer !== null && op.transfer.ruleId === null && (
+					<Button
+						variant="default"
+						h={48}
+						leftSection={<IconArrowsExchange size={18} />}
+						onClick={closeThen(() => handlers.onTransferAlways(op))}
+						style={{ gridColumn: "1 / -1" }}
+					>
+						{t("transfers.always")}
+					</Button>
+				)}
 				{op.ignoreRuleId === null && (
 					<Button
 						variant="default"
@@ -459,23 +519,33 @@ function BudgetField({
 	op,
 	handlers,
 	onCreate,
+	options: offered,
+	label,
+	description,
 }: {
 	op: OperationResponse;
 	handlers: OperationHandlers;
-	onCreate: () => void;
+	/** Offers to create a budget from the operation when it is linked to none. */
+	onCreate?: () => void;
+	/** The budgets offered; those the amount fits by default. */
+	options?: BudgetResponse[];
+	label?: string;
+	description?: string;
 }) {
 	const { t } = useTranslation();
 	const amount = Number(op.amount);
 	const linkedId =
 		op.budgetLink.type === "unlinked" ? null : op.budgetLink.budgetId;
-	const options = handlers.budgets.filter(
-		(b) => b.id === linkedId || budgetFitsAmount(b, amount),
-	);
+	const options =
+		offered ??
+		handlers.budgets.filter(
+			(b) => b.id === linkedId || budgetFitsAmount(b, amount),
+		);
 
 	return (
 		<Stack gap="xs">
 			<Select
-				label={t("operations.sheet.budget")}
+				label={label ?? t("operations.sheet.budget")}
 				data={options.map((b) => ({ value: b.id, label: b.label }))}
 				value={linkedId}
 				onChange={(budgetId) =>
@@ -485,7 +555,7 @@ function BudgetField({
 				description={
 					op.budgetLink.type === "auto"
 						? t("operations.sheet.autoLinked")
-						: undefined
+						: description
 				}
 				leftSection={<IconLink size={18} />}
 				searchable
@@ -493,15 +563,17 @@ function BudgetField({
 				comboboxProps={{ withinPortal: true }}
 			/>
 			{linkedId === null ? (
-				<Button
-					variant="default"
-					h={44}
-					leftSection={<IconPlus size={16} />}
-					onClick={onCreate}
-					style={{ borderStyle: "dashed" }}
-				>
-					{t("operations.createBudget")}
-				</Button>
+				onCreate && (
+					<Button
+						variant="default"
+						h={44}
+						leftSection={<IconPlus size={16} />}
+						onClick={onCreate}
+						style={{ borderStyle: "dashed" }}
+					>
+						{t("operations.createBudget")}
+					</Button>
+				)
 			) : (
 				<Button
 					variant="subtle"

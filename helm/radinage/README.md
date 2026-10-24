@@ -44,6 +44,7 @@ A personal bank account tracking application
 | apps.api.maxCategoriesPerUser | string | `"50"` | Maximum number of categories per user |
 | apps.api.maxIgnoreRulesPerUser | string | `"100"` | Maximum number of ignore rules per user |
 | apps.api.maxImportProfilesPerUser | string | `"20"` | Maximum number of import profiles per user |
+| apps.api.maxTransferRulesPerUser | string | `"100"` | Maximum number of transfer rules per user |
 | apps.api.nodeSelector | object | `{}` | API node selector — override `global.nodeSelector` |
 | apps.api.podAnnotations | object | `{}` | API pod annotations — override `global.podAnnotations` |
 | apps.api.podLabels | object | `{}` | API pod labels — override `global.podLabels` |

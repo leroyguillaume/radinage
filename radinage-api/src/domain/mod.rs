@@ -42,6 +42,7 @@ pub mod category;
 pub mod ignore_rule;
 pub mod import_profile;
 pub mod operation;
+pub mod transfer;
 pub mod user;
 
 use chrono::NaiveDate;

@@ -134,6 +134,8 @@ apps:
     maxCategoriesPerUser: "50"
     # -- (string) Maximum number of ignore rules per user
     maxIgnoreRulesPerUser: "100"
+    # -- (string) Maximum number of transfer rules per user
+    maxTransferRulesPerUser: "100"
     # -- (string) Maximum number of accounts per user
     maxAccountsPerUser: "20"
     # -- (string) Base URL of the web application (used for invitation links).

@@ -86,6 +86,7 @@ function operation(overrides: Partial<OperationResponse>): OperationResponse {
 		budgetLink: { type: "unlinked" },
 		ignored: false,
 		ignoreRuleId: null,
+		transfer: null,
 		categoryId: null,
 		effectiveCategoryId: null,
 		splits: [],
@@ -155,6 +156,7 @@ function account(
 		receivesOperations,
 		balance: null,
 		currentBalance: null,
+		transferredInto: false,
 		createdAt: "2026-01-01T00:00:00Z",
 	};
 }
@@ -607,6 +609,7 @@ describe("SearchPage", () => {
 					label: "REMBOURSEMENT",
 					ignored: true,
 					ignoreRuleId: "r1",
+					transfer: null,
 				}),
 			]),
 		);

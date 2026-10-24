@@ -62,6 +62,7 @@ const account: AccountResponse = {
 	receivesOperations: true,
 	balance: null,
 	currentBalance: null,
+	transferredInto: false,
 	createdAt: "2026-01-01T10:00:00Z",
 };
 

@@ -54,6 +54,7 @@ const mockSummaryResponse = {
 				income: "2000.00",
 				savings: "-300.00",
 			},
+			transfers: { toSavings: "0", fromSavings: "0", internal: "0" },
 		},
 		{
 			year: 2026,
@@ -64,6 +65,7 @@ const mockSummaryResponse = {
 				income: "2200.00",
 				savings: "-400.00",
 			},
+			transfers: { toSavings: "0", fromSavings: "0", internal: "0" },
 		},
 		{
 			year: 2026,
@@ -74,6 +76,7 @@ const mockSummaryResponse = {
 				income: "2500.00",
 				savings: "-350.00",
 			},
+			transfers: { toSavings: "0", fromSavings: "0", internal: "0" },
 		},
 	],
 };
@@ -195,6 +198,35 @@ describe("StatsPage", () => {
 		expect(pageText).toContain("3\u202f400");
 	});
 
+	it("counts transfers as net savings and keeps internal ones in the balance", async () => {
+		const [january, ...rest] = mockSummaryResponse.months;
+		if (!january) throw new Error("fixture without months");
+		setupMocks({
+			months: [
+				{
+					...january,
+					transfers: {
+						toSavings: "-200.00",
+						fromSavings: "50.00",
+						internal: "-25.00",
+					},
+				},
+				...rest,
+			],
+		});
+		await renderStatsPage();
+
+		await waitFor(() => {
+			expect(screen.getByText("Revenus")).toBeInTheDocument();
+		});
+
+		// Savings: -1050 - 200 + 50 = -1200; balance: 3400 - 150 - 25 = 3225.
+		const pageText = document.body.textContent ?? "";
+		expect(pageText).toContain("1 200");
+		expect(pageText).toContain("3 225");
+		expect(pageText).toContain("6 700");
+	});
+
 	it("renders bar charts", async () => {
 		await renderStatsPage();
 
@@ -258,12 +290,14 @@ describe("StatsPage", () => {
 					month: 1,
 					unbudgeted: "1500.00",
 					budgeted: { expense: "0.00", income: "0.00", savings: "0.00" },
+					transfers: { toSavings: "0", fromSavings: "0", internal: "0" },
 				},
 				{
 					year: 2026,
 					month: 2,
 					unbudgeted: "-400.00",
 					budgeted: { expense: "0.00", income: "0.00", savings: "0.00" },
+					transfers: { toSavings: "0", fromSavings: "0", internal: "0" },
 				},
 			],
 		});

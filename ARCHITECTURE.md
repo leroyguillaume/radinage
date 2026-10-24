@@ -45,8 +45,10 @@ handler → service → repository → database:
   `BudgetRepository`, `ImportProfileRepository`, `CategoryRepository`,
   `IgnoreRuleRepository`), each
   with a `Pg*` implementation and a mockall-generated mock for handler tests.
+  Transfer rules belong to the account whose operations they match, so
+  `AccountRepository` holds them too.
 - [src/domain/](radinage-api/src/domain/) holds users, accounts, operations,
-  budgets, categories, ignore rules and import profiles,
+  budgets, categories, ignore rules, transfers and import profiles,
   including the `BudgetLink` and `BudgetKind` enums that carry most of the
   domain's shape.
 - [src/auth/](radinage-api/src/auth/) hashes passwords with Argon2 and issues
@@ -122,11 +124,15 @@ sequenceDiagram
         H->>R: exists_by_fields(user, account, amount, date, label)
     end
     H->>G: list(user)
+    H->>A: list_transfer_rules(user)
     loop each non-duplicate row
         H->>R: insert
-        H->>M: match_operation(op, all user budgets)
+        opt a transfer rule recognizes it, on either of its accounts
+            H->>R: set_transfer, then pair_transfer
+        end
+        H->>M: match_operation(op, budgets the op accepts)
         H->>R: set_auto_link (when a budget matches)
-        H->>M: match_category(op, all user categories)
+        H->>M: match_category(op, all user categories), unless a transfer
         H->>R: set_category (when a category matches)
         H->>R: ignore_by_rule (when an ignore rule matches)
     end
@@ -165,6 +171,19 @@ that are not ignored yet; none of these paths ever changes how an already
 ignored operation was ignored. A failure to list or apply the rules during an
 import is logged and leaves the operations counted.
 
+Transfer rules use the same label patterns. A rule names an imported checking
+account with a pattern for its operations and the other account, with a second
+pattern for that account's operations when it receives operations too. Every
+operation created by hand or by an import becomes, before any budget or
+category matching, a transfer with the other account of the first of the
+user's rules, oldest first, that recognizes it on either of its two accounts,
+and is paired with the other side if that one is already in (see *A transfer
+says where the money went*). Applying a rule (`POST /transfer-rules/{id}/apply`)
+makes the existing operations it recognizes transfers, leaving those already
+transfers, then pairs them. A failure to list the rules
+or to make a transfer during an import is logged and leaves the operation an
+ordinary one.
+
 The column mapping and the account travel with every import request, even when
 the web app took them from an import profile: the profile only fills the form
 and, through
@@ -193,7 +212,12 @@ categories, which own their ordered label rules; an operation, each split part a
 category that becomes null when that category is deleted. Users own ignore
 rules too; an ignored operation records the rule that ignored it, or none when
 it was ignored by hand, and deleting a rule stops ignoring the operations it
-ignored, in one transaction. The schema is
+ignored, in one transaction. An operation can be a transfer: it names the other
+account, the transfer rule that made it one if any, and, between two accounts
+receiving operations, the operation on the other side, which names it back.
+Transfer rules belong to their two accounts and go with either; deleting one
+undoes the transfers it made in one transaction, and an account that operations
+are transfers with cannot be deleted. The schema is
 defined by
 [radinage-api/migrations/](radinage-api/migrations/).
 
@@ -320,22 +344,58 @@ the horizon with the same rows as its months: by accounting date and without
 ignored operations, so that an operation moved to another month or left out is
 not counted twice or once too many. Summed over the accounts, an ignored
 transfer between two of them cancels out either way. Other accounts hold no
-operations. A savings account is worth its most recent balance plus what its
-savings budgets saved since: a savings budget may name the savings account its
-money goes to, and every amount linked to it after that balance, by bank date,
-lands there with its sign flipped, since what left the checking account (-100)
-arrived on the savings one (+100). Ignored operations are left out here: they
-count towards no budget, so they saved nothing. The link lives on the budget,
-not on each operation, because a budget already gathers the transfers to one
-savings account, by hand or through its matching rules; the database keeps it
-on savings budgets only, and the API on savings accounts only. Any other
-account is worth its most recent balance. Correcting an account's
+operations. They are worth their most recent balance
+plus what landed on them since, by bank date, with its sign flipped, since what
+left the checking account (-100) arrived on the other one (+100): every transfer
+with the account, and, on a savings account, every other amount linked to one of
+its savings budgets. A savings budget may name the savings account its money
+goes to, because a budget already gathers the money put aside on one account,
+by hand or through its matching rules; the database keeps that link on savings
+budgets only, and the API on savings accounts only. An ignored transfer still
+counts there, since the money moved; an ignored amount linked to a budget does
+not, since it counts towards no budget and so saved nothing. A transfer
+with another account landed on that account, whatever budget it is linked to,
+so no amount is counted on two accounts. Correcting an account's
 starting point is recording a newer balance; the older ones stay in its
 history.
 
+**A transfer says where the money went.** A bank statement shows money
+leaving for, or arriving from, another account as one more operation. Counted
+as such, putting 300 on a savings account would be a 300 expense, and moving
+450 between two checking accounts a 450 expense on one and a 450 income on the
+other. An operation can therefore be a transfer with another of the user's
+accounts, which takes it out of income and expenses: a debit to a savings
+account counts as savings (`Flows::savings`), a credit from one is money taken
+back from savings (`Flows::withdrawals`), kept apart from income so that
+emptying a savings account shows as savings going down rather than as earnings,
+and a transfer with a checking account is neither (`Flows::transfers`, its net).
+All three still count in the month's balance, so the running balance keeps
+following the imported checking accounts. How a row counts is decided once, in
+`SummaryRow::category`, for the summary and the forecast alike; a transfer is
+never unbudgeted spending, so it does not feed the unbudgeted rate. Only money
+put on a savings account can keep a budget link, and to a savings budget sending
+its money to that account or to none in particular, which then tracks a goal: it
+counts as that budget's savings, not twice. A transfer
+has no category, so the statistics per category leave it out. Between two
+accounts receiving operations, both sides are on a statement, so they are
+paired, whichever of the two statements is imported first: with the transfer of
+the other account back to this one, of opposite amount and closest by date
+within `TRANSFER_PAIRING_DAYS` days. Only an operation recognized as a transfer
+on its own side is paired automatically, by its own label in a rule or by hand:
+an amount and a date alone would take a refund of the same amount for the other
+side, and silently move it out of income. Any other operation of opposite
+amount is only offered on the operation's sheet, to link by hand. The two sides
+are marked and unmarked together; an operation unpaired by another pairing
+stays a transfer, waiting for another side, when a rule made it one.
+Changing a transfer's amount makes it a transfer again, so that its pairing and
+budget link follow the new amount; unmarking one runs the budget and category
+matching again on both sides, since marking cleared their category and budget.
+The rules live with the accounts whose operations they match rather than with
+the user's other rules, because they say something about those accounts: what
+their statements call a transfer to each other.
+
 **A balance read replaces the estimate, and keeps it.** The same movements
-(an account's operations when it receives them, what its savings budgets saved
-otherwise) rebuild an account's balance day by day: the latest balance read on
+(an account's operations when it receives them, what landed on it otherwise) rebuild an account's balance day by day: the latest balance read on
 or before a day plus what moved after it up to that day, and before the first
 balance, that balance minus what moved from the day to it. `GET
 /accounts/{id}/balance-history` returns that timeline, starting no earlier than
@@ -375,6 +435,11 @@ that defines flags, environment variables and defaults together.
   an account holding operations or profiles stays an imported checking account.
 - **A manual budget link is never overwritten by auto-matching**; only an
   explicit `force` on apply replaces it.
+- **A transfer is never with the operation's own account, never split, and has
+  no category**; its budget link, if any, is on money put on a savings account
+  and to a savings budget sending its money there or to no account in particular. An operation is the other side of one transfer at
+  most, and moving it to another account ends its transfer on both sides. An
+  account that operations are transfers with keeps its kind.
 - **A split operation's parts sum exactly to its amount**, share its sign and
   number at least two (`validate_splits`). While split, its amount cannot
   change, and neither auto-matching nor a manual link touches it.

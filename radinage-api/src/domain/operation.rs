@@ -1,3 +1,7 @@
+use super::{
+    budget::{Budget, BudgetType},
+    transfer::{Transfer, TransferFlow},
+};
 use chrono::NaiveDate;
 use rust_decimal::Decimal;
 use schemars::JsonSchema;
@@ -25,6 +29,8 @@ pub struct Operation {
     pub category_id: Option<Uuid>,
     /// Category of the budget the operation is linked to, its default category.
     pub budget_category_id: Option<Uuid>,
+    /// Transfer with another of the owner's accounts, if the operation is one.
+    pub transfer: Option<Transfer>,
     /// Parts the operation is split into, ordered by position; empty when not split.
     pub splits: Vec<OperationSplit>,
 }
@@ -43,6 +49,32 @@ impl Operation {
     /// The operation's own category, else its budget's; a split operation has none of its own.
     pub fn effective_category_id(&self) -> Option<Uuid> {
         self.category_id.or(self.budget_category_id)
+    }
+
+    /// How the operation counts as a transfer, `None` when it is not one.
+    pub fn transfer_flow(&self) -> Option<TransferFlow> {
+        self.transfer
+            .map(|t| TransferFlow::of(t.account_kind, self.amount))
+    }
+
+    /// Whether a transfer can be linked to some budget: only when it puts money on a savings
+    /// account. Always true when the operation is not a transfer.
+    pub fn may_have_budget(&self) -> bool {
+        matches!(self.transfer_flow(), None | Some(TransferFlow::ToSavings))
+    }
+
+    /// Whether the operation can be linked to `budget`: any budget when it is not a transfer;
+    /// when it puts money on a savings account, a savings budget sending its money there or to
+    /// no account in particular; none otherwise.
+    pub fn accepts_budget(&self, budget: &Budget) -> bool {
+        match (self.transfer, self.transfer_flow()) {
+            (None, _) => true,
+            (Some(transfer), Some(TransferFlow::ToSavings)) => {
+                budget.budget_type == BudgetType::Savings
+                    && budget.account_id.is_none_or(|id| id == transfer.account_id)
+            }
+            _ => false,
+        }
     }
 }
 
@@ -270,6 +302,7 @@ mod tests {
             ignore_rule_id: None,
             category_id: None,
             budget_category_id: None,
+            transfer: None,
             splits: vec![],
         };
         assert!(!op.is_split());

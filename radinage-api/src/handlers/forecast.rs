@@ -71,9 +71,17 @@ pub struct ForecastMonthResponse {
     /// Expense-budget amounts plus negative unbudgeted operations, plus `unbudgetedForecast`.
     #[schemars(with = "String")]
     pub expenses: Decimal,
+    /// Savings-budget amounts plus the money put on savings accounts by transfers.
     #[schemars(with = "String")]
     pub savings: Decimal,
-    /// Income + expenses + savings.
+    /// Money taken back from savings accounts by transfers, positive: net savings are
+    /// `savings + withdrawals`.
+    #[schemars(with = "String")]
+    pub withdrawals: Decimal,
+    /// Net of the transfers with checking accounts, zero when both sides are imported.
+    #[schemars(with = "String")]
+    pub transfers: Decimal,
+    /// Income + expenses + savings + withdrawals + transfers.
     #[schemars(with = "String")]
     pub balance: Decimal,
     /// Part of the balance the budgets still expect this month on top of what is already
@@ -101,6 +109,8 @@ impl From<&ForecastMonth> for ForecastMonthResponse {
             income: m.flows.income,
             expenses: m.flows.expenses,
             savings: m.flows.savings,
+            withdrawals: m.flows.withdrawals,
+            transfers: m.flows.transfers,
             balance: m.flows.balance(),
             committed: m.committed,
             unbudgeted_forecast: m.unbudgeted_forecast,
@@ -120,6 +130,10 @@ pub struct ForecastTotalsResponse {
     #[schemars(with = "String")]
     pub savings: Decimal,
     #[schemars(with = "String")]
+    pub withdrawals: Decimal,
+    #[schemars(with = "String")]
+    pub transfers: Decimal,
+    #[schemars(with = "String")]
     pub balance: Decimal,
 }
 
@@ -129,6 +143,8 @@ impl From<Flows> for ForecastTotalsResponse {
             income: flows.income,
             expenses: flows.expenses,
             savings: flows.savings,
+            withdrawals: flows.withdrawals,
+            transfers: flows.transfers,
             balance: flows.balance(),
         }
     }
@@ -465,6 +481,7 @@ mod tests {
             budget_link_type: "unlinked".to_string(),
             budget_id: None,
             budget_type: None,
+            transfer_account_kind: None,
         }
     }
 
@@ -498,6 +515,7 @@ mod tests {
                 balance,
             }),
             current_balance: Some(balance.amount),
+            transferred_into: false,
             created_at: chrono::Utc::now(),
         }
     }
@@ -589,6 +607,7 @@ mod tests {
                             budget_link_type: "auto".to_string(),
                             budget_id: Some(Uuid::nil()),
                             budget_type: Some("savings".to_string()),
+                            transfer_account_kind: None,
                         },
                     ])
                 })
@@ -607,16 +626,16 @@ mod tests {
             serde_json::json!({
                 "months": [
                     {"year": 2020, "month": 11, "status": "past", "income": "1200.00",
-                     "expenses": "-800.00", "savings": "0", "balance": "400.00",
+                     "expenses": "-800.00", "savings": "0", "withdrawals": "0", "transfers": "0", "balance": "400.00",
                      "committed": "0", "unbudgetedForecast": "0", "cumulative": "400.00"},
                     {"year": 2020, "month": 12, "status": "past", "income": "0",
-                     "expenses": "0", "savings": "0", "balance": "0", "committed": "0",
+                     "expenses": "0", "savings": "0", "withdrawals": "0", "transfers": "0", "balance": "0", "committed": "0",
                      "unbudgetedForecast": "0", "cumulative": "400.00"},
                     {"year": 2021, "month": 1, "status": "past", "income": "0",
-                     "expenses": "0", "savings": "-300.00", "balance": "-300.00",
+                     "expenses": "0", "savings": "-300.00", "withdrawals": "0", "transfers": "0", "balance": "-300.00",
                      "committed": "0", "unbudgetedForecast": "0", "cumulative": "100.00"},
                 ],
-                "totals": {"income": "1200.00", "expenses": "-800.00", "savings": "-300.00",
+                "totals": {"income": "1200.00", "expenses": "-800.00", "savings": "-300.00", "withdrawals": "0", "transfers": "0",
                            "balance": "100.00"},
                 "startingBalance": null,
                 "endBalance": "100.00",
@@ -678,6 +697,7 @@ mod tests {
                     budget_link_type: "manual".to_string(),
                     budget_id: Some(groceries_id),
                     budget_type: Some("expense".to_string()),
+                    transfer_account_kind: None,
                 }])
             })
         });
@@ -1051,6 +1071,7 @@ mod tests {
             budget_link_type: "manual".to_string(),
             budget_id: Some(budget.id),
             budget_type: Some(budget.budget_type.as_str().to_string()),
+            transfer_account_kind: None,
         }
     }
 
@@ -1110,7 +1131,7 @@ mod tests {
                      "projected": "-900"},
                 ],
                 "unbudgeted": {"actual": "-25.50", "forecast": "0", "projected": "-25.50"},
-                "totals": {"income": "1990", "expenses": "-925.50", "savings": "0",
+                "totals": {"income": "1990", "expenses": "-925.50", "savings": "0", "withdrawals": "0", "transfers": "0",
                            "balance": "1064.50"},
             })
         );

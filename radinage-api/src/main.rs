@@ -215,7 +215,7 @@ where
             },
             Tag {
                 name: "Accounts".to_string(),
-                description: Some("Manage the bank accounts a user follows and the balances read on them. A checking account whose statements are imported holds the operations: its balance is its most recent balance plus the operations dated after it, and the forecast starts from the sum of these accounts. A savings account is worth its most recent balance plus what the savings budgets sending their money to it saved after it, each amount linked to them, negative on the account it is on, adding its opposite. Any other account is worth its most recent balance.".to_string()),
+                description: Some("Manage the bank accounts a user follows and the balances read on them. A checking account whose statements are imported holds the operations: its balance is its most recent balance plus the operations dated after it, and the forecast starts from the sum of these accounts. Any other account is worth its most recent balance plus what landed on it after that balance: the transfers with it and, on a savings account, what the savings budgets sending their money to it saved, each amount, negative on the account it is on, adding its opposite. Transfer rules belong to the imported checking account whose operations they match (see Transfer rules).".to_string()),
                 ..Tag::default()
             },
             Tag {
@@ -239,6 +239,11 @@ where
                 ..Tag::default()
             },
             Tag {
+                name: "Transfer rules".to_string(),
+                description: Some("Manage the rules that make operations transfers between two of a user's accounts automatically. A rule names an imported checking account and a label pattern for its operations, the other account, and, when that account receives operations too, a label pattern for the other side there; patterns match by prefix, suffix or substring, case-insensitively. An operation created by hand or by a statement import becomes, before budget and category matching, a transfer through the first of the user's rules, oldest first, that recognizes it on either account, and is paired with the transfer of opposite amount the rule recognized on the other account within 5 days, if already there. Applying a rule makes the existing operations it recognizes transfers, then pairs them.".to_string()),
+                ..Tag::default()
+            },
+            Tag {
                 name: "Import profiles".to_string(),
                 description: Some("Manage the named file layouts a user imports bank statements with: which columns hold the label, the amount and the date, the date format, and how many leading rows to skip. Profiles are listed most recently used first.".to_string()),
                 ..Tag::default()
@@ -255,7 +260,7 @@ where
             },
             Tag {
                 name: "Data".to_string(),
-                description: Some("Export and re-import a user's full data (accounts and their balances, categories, budgets, ignore rules, operations and import profiles) as JSON. Intended for backup and account migration.".to_string()),
+                description: Some("Export and re-import a user's full data (accounts and their balances, categories, budgets, ignore rules, transfer rules, operations and import profiles) as JSON. Intended for backup and account migration.".to_string()),
                 ..Tag::default()
             },
         ],
@@ -541,6 +546,21 @@ where
                     .id("unignoreOperation")
             }),
         )
+        .api_route(
+            "/operations/{id}/transfer",
+            put_with(handlers::operations::set_transfer, |op| {
+                op.tag("Operations")
+                    .summary("Make an operation a transfer")
+                    .description("Make the operation a transfer with another of the caller's accounts, by hand: where the money went for a debit, where it came from for a credit. A transfer is neither income nor expense; with a savings account, a debit counts as savings and a credit is deducted from them, and the savings account's balance follows. The operation loses its category, and its budget link unless it puts money on a savings account under a savings budget sending its money there or to no account in particular. When the other account receives operations, the operation is paired with the one on the other side: `counterpartId` when given, any operation of the other account of opposite amount; else the closest by date among the transfers of the other account with this one, of opposite amount within 5 days and not paired yet. Both are then each other's transfer, and an operation unpaired by it stays a transfer only when a rule made it one. Sending the account of the current transfer keeps its rule and its other side. Returns 400 if the account is the operation's own or not one of the caller's, or `counterpartId` cannot be the other side, writing nothing; 409 if the operation is split; 404 if it does not exist or belongs to another user.")
+                    .id("setOperationTransfer")
+            })
+            .delete_with(handlers::operations::clear_transfer, |op| {
+                op.tag("Operations")
+                    .summary("Stop an operation being a transfer")
+                    .description("Make the operation, and the operation on the other side when paired, ordinary operations again, whether a rule or a hand made them transfers. Returns 404 if the operation does not exist or belongs to another user.")
+                    .id("clearOperationTransfer")
+            }),
+        )
         // Budgets
         .api_route(
             "/budgets",
@@ -669,6 +689,47 @@ where
                     .id("applyIgnoreRule")
             }),
         )
+        // Transfer rules
+        .api_route(
+            "/transfer-rules",
+            get_with(handlers::transfer_rules::list_transfer_rules, |op| {
+                op.tag("Transfer rules")
+                    .summary("List transfer rules")
+                    .description("Retrieve all transfer rules of the authenticated user, oldest first: the order they are tried in. A user has at most MAX_TRANSFER_RULES_PER_USER rules.")
+                    .id("listTransferRules")
+            })
+            .post_with(handlers::transfer_rules::create_transfer_rule, |op| {
+                op.tag("Transfer rules")
+                    .summary("Create a transfer rule")
+                    .description("Create a rule making transfers between `accountId`, one of the caller's imported checking accounts, and `counterpartAccountId`, another of the caller's accounts: the operations created from now on on `accountId` whose label matches `labelPattern` and, when `counterpartAccountId` receives operations, those on it whose label matches `counterpartLabelPattern`, which is required then and refused otherwise. Pattern values are trimmed and 1 to 200 characters long (400 otherwise). Existing operations are left as they are until the rule is applied. Returns 409 once the user has MAX_TRANSFER_RULES_PER_USER rules.")
+                    .id("createTransferRule")
+                    .response::<201, Json<handlers::transfer_rules::TransferRuleResponse>>()
+            }),
+        )
+        .api_route(
+            "/transfer-rules/{id}",
+            put_with(handlers::transfer_rules::update_transfer_rule, |op| {
+                op.tag("Transfer rules")
+                    .summary("Update a transfer rule")
+                    .description("Replace the accounts and pattern of a rule, with the same rules as creation. The transfers it already made stay as they are. Returns 404 if the rule does not exist or belongs to another user.")
+                    .id("updateTransferRule")
+            })
+            .delete_with(handlers::transfer_rules::delete_transfer_rule, |op| {
+                op.tag("Transfer rules")
+                    .summary("Delete a transfer rule")
+                    .description("Permanently delete a rule and make the operations it made transfers ordinary operations again, with the operation on their other side unless a rule of its own made it a transfer; transfers made by hand stay. Returns 404 if the rule does not exist or belongs to another user.")
+                    .id("deleteTransferRule")
+            }),
+        )
+        .api_route(
+            "/transfer-rules/{id}/apply",
+            post_with(handlers::transfer_rules::apply_transfer_rule, |op| {
+                op.tag("Transfer rules")
+                    .summary("Apply a transfer rule to existing operations")
+                    .description("Make every operation the rule recognizes, on either of its accounts, a transfer with the other account, then pair the two sides where both are there. Operations already transfers and split ones are left as they are. Returns how many it made transfers and how many it skipped, 404 if the rule does not exist or belongs to another user.")
+                    .id("applyTransferRule")
+            }),
+        )
         // Import profiles
         .api_route(
             "/import-profiles",
@@ -764,7 +825,7 @@ where
             get_with(handlers::data::export_data, |op| {
                 op.tag("Data")
                     .summary("Export all budgets and operations")
-                    .description("Return the authenticated user's full data (accounts and their balances, categories, budgets, ignore rules, operations and import profiles) as a versioned JSON payload. Suitable for backup or migration.")
+                    .description("Return the authenticated user's full data (accounts and their balances, categories, budgets, ignore rules, transfer rules, operations and import profiles) as a versioned JSON payload. Suitable for backup or migration.")
                     .id("exportData")
             }),
         )
@@ -773,7 +834,7 @@ where
             post_with(handlers::data::import_data, |op| {
                 op.tag("Data")
                     .summary("Import budgets and operations from a prior export")
-                    .description("Merge budgets and operations from a JSON payload previously obtained via /data/export into the authenticated user's account. Categories are deduplicated by name, budgets by label, ignore rules by pattern and amount, accounts by name, operations by (account, date, amount, label). Category, budget and ignore rule references are remapped to existing or newly-created ones. Returns 409, importing nothing, when the new categories would exceed MAX_CATEGORIES_PER_USER or the new ignore rules MAX_IGNORE_RULES_PER_USER. Accounts the user lacks are created with their balances, those matched by name keep theirs. A savings budget created keeps its account when that maps to a savings account of the user's, and goes without one otherwise. The operations and profiles of an export made before accounts existed go to the user's first imported checking account, or to a new one, which also gets that export's balance when it has none. Returns 400, importing nothing, when an operation or profile would land on an account that does not receive operations, 409 when the new accounts would exceed MAX_ACCOUNTS_PER_USER.")
+                    .description("Merge budgets and operations from a JSON payload previously obtained via /data/export into the authenticated user's account. Categories are deduplicated by name, budgets by label, ignore rules by pattern and amount, transfer rules by accounts and pattern, accounts by name, operations by (account, date, amount, label). Category, budget, ignore rule and transfer rule references are remapped to existing or newly-created ones. Operations that were transfers are made transfers again, paired where the export carries both sides. Returns 409, importing nothing, when the new categories would exceed MAX_CATEGORIES_PER_USER, the new ignore rules MAX_IGNORE_RULES_PER_USER or the new transfer rules MAX_TRANSFER_RULES_PER_USER. Accounts the user lacks are created with their balances, those matched by name keep theirs. A savings budget created keeps its account when that maps to a savings account of the user's, and goes without one otherwise. The operations and profiles of an export made before accounts existed go to the user's first imported checking account, or to a new one, which also gets that export's balance when it has none. Returns 400, importing nothing, when an operation or profile would land on an account that does not receive operations, 409 when the new accounts would exceed MAX_ACCOUNTS_PER_USER.")
                     .id("importData")
             }),
         )
@@ -874,6 +935,7 @@ pub(crate) mod test_util {
             max_import_profiles_per_user: 20,
             max_categories_per_user: 50,
             max_ignore_rules_per_user: 100,
+            max_transfer_rules_per_user: 100,
             max_accounts_per_user: 20,
             root_path: String::new(),
             webapp_url: "http://localhost:5173".to_string(),
@@ -979,6 +1041,7 @@ pub(crate) mod test_util {
             },
             balance: None,
             current_balance: None,
+            transferred_into: false,
             created_at: chrono::Utc::now(),
         }
     }
@@ -994,6 +1057,8 @@ pub(crate) mod test_util {
             .returning(|id, user_id| Box::pin(async move { Ok(Some(main_account(id, user_id))) }));
         repo.expect_list_balances()
             .returning(|_, _| Box::pin(async { Ok(Vec::new()) }));
+        repo.expect_list_transfer_rules()
+            .returning(|_| Box::pin(async { Ok(Vec::new()) }));
         repo
     }
 
@@ -1121,6 +1186,20 @@ pub(crate) mod test_util {
                 routing::post(handlers::ignore_rules::apply_ignore_rule),
             )
             .route(
+                "/transfer-rules",
+                routing::get(handlers::transfer_rules::list_transfer_rules)
+                    .post(handlers::transfer_rules::create_transfer_rule),
+            )
+            .route(
+                "/transfer-rules/{id}",
+                routing::put(handlers::transfer_rules::update_transfer_rule)
+                    .delete(handlers::transfer_rules::delete_transfer_rule),
+            )
+            .route(
+                "/transfer-rules/{id}/apply",
+                routing::post(handlers::transfer_rules::apply_transfer_rule),
+            )
+            .route(
                 "/import-profiles",
                 routing::get(handlers::import_profiles::list_import_profiles)
                     .post(handlers::import_profiles::create_import_profile),
@@ -1167,6 +1246,11 @@ pub(crate) mod test_util {
                 "/operations/{id}/ignore",
                 routing::put(handlers::operations::ignore_operation)
                     .delete(handlers::operations::unignore_operation),
+            )
+            .route(
+                "/operations/{id}/transfer",
+                routing::put(handlers::operations::set_transfer)
+                    .delete(handlers::operations::clear_transfer),
             )
             // Budgets
             .route(

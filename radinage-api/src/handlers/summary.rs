@@ -4,6 +4,7 @@ use crate::{
     domain::{
         budget::{BudgetType, YearMonth},
         last_day_of_month,
+        transfer::TransferFlow,
     },
     error::{AppError, AppResult},
     repositories::{
@@ -54,6 +55,22 @@ pub struct BudgetedTotals {
     pub savings: Decimal,
 }
 
+/// Totals of the transfers with other accounts that are not linked to a budget, signed like
+/// operations.
+#[derive(Debug, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct TransferTotals {
+    /// Money put on savings accounts (zero or negative); counts as savings.
+    #[schemars(with = "String")]
+    pub to_savings: Decimal,
+    /// Money taken back from savings accounts (zero or positive); deducted from savings.
+    #[schemars(with = "String")]
+    pub from_savings: Decimal,
+    /// Net of the transfers with checking accounts; neither income nor expenses.
+    #[schemars(with = "String")]
+    pub internal: Decimal,
+}
+
 /// Financial totals for a single month.
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
@@ -67,6 +84,8 @@ pub struct MonthlySummary {
     pub unbudgeted: Decimal,
     /// Totals of operations linked to a budget, grouped by budget type.
     pub budgeted: BudgetedTotals,
+    /// Totals of the transfers not linked to a budget.
+    pub transfers: TransferTotals,
 }
 
 /// Response containing one summary entry per month in the requested range.
@@ -261,6 +280,7 @@ pub async fn get_summary<U, O: OperationRepository, B, P, C, R, A>(
         let mut expense = Decimal::ZERO;
         let mut income = Decimal::ZERO;
         let mut savings = Decimal::ZERO;
+        let mut transfers = TransferTotals::default();
 
         for row in summary_rows {
             match row.category() {
@@ -268,6 +288,15 @@ pub async fn get_summary<U, O: OperationRepository, B, P, C, R, A>(
                 Some(SummaryCategory::Budgeted(BudgetType::Expense)) => expense += row.amount,
                 Some(SummaryCategory::Budgeted(BudgetType::Income)) => income += row.amount,
                 Some(SummaryCategory::Budgeted(BudgetType::Savings)) => savings += row.amount,
+                Some(SummaryCategory::Transfer(TransferFlow::ToSavings)) => {
+                    transfers.to_savings += row.amount;
+                }
+                Some(SummaryCategory::Transfer(TransferFlow::FromSavings)) => {
+                    transfers.from_savings += row.amount;
+                }
+                Some(SummaryCategory::Transfer(TransferFlow::Internal)) => {
+                    transfers.internal += row.amount;
+                }
                 None => {}
             }
         }
@@ -281,6 +310,7 @@ pub async fn get_summary<U, O: OperationRepository, B, P, C, R, A>(
                 income,
                 savings,
             },
+            transfers,
         });
 
         if (year, month) == to {
@@ -390,6 +420,7 @@ mod tests {
                         amount: Decimal::new(-800, 0),
                         budget_link_type: "manual".to_string(),
                         budget_type: Some("expense".to_string()),
+                        transfer_account_kind: None,
                     },
                     SummaryRow {
                         account_id: Uuid::nil(),
@@ -398,6 +429,7 @@ mod tests {
                         amount: Decimal::new(-50, 0),
                         budget_link_type: "unlinked".to_string(),
                         budget_type: None,
+                        transfer_account_kind: None,
                     },
                     SummaryRow {
                         account_id: Uuid::nil(),
@@ -406,6 +438,7 @@ mod tests {
                         amount: Decimal::new(3000, 0),
                         budget_link_type: "auto".to_string(),
                         budget_type: Some("income".to_string()),
+                        transfer_account_kind: None,
                     },
                     SummaryRow {
                         account_id: Uuid::nil(),
@@ -414,6 +447,7 @@ mod tests {
                         amount: Decimal::new(-200, 0),
                         budget_link_type: "manual".to_string(),
                         budget_type: Some("savings".to_string()),
+                        transfer_account_kind: None,
                     },
                 ])
             })
@@ -518,6 +552,7 @@ mod tests {
             budget_link_type: link.to_string(),
             budget_id,
             budget_type: budget_id.map(|_| "expense".to_string()),
+            transfer_account_kind: None,
         }
     }
 

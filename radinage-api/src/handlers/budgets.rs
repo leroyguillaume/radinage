@@ -297,7 +297,10 @@ pub async fn apply_budget<U, O: OperationRepository, B: BudgetRepository, P, C, 
     let mut skipped = 0usize;
 
     for op in ops {
-        if op.is_split() || (!body.force && op.budget_link.is_manual()) {
+        if op.is_split()
+            || !op.accepts_budget(&budget)
+            || (!body.force && op.budget_link.is_manual())
+        {
             skipped += 1;
             continue;
         }
@@ -455,6 +458,7 @@ mod tests {
             ignore_rule_id: None,
             category_id: None,
             budget_category_id: None,
+            transfer: None,
             splits: vec![],
         }
     }

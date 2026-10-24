@@ -24,8 +24,14 @@ import { AccountForm } from "@/components/AccountForm";
 import { AnchorLink } from "@/components/AnchorLink";
 import { ApiError } from "@/lib/api";
 import { formatAmount, formatIsoDate } from "@/lib/format";
-import { useAccounts, useBudgets, useDeleteAccount } from "@/lib/hooks";
+import {
+	useAccounts,
+	useBudgets,
+	useDeleteAccount,
+	useTransferRules,
+} from "@/lib/hooks";
 import { balanceTextColor } from "@/lib/tones";
+import { feederNames, feedersOf } from "@/lib/transfers";
 import type { AccountResponse } from "@/lib/types";
 import { palette } from "@/theme";
 
@@ -57,7 +63,9 @@ function AccountRow({
 	const date = account.balance
 		? formatIsoDate(account.balance.date, i18n.language)
 		: null;
-	const estimated = savedBy.length > 0;
+	const estimated =
+		!account.receivesOperations &&
+		(savedBy.length > 0 || account.transferredInto);
 	const detail =
 		date === null
 			? t("accounts.noBalance")
@@ -194,8 +202,14 @@ export function AccountsSection() {
 	const { t } = useTranslation();
 	const accountsQuery = useAccounts();
 	const budgets = useBudgets().data ?? [];
+	const transferRules = useTransferRules().data ?? [];
 	const [editing, setEditing] = useState<Editing>({ kind: "none" });
 	const accounts = accountsQuery.data ?? [];
+	const savedBy = (account: AccountResponse) =>
+		feederNames(
+			feedersOf(account.id, budgets, transferRules, accounts),
+			(names) => t("transfers.fedBy", { accounts: names }),
+		);
 	const stopEditing = () => setEditing({ kind: "none" });
 
 	return (
@@ -250,8 +264,8 @@ export function AccountsSection() {
 										</Text>
 									</Group>
 									{group === "savings" &&
-										members.some((a) =>
-											budgets.some((b) => b.accountId === a.id),
+										members.some(
+											(a) => a.transferredInto || savedBy(a).length > 0,
 										) && (
 											<Alert
 												color="gold"
@@ -277,9 +291,7 @@ export function AccountsSection() {
 												<AccountRow
 													key={account.id}
 													account={account}
-													savedBy={budgets
-														.filter((b) => b.accountId === account.id)
-														.map((b) => b.label)}
+													savedBy={savedBy(account)}
 													onEdit={() =>
 														setEditing({ kind: "edit", id: account.id })
 													}

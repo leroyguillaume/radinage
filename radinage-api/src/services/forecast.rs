@@ -5,6 +5,7 @@ use crate::{
     domain::{
         account::AccountBalance,
         budget::{Budget, BudgetType, YearMonth},
+        transfer::TransferFlow,
     },
     repositories::{SummaryCategory, SummaryRow},
 };
@@ -38,11 +39,23 @@ pub struct Flows {
     pub income: Decimal,
     pub expenses: Decimal,
     pub savings: Decimal,
+    /// Money taken back from savings accounts, positive: net savings are `savings` plus this.
+    pub withdrawals: Decimal,
+    /// Net of the transfers with checking accounts: zero when both sides are accounted.
+    pub transfers: Decimal,
 }
 
 impl Flows {
     pub fn balance(&self) -> Decimal {
-        self.income + self.expenses + self.savings
+        self.income + self.expenses + self.savings + self.withdrawals + self.transfers
+    }
+
+    fn add_transfer(&mut self, flow: TransferFlow, amount: Decimal) {
+        match flow {
+            TransferFlow::ToSavings => self.savings += amount,
+            TransferFlow::FromSavings => self.withdrawals += amount,
+            TransferFlow::Internal => self.transfers += amount,
+        }
     }
 
     fn add_budgeted(&mut self, budget_type: BudgetType, amount: Decimal) {
@@ -68,6 +81,8 @@ impl AddAssign for Flows {
         self.income += other.income;
         self.expenses += other.expenses;
         self.savings += other.savings;
+        self.withdrawals += other.withdrawals;
+        self.transfers += other.transfers;
     }
 }
 
@@ -539,7 +554,7 @@ pub fn budget_progress<'a>(
 }
 
 /// Flows of accounted amounts: each budgeted amount under its budget's type, each
-/// unbudgeted one under income or expenses by its own sign.
+/// unbudgeted one under income or expenses by its own sign, each transfer by its flow.
 pub fn actual_flows<'a>(rows: impl IntoIterator<Item = &'a SummaryRow>) -> Flows {
     let mut flows = Flows::default();
     for row in rows {
@@ -548,6 +563,7 @@ pub fn actual_flows<'a>(rows: impl IntoIterator<Item = &'a SummaryRow>) -> Flows
                 flows.add_budgeted(budget_type, row.amount);
             }
             Some(SummaryCategory::Unbudgeted) => flows.add_unbudgeted(row.amount),
+            Some(SummaryCategory::Transfer(flow)) => flows.add_transfer(flow, row.amount),
             None => {}
         }
     }
@@ -592,6 +608,7 @@ mod tests {
             .to_string(),
             budget_id: budget_type.map(|_| Uuid::nil()),
             budget_type: budget_type.map(str::to_string),
+            transfer_account_kind: None,
         }
     }
 
@@ -622,6 +639,7 @@ mod tests {
             income,
             expenses,
             savings,
+            ..Flows::default()
         }
     }
 
@@ -655,6 +673,39 @@ mod tests {
             actual_flows(&rows),
             flows(dec!(3200), dec!(-2030), dec!(-300))
         );
+    }
+
+    #[test]
+    fn transfers_count_as_savings_withdrawals_or_neither_and_never_as_unbudgeted_spending() {
+        let day = date(2026, 1, 5);
+        let transfer = |amount, kind: &str, budget_type: Option<&str>| SummaryRow {
+            transfer_account_kind: Some(kind.to_string()),
+            ..row(day, amount, budget_type)
+        };
+        let rows = [
+            transfer(dec!(-300), "savings", Some("savings")),
+            transfer(dec!(-100), "savings", None),
+            transfer(dec!(500), "savings", None),
+            transfer(dec!(-450), "checking", None),
+            row(day, dec!(-20), None),
+        ];
+
+        let flows = actual_flows(&rows);
+
+        assert_eq!(
+            flows,
+            Flows {
+                income: dec!(0),
+                expenses: dec!(-20),
+                savings: dec!(-400),
+                withdrawals: dec!(500),
+                transfers: dec!(-450),
+            }
+        );
+        assert_eq!(flows.balance(), dec!(-370));
+        // January is the third month before April: only the -20 is unbudgeted spending.
+        let rate = unbudgeted_rate(&rows, date(2026, 4, 10));
+        assert_eq!(rate, (dec!(-20) / dec!(90)).round_dp(4));
     }
 
     #[test]
@@ -780,6 +831,7 @@ mod tests {
             budget_link_type: "manual".to_string(),
             budget_id: Some(budget.id),
             budget_type: Some(budget.budget_type.as_str().to_string()),
+            transfer_account_kind: None,
         }
     }
 

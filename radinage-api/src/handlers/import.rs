@@ -8,7 +8,7 @@ use crate::{
     error::{AppError, AppResult},
     handlers::{
         accounts::account_receiving_operations, ignore_rules::auto_ignore_operation,
-        operations::auto_match_operation,
+        operations::auto_match_operation, transfer_rules::auto_transfer_operation,
     },
     repositories::{
         AccountRepository, BudgetRepository, CategoryRepository, IgnoreRuleRepository,
@@ -298,6 +298,13 @@ pub async fn import_operations<
             Vec::new()
         }
     };
+    let transfer_rules = match state.account_repo.list_transfer_rules(user_id).await {
+        Ok(rules) => rules,
+        Err(e) => {
+            tracing::warn!(error = %e, "could not list transfer rules, importing without them");
+            Vec::new()
+        }
+    };
     let mut imported = 0usize;
     for parsed_row in to_insert {
         let id = Uuid::new_v4();
@@ -331,7 +338,22 @@ pub async fn import_operations<
                     ignore_rule_id: None,
                     category_id: None,
                     budget_category_id: None,
+                    transfer: None,
                     splits: Vec::new(),
+                };
+                // Transfers come first: they decide which budgets and categories still apply.
+                let op = match auto_transfer_operation(
+                    &state.operation_repo,
+                    &transfer_rules,
+                    op.clone(),
+                )
+                .await
+                {
+                    Ok(op) => op,
+                    Err(e) => {
+                        tracing::warn!(error = %e, operation_id = %op.id, "could not match transfer");
+                        op
+                    }
                 };
                 // Best-effort auto-match; don't fail the import on match errors.
                 let _ = auto_match_operation(
@@ -1188,6 +1210,7 @@ mod tests {
                     },
                     balance: None,
                     current_balance: None,
+                    transferred_into: false,
                     created_at: Utc::now(),
                 }))
             })

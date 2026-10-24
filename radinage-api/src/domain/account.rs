@@ -68,6 +68,8 @@ pub struct Account {
     /// savings budgets, sign flipped: they left the account they are on to land here.
     /// `None` without a balance.
     pub current_balance: Option<Decimal>,
+    /// Whether operations of other accounts are transfers with this one.
+    pub transferred_into: bool,
     pub created_at: DateTime<Utc>,
 }
 

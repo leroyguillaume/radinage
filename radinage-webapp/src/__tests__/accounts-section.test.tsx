@@ -39,6 +39,7 @@ const perso: AccountResponse = {
 	receivesOperations: true,
 	balance: { id: "b-perso", amount: "1500.00", date: "2025-02-03" },
 	currentBalance: "1655.18",
+	transferredInto: false,
 	createdAt: "2026-01-01T10:00:00Z",
 };
 
@@ -50,6 +51,7 @@ const livret: AccountResponse = {
 	receivesOperations: false,
 	balance: { id: "b-livret", amount: "9760.00", date: "2026-10-21" },
 	currentBalance: "9760.00",
+	transferredInto: false,
 	createdAt: "2026-01-01T10:00:00Z",
 };
 
@@ -61,6 +63,7 @@ const pro: AccountResponse = {
 	receivesOperations: false,
 	balance: null,
 	currentBalance: null,
+	transferredInto: false,
 	createdAt: "2026-01-01T10:00:00Z",
 };
 

@@ -112,6 +112,7 @@ function makeLinkedOperation(
 		budgetLink: { type: "auto", budgetId },
 		ignored: false,
 		ignoreRuleId: null,
+		transfer: null,
 		categoryId: null,
 		effectiveCategoryId: null,
 		splits: [],
@@ -612,6 +613,7 @@ describe("BudgetsPage", () => {
 					budgetLink: { type: "unlinked" },
 					ignored: false,
 					ignoreRuleId: null,
+					transfer: null,
 					categoryId: null,
 					effectiveCategoryId: null,
 					splits: [

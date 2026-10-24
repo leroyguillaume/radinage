@@ -60,7 +60,9 @@ import {
 	neutralTone,
 	type Tone,
 } from "@/lib/tones";
+import { transferFlow, transferTone } from "@/lib/transfers";
 import type {
+	AccountResponse,
 	BudgetResponse,
 	BudgetType,
 	ImportResult,
@@ -84,7 +86,8 @@ export const Route = createFileRoute("/operations")({
 	},
 });
 
-type SectionType = BudgetType | "monthly";
+/** Budgets by type, then the operations outside any budget: daily ones, and transfers. */
+type SectionType = BudgetType | "monthly" | "transfers";
 
 interface BudgetGroup {
 	budgetId: string | null;
@@ -108,6 +111,7 @@ const SECTION_ORDER: SectionType[] = [
 	"expense",
 	"savings",
 	"monthly",
+	"transfers",
 ];
 
 const dailyTone: Tone = {
@@ -117,7 +121,9 @@ const dailyTone: Tone = {
 };
 
 function sectionTone(type: SectionType): Tone {
-	return type === "monthly" ? dailyTone : budgetTypeTones[type];
+	if (type === "monthly") return dailyTone;
+	if (type === "transfers") return transferTone("internal");
+	return budgetTypeTones[type];
 }
 
 /**
@@ -126,7 +132,7 @@ function sectionTone(type: SectionType): Tone {
  * with positive numbers.
  */
 function normalize(type: SectionType, amount: number): number {
-	if (amount === 0 || type === "income") return amount;
+	if (amount === 0 || type === "income" || type === "transfers") return amount;
 	return -amount;
 }
 
@@ -152,7 +158,13 @@ function buildSections(groups: BudgetGroup[]): BudgetSection[] {
 	});
 }
 
-function SummaryStats({ sections }: { sections: BudgetSection[] }) {
+function SummaryStats({
+	sections,
+	accounts,
+}: {
+	sections: BudgetSection[];
+	accounts: AccountResponse[];
+}) {
 	const { t } = useTranslation();
 
 	const byType = new Map<string, BudgetSection>();
@@ -171,10 +183,34 @@ function SummaryStats({ sections }: { sections: BudgetSection[] }) {
 		}
 	}
 
+	// Money put on or taken back from savings accounts counts as net savings; the other
+	// transfers are neither income nor expenses, but still move the balance.
+	let transferredSavings = 0;
+	let internal = 0;
+	let unknown = 0;
+	for (const group of byType.get("transfers")?.groups ?? []) {
+		for (const entry of group.entries) {
+			const flow = transferFlow(entry.operation, accounts);
+			if (flow === "internal") {
+				internal += entry.amount;
+			} else if (flow === null) {
+				unknown += entry.amount;
+			} else {
+				transferredSavings += entry.amount;
+			}
+		}
+	}
+
 	const incomeReal = (byType.get("income")?.totalReal ?? 0) + monthlyIncome;
 	const expenseReal = (byType.get("expense")?.totalReal ?? 0) + monthlyExpense;
-	const savingsReal = byType.get("savings")?.totalReal ?? 0;
-	const balance = incomeReal + expenseReal + savingsReal;
+	const savingsReal =
+		(byType.get("savings")?.totalReal ?? 0) + transferredSavings;
+	const balance = incomeReal + expenseReal + savingsReal + internal + unknown;
+	const hasInternal = byType
+		.get("transfers")
+		?.groups.some((g) =>
+			g.entries.some((e) => transferFlow(e.operation, accounts) === "internal"),
+		);
 
 	const typedTiles: { type: BudgetType; label: string; value: number }[] = [
 		{ type: "income", label: t("operations.stats.income"), value: incomeReal },
@@ -191,7 +227,7 @@ function SummaryStats({ sections }: { sections: BudgetSection[] }) {
 	];
 
 	return (
-		<SimpleGrid cols={{ base: 2, sm: 4 }} spacing="sm">
+		<SimpleGrid cols={{ base: 2, sm: hasInternal ? 5 : 4 }} spacing="sm">
 			{typedTiles.map((tile) => (
 				<StatTile
 					key={tile.type}
@@ -201,6 +237,14 @@ function SummaryStats({ sections }: { sections: BudgetSection[] }) {
 					valueColor={budgetTypeTones[tile.type].text}
 				/>
 			))}
+			{hasInternal && (
+				<StatTile
+					label={t("transfers.internalStat")}
+					value={formatSignedAmount(internal)}
+					dotColor={transferTone("internal").fill}
+					valueColor={transferTone("internal").text}
+				/>
+			)}
 			<StatTile
 				label={t("operations.stats.balance")}
 				value={formatSignedAmount(balance)}
@@ -286,12 +330,17 @@ function groupOperationsByBudget(
 	}
 
 	const groups = new Map<string | null, OperationEntry[]>();
+	const transfers: OperationEntry[] = [];
 
 	const entries = operations
 		.flatMap((op) => entriesInMonth(op, year, month))
 		.filter((entry) => matchesCategory(entry, categoryFilter))
 		.sort((a, b) => b.date.localeCompare(a.date));
 	for (const entry of entries) {
+		if (entry.budgetId === null && entry.operation.transfer !== null) {
+			transfers.push(entry);
+			continue;
+		}
 		const existing = groups.get(entry.budgetId);
 		if (existing) {
 			existing.push(entry);
@@ -355,6 +404,18 @@ function groupOperationsByBudget(
 		if (b.budgetId === null) return -1;
 		return a.budgetLabel.localeCompare(b.budgetLabel);
 	});
+
+	if (transfers.length > 0) {
+		result.push({
+			budgetId: null,
+			budget: null,
+			budgetLabel: "transfers.section",
+			budgetType: "transfers",
+			realAmount: transfers.reduce((sum, e) => sum + e.amount, 0),
+			budgetedAmount: null,
+			entries: transfers,
+		});
+	}
 
 	return result;
 }
@@ -458,7 +519,7 @@ function MonthlyOperationsPage() {
 	const selectable = [
 		...new Set(
 			groups
-				.find((g) => g.budgetId === null)
+				.find((g) => g.budgetType === "monthly")
 				?.entries.map((entry) => entry.operation),
 		),
 	];
@@ -623,7 +684,7 @@ function MonthlyOperationsPage() {
 					</Text>
 				) : (
 					<>
-						<SummaryStats sections={sections} />
+						<SummaryStats sections={sections} accounts={handlers.accounts} />
 						{sections.map((section) => (
 							<SectionCard
 								key={section.type}

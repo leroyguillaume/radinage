@@ -25,8 +25,26 @@ export interface OperationResponse {
 	categoryId: string | null;
 	/** Own category, else the linked budget's; always null when split. */
 	effectiveCategoryId: string | null;
+	/** Transfer with another of the user's accounts; null when the operation is not one. */
+	transfer: TransferResponse | null;
 	/** Parts of a split operation, in order; empty when the operation is whole. */
 	splits: OperationSplitResponse[];
+}
+
+/** An operation's transfer with another of the user's accounts. */
+export interface TransferResponse {
+	/** Where the money went for a debit, where it came from for a credit. */
+	accountId: string;
+	/** Transfer rule that made the operation a transfer; null when set by hand or by pairing. */
+	ruleId: string | null;
+	/** The operation on the other side, between two accounts receiving operations. */
+	operationId: string | null;
+}
+
+export interface SetTransferRequest {
+	accountId: string;
+	/** Operation of the other account on the other side; looked for when omitted. */
+	counterpartId?: string;
 }
 
 /** Aggregates over every operation matching a search, not only the returned page. */
@@ -77,11 +95,22 @@ export interface BudgetedTotals {
 	savings: string;
 }
 
+/** Transfers not linked to a budget, signed like operations. */
+export interface TransferTotals {
+	/** Money put on savings accounts; zero or negative. */
+	toSavings: string;
+	/** Money taken back from savings accounts; zero or positive. */
+	fromSavings: string;
+	/** Net of the transfers with checking accounts. */
+	internal: string;
+}
+
 export interface MonthlySummary {
 	year: number;
 	month: number;
 	unbudgeted: string;
 	budgeted: BudgetedTotals;
+	transfers: TransferTotals;
 }
 
 export interface SummaryResponse {
@@ -124,7 +153,12 @@ export type ForecastMonthStatus = "past" | "current" | "future";
 export interface ForecastFlows {
 	income: string;
 	expenses: string;
+	/** Savings budgets plus money put on savings accounts; zero or negative. */
 	savings: string;
+	/** Money taken back from savings accounts; zero or positive. Net savings are `savings + withdrawals`. */
+	withdrawals: string;
+	/** Net of the transfers with checking accounts. */
+	transfers: string;
 	balance: string;
 }
 
@@ -262,6 +296,33 @@ export type IgnoreRuleRequest = Pick<
 	"labelPattern" | "amount"
 >;
 
+export interface TransferRuleResponse {
+	id: string;
+	/** Imported checking account whose operations `labelPattern` recognizes. */
+	accountId: string;
+	/** The other account of the transfers. */
+	counterpartAccountId: string;
+	labelPattern: LabelPattern;
+	/** How the other side is labelled on the other account; null when it does not receive operations. */
+	counterpartLabelPattern: LabelPattern | null;
+	createdAt: string;
+}
+
+export type TransferRuleRequest = Pick<
+	TransferRuleResponse,
+	| "accountId"
+	| "counterpartAccountId"
+	| "labelPattern"
+	| "counterpartLabelPattern"
+>;
+
+export interface ApplyTransferRuleResponse {
+	/** Matching operations the rule made transfers. */
+	transferred: number;
+	/** Matching operations left as they are: already transfers, or split. */
+	skipped: number;
+}
+
 export interface ApplyIgnoreRuleResponse {
 	/** Matching operations the rule now ignores. */
 	ignored: number;
@@ -325,9 +386,12 @@ export interface AccountResponse {
 	balance: BalanceEntry | null;
 	/**
 	 * Balance today: `balance`, plus the operations dated after it on an account receiving
-	 * them, or what its savings budgets saved after it on a savings account.
+	 * them, or what landed on it after it otherwise: the transfers with it and what its
+	 * savings budgets saved.
 	 */
 	currentBalance: string | null;
+	/** Whether operations of other accounts are transfers with this one. */
+	transferredInto: boolean;
 	createdAt: string;
 }
 

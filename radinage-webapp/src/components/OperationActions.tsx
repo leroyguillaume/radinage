@@ -10,12 +10,18 @@ import {
 } from "@/components/OperationSheet";
 import { SplitOperationModal } from "@/components/SplitOperationModal";
 import {
+	type TransferRuleDraft,
+	TransferRuleModal,
+} from "@/components/TransferRuleForm";
+import {
 	useAccounts,
 	useIgnoreRules,
 	useLinkBudget,
 	useSetOperationAccount,
 	useSetOperationCategory,
 	useSetOperationIgnored,
+	useSetOperationTransfer,
+	useTransferRules,
 	useUnlinkBudget,
 	useUpdateEffectiveDate,
 } from "@/lib/hooks";
@@ -56,6 +62,8 @@ export function useOperationActions({
 	const ignoreRules = useIgnoreRules().data ?? [];
 	const accounts = useAccounts().data ?? [];
 	const setOperationAccount = useSetOperationAccount();
+	const setOperationTransfer = useSetOperationTransfer();
+	const transferRules = useTransferRules().data ?? [];
 
 	const [sheetId, setSheetId] = useState<string | null>(null);
 	const [splitTarget, setSplitTarget] = useState<OperationResponse | null>(
@@ -67,6 +75,9 @@ export function useOperationActions({
 	>();
 
 	const [ignorePattern, setIgnorePattern] = useState<LabelPattern | null>(null);
+	const [transferDraft, setTransferDraft] = useState<TransferRuleDraft | null>(
+		null,
+	);
 
 	/** The label text the user selected, else the whole label. */
 	function labelToMatch(op: OperationResponse): string {
@@ -86,6 +97,7 @@ export function useOperationActions({
 		budgets,
 		categories,
 		ignoreRules,
+		transferRules,
 		onOpen: (op) => setSheetId(op.id),
 		onSetAccount: (opId, accountId) =>
 			setOperationAccount.mutate({ opId, accountId }),
@@ -98,6 +110,14 @@ export function useOperationActions({
 			setOperationIgnored.mutate({ opId, ignored }),
 		onIgnoreAlways: (op) =>
 			setIgnorePattern({ type: "contains", value: labelToMatch(op) }),
+		onSetTransfer: (opId, transfer) =>
+			setOperationTransfer.mutate({ opId, transfer }),
+		onTransferAlways: (op) =>
+			setTransferDraft({
+				accountId: op.accountId,
+				counterpartAccountId: op.transfer?.accountId,
+				labelPattern: { type: "contains", value: labelToMatch(op) },
+			}),
 		onSplit: setSplitTarget,
 		onEditEffectiveDate: (op, effectiveDate) =>
 			updateEffectiveDate.mutate({ op, effectiveDate }),
@@ -125,6 +145,10 @@ export function useOperationActions({
 			<IgnoreRuleModal
 				initialPattern={ignorePattern}
 				onClose={() => setIgnorePattern(null)}
+			/>
+			<TransferRuleModal
+				draft={transferDraft}
+				onClose={() => setTransferDraft(null)}
 			/>
 			<SplitOperationModal
 				operation={splitTarget}

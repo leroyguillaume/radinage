@@ -142,11 +142,15 @@ pub struct AccountResponse {
     /// from it.
     pub balance: Option<BalanceEntryResponse>,
     /// Balance today: `balance`, plus, on an account receiving operations, every operation
-    /// dated after it, ignored ones included; on a savings account, minus every non-ignored
-    /// amount dated after it that is linked to one of its savings budgets, so that 100 put
-    /// aside from the checking account (-100 there) adds 100. Null when no balance is read.
+    /// dated after it, ignored ones included; on any other account, minus every amount dated
+    /// after it that left another account to land here, so that 100 put aside from the
+    /// checking account (-100 there) adds 100: the transfers with the account, ignored ones
+    /// included, and the other non-ignored amounts linked to its savings budgets. Null when no
+    /// balance is read.
     #[schemars(with = "Option<String>")]
     pub current_balance: Option<Decimal>,
+    /// Whether operations of other accounts are transfers with this one.
+    pub transferred_into: bool,
     pub created_at: DateTime<Utc>,
 }
 
@@ -160,6 +164,7 @@ impl From<Account> for AccountResponse {
             imported: a.fields.imported,
             balance: a.balance.map(Into::into),
             current_balance: a.current_balance,
+            transferred_into: a.transferred_into,
             created_at: a.created_at,
         }
     }
@@ -297,6 +302,14 @@ pub async fn update_account<U, O, B, P, C, R, A: AccountRepository>(
         return Err(AppError::Conflict(
             "savings budgets send their money to the account, so it must stay a savings account"
                 .to_string(),
+        ));
+    }
+    if let Some(current) = state.account_repo.find(id, auth_user.id).await?
+        && current.transferred_into
+        && current.fields.kind != fields.kind
+    {
+        return Err(AppError::Conflict(
+            "operations are transfers with the account, so it must keep its kind".to_string(),
         ));
     }
     let account = state
@@ -457,6 +470,7 @@ mod tests {
                 },
             }),
             current_balance: Some(dec!(960)),
+            transferred_into: false,
             created_at: Utc::now(),
         }
     }
@@ -516,6 +530,7 @@ mod tests {
                     fields: f.clone(),
                     balance: None,
                     current_balance: None,
+                    transferred_into: false,
                     ..account(uid, AccountKind::Checking, true)
                 };
                 Box::pin(async move { Ok(created) })
@@ -585,6 +600,9 @@ mod tests {
         repo.expect_has_savings_budgets()
             .withf(move |aid, uid| *aid == id && *uid == user_id)
             .returning(|_, _| Box::pin(async { Ok(true) }));
+        repo.expect_find().returning(|_, uid| {
+            Box::pin(async move { Ok(Some(account(uid, AccountKind::Savings, false))) })
+        });
         repo.expect_update().returning(move |_, uid, f| {
             let updated = Account {
                 fields: f.clone(),
@@ -613,6 +631,8 @@ mod tests {
         let mut repo = MockAccountRepository::new();
         repo.expect_has_savings_budgets()
             .returning(|_, _| Box::pin(async { Ok(false) }));
+        repo.expect_find()
+            .returning(|_, _| Box::pin(async { Ok(None) }));
         repo.expect_update()
             .returning(|_, _, _| Box::pin(async { Ok(None) }));
 

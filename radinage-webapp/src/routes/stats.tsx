@@ -271,19 +271,26 @@ function StatsPage() {
 			}),
 			expenses: Number(m.budgeted.expense) + Math.min(0, unbudgeted),
 			income: Number(m.budgeted.income) + Math.max(0, unbudgeted),
-			savings: Number(m.budgeted.savings),
+			// Net savings: money taken back from savings is deducted, not counted as income.
+			savings:
+				Number(m.budgeted.savings) +
+				Number(m.transfers.toSavings) +
+				Number(m.transfers.fromSavings),
+			internal: Number(m.transfers.internal),
 		};
 	});
 
 	let totalExpenses = 0;
 	let totalIncome = 0;
 	let totalSavings = 0;
+	let totalInternal = 0;
 	for (const m of perMonth) {
 		totalExpenses += m.expenses;
 		totalIncome += m.income;
 		totalSavings += m.savings;
+		totalInternal += m.internal;
 	}
-	const balance = totalIncome + totalExpenses + totalSavings;
+	const balance = totalIncome + totalExpenses + totalSavings + totalInternal;
 
 	const barData = perMonth.map((m) => ({
 		month: m.label,
@@ -294,7 +301,7 @@ function StatsPage() {
 
 	let running = 0;
 	const balanceData = perMonth.map((m) => {
-		running += m.income + m.expenses + m.savings;
+		running += m.income + m.expenses + m.savings + m.internal;
 		return { month: m.label, [t("stats.balance")]: running };
 	});
 
