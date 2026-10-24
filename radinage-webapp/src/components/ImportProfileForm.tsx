@@ -43,7 +43,7 @@ const ROLE_COLORS: Record<ColumnRole, string> = {
 	date: "gold",
 };
 
-/** Formats offered by default, each shown as how it writes 31 December 2026. */
+/** Formats offered by default, each shown as how it writes 31 December 2026 (at 14:30 when it has a time). */
 const DATE_FORMATS: Record<string, string> = {
 	"%d/%m/%Y": "31/12/2026",
 	"%Y-%m-%d": "2026-12-31",
@@ -51,6 +51,11 @@ const DATE_FORMATS: Record<string, string> = {
 	"%d.%m.%Y": "31.12.2026",
 	"%m/%d/%Y": "12/31/2026",
 	"%d/%m/%y": "31/12/26",
+	"%d/%m/%Y %H:%M:%S": "31/12/2026 14:30:00",
+	"%d/%m/%Y %H:%M": "31/12/2026 14:30",
+	"%Y-%m-%d %H:%M:%S": "2026-12-31 14:30:00",
+	"%Y-%m-%d %H:%M": "2026-12-31 14:30",
+	"%Y-%m-%dT%H:%M:%S": "2026-12-31T14:30:00",
 };
 
 const DEFAULT_DATE_FORMAT = "%d/%m/%Y";
