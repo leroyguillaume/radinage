@@ -1,6 +1,10 @@
 export const OPERATION_DIRECTIONS = ["expense", "income"] as const;
 export type OperationDirection = (typeof OPERATION_DIRECTIONS)[number];
 
+/** Choices besides the default, which leaves the ignored operations out. */
+export const IGNORED_FILTERS = ["only", "included"] as const;
+export type IgnoredFilter = (typeof IGNORED_FILTERS)[number];
+
 export const OPERATION_SORTS = ["date", "amount", "label"] as const;
 export type OperationSort = (typeof OPERATION_SORTS)[number];
 
@@ -21,8 +25,8 @@ export interface OperationFilters {
 	/** YYYY-MM-DD bounds on the accounting date. */
 	dateFrom?: string;
 	dateTo?: string;
-	/** Keeps the ignored operations alone, which are otherwise left out. */
-	ignored?: boolean;
+	/** The ignored operations alone, or along with the others; left out when absent. */
+	ignored?: IgnoredFilter;
 	sort?: OperationSort;
 	order?: SortOrder;
 }
@@ -99,7 +103,7 @@ export function parseOperationFilters(
 		amountMax: asMatching(search.amountMax, DECIMAL_PATTERN),
 		dateFrom: asMatching(search.dateFrom, DATE_PATTERN),
 		dateTo: asMatching(search.dateTo, DATE_PATTERN),
-		ignored: asFlag(search.ignored),
+		ignored: asOneOf(search.ignored, IGNORED_FILTERS),
 		sort: asOneOf(search.sort, OPERATION_SORTS),
 		order: asOneOf(search.order, SORT_ORDERS),
 	});
@@ -122,7 +126,7 @@ export function operationSearchQuery(
 	if (filters.amountMax) params.set("amountMax", filters.amountMax);
 	if (filters.dateFrom) params.set("dateFrom", filters.dateFrom);
 	if (filters.dateTo) params.set("dateTo", filters.dateTo);
-	if (filters.ignored) params.set("ignored", "true");
+	if (filters.ignored) params.set("ignored", filters.ignored);
 	if (filters.sort) params.set("sort", filters.sort);
 	if (filters.order) params.set("order", filters.order);
 	params.set("page", String(page));
