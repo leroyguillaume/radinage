@@ -134,7 +134,8 @@
 		"name": "Name",
 		"namePlaceholder": "E.g. My bank — CSV",
 		"sample": "Sample file",
-		"samplePlaceholder": "To pick the columns visually",
+		"sampleHint": "To pick the columns visually",
+		"samplePlaceholder": "Pick a file",
 		"sampleError": "This file cannot be read",
 		"columnHint": "Tap a header to give the column a role. The fallback label is read when the label is blank.",
 		"column": "Column {{column}}",
@@ -146,7 +147,7 @@
 			"none": "Ignore"
 		},
 		"labelCol": "Label column",
-		"labelFallbackCol": "Fallback label",
+		"labelFallbackCol": "Fallback label (optional)",
 		"noColumn": "None",
 		"amountCol": "Amount column",
 		"dateCol": "Date column",
