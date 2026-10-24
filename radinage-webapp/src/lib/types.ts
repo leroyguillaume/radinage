@@ -459,6 +459,8 @@ export interface ImportPreviewResponse {
 export interface ImportResult {
 	imported: number;
 	skipped: number;
+	/** Operations whose blank label was filled from the profile's fallback column. */
+	relabeled: number;
 	errors: { row: number; reason: string }[];
 }
 

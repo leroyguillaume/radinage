@@ -59,7 +59,7 @@ const account: AccountResponse = {
 /** Answer the profile list with `profiles`, the accounts with `account` and every import with `importResult`. */
 function mockApi(
 	profiles: ImportProfileResponse[],
-	importResult: unknown = { imported: 2, skipped: 0, errors: [] },
+	importResult: unknown = { imported: 2, skipped: 0, relabeled: 0, errors: [] },
 ) {
 	apiFetchMock.mockImplementation(async (path) => {
 		if (path === "/import-profiles") return profiles;
@@ -148,7 +148,7 @@ describe("ImportModal", () => {
 	});
 
 	it("imports with the selected profile's settings", async () => {
-		const result = { imported: 2, skipped: 1, errors: [] };
+		const result = { imported: 2, skipped: 1, relabeled: 0, errors: [] };
 		mockApi(
 			[
 				makeProfile(),

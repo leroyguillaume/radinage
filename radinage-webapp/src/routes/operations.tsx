@@ -671,6 +671,13 @@ function MonthlyOperationsPage() {
 								{t("import.resultSkipped", { count: importResult.skipped })}
 							</Text>
 						)}
+						{importResult.relabeled > 0 && (
+							<Text size="sm">
+								{t("import.resultRelabeled", {
+									count: importResult.relabeled,
+								})}
+							</Text>
+						)}
 						{importResult.errors.length > 0 && (
 							<Text size="sm" c={budgetTypeTones.expense.text}>
 								{t("import.resultErrors", {

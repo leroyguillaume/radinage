@@ -125,6 +125,7 @@
 		"error": "Erreur lors de l'import",
 		"resultImported": "{{count}} opération(s) importée(s)",
 		"resultSkipped": "{{count}} doublon(s) ignoré(s)",
+		"resultRelabeled": "{{count}} libellé(s) vide(s) complété(s)",
 		"resultErrors": "{{count}} erreur(s)"
 	},
 	"importProfile": {

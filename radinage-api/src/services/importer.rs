@@ -26,6 +26,8 @@ pub struct ImportParams {
 #[derive(Debug, Clone)]
 pub struct ParsedRow {
     pub label: String,
+    /// Whether the label comes from the fallback column, the label column being blank.
+    pub from_fallback: bool,
     pub amount: Decimal,
     pub date: NaiveDate,
     /// 1-based row number in the source file.
@@ -190,12 +192,13 @@ fn parse_record(
     params: &ImportParams,
     row_num: usize,
 ) -> Result<ParsedRow, RowError> {
-    let label = with_fallback(get_col(record, params.label_col, row_num, "label")?, || {
-        params
-            .label_fallback_col
-            .and_then(|col| record.get(col))
-            .map(|cell| cell.trim().to_string())
-    });
+    let (label, from_fallback) =
+        with_fallback(get_col(record, params.label_col, row_num, "label")?, || {
+            params
+                .label_fallback_col
+                .and_then(|col| record.get(col))
+                .map(|cell| cell.trim().to_string())
+        });
     let amount_str = get_col(record, params.amount_col, row_num, "amount")?;
     let date_str = get_col(record, params.date_col, row_num, "date")?;
 
@@ -204,20 +207,22 @@ fn parse_record(
 
     Ok(ParsedRow {
         label,
+        from_fallback,
         amount,
         date,
         row: row_num,
     })
 }
 
-/// `label`, or the fallback cell when `label` is blank and the fallback is not.
-fn with_fallback(label: String, fallback: impl FnOnce() -> Option<String>) -> String {
+/// `label`, or the fallback cell when `label` is blank and the fallback is not, telling which.
+fn with_fallback(label: String, fallback: impl FnOnce() -> Option<String>) -> (String, bool) {
     if !label.trim().is_empty() {
-        return label;
+        return (label, false);
     }
-    fallback()
-        .filter(|cell| !cell.trim().is_empty())
-        .unwrap_or(label)
+    match fallback().filter(|cell| !cell.trim().is_empty()) {
+        Some(cell) => (cell, true),
+        None => (label, false),
+    }
 }
 
 fn get_col(
@@ -240,7 +245,7 @@ fn parse_xlsx_row(
     params: &ImportParams,
     row_num: usize,
 ) -> Result<ParsedRow, RowError> {
-    let label = with_fallback(
+    let (label, from_fallback) = with_fallback(
         get_xlsx_col(row, params.label_col, row_num, "label")?,
         || {
             params
@@ -256,6 +261,7 @@ fn parse_xlsx_row(
 
     Ok(ParsedRow {
         label,
+        from_fallback,
         amount,
         date,
         row: row_num,
@@ -534,8 +540,19 @@ mod tests {
             \x20 ,-1.00,08/10/2026,\n";
         let result = parse_csv(csv, &params);
         assert!(result.errors.is_empty(), "{:?}", result.errors);
-        let labels: Vec<_> = result.rows.iter().map(|r| r.label.as_str()).collect();
-        assert_eq!(labels, ["CARTE X4821", "COTIS CARTE VISA", ""]);
+        let labels: Vec<_> = result
+            .rows
+            .iter()
+            .map(|r| (r.label.as_str(), r.from_fallback))
+            .collect();
+        assert_eq!(
+            labels,
+            [
+                ("CARTE X4821", false),
+                ("COTIS CARTE VISA", true),
+                ("", false)
+            ]
+        );
     }
 
     #[test]

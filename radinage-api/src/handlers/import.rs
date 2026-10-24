@@ -124,6 +124,11 @@ pub struct ImportResponse {
     pub skipped: usize,
     /// 1-based row numbers of rows skipped because they duplicated an existing operation.
     pub duplicate_rows: Vec<usize>,
+    /// Number of existing operations with a blank label that got the label of a row read
+    /// from the fallback column, instead of importing that row again.
+    pub relabeled: usize,
+    /// 1-based row numbers of the rows that filled in those labels.
+    pub relabeled_rows: Vec<usize>,
     /// Per-row errors encountered during import (row number + message).
     pub errors: Vec<RowError>,
 }
@@ -266,14 +271,45 @@ pub async fn import_operations<
 
     let mut skipped = 0usize;
     let mut duplicate_rows: Vec<usize> = Vec::new();
+    let mut relabeled_rows: Vec<usize> = Vec::new();
     let mut errors = result.errors;
 
     // Phase 1 — duplicate detection. Each file row is matched only against
     // the pre-import database state: rows that don't exist in DB but appear
     // multiple times in the file must all be imported, not collapsed. We
     // therefore collect non-duplicate rows and insert them in a second pass.
+    //
+    // A row whose label comes from the fallback column first fills in an operation an import
+    // made before the profile had that column, left with a blank label. Each call fills one
+    // operation, so identical rows fill as many operations, and only then are duplicates.
     let mut to_insert: Vec<ParsedRow> = Vec::new();
     for parsed_row in result.rows {
+        if parsed_row.from_fallback {
+            match state
+                .operation_repo
+                .fill_blank_label(
+                    user_id,
+                    account_id,
+                    parsed_row.amount,
+                    parsed_row.date,
+                    &parsed_row.label,
+                )
+                .await
+            {
+                Ok(true) => {
+                    relabeled_rows.push(parsed_row.row);
+                    continue;
+                }
+                Ok(false) => {}
+                Err(e) => {
+                    errors.push(RowError {
+                        row: parsed_row.row,
+                        reason: format!("blank label check error: {e}"),
+                    });
+                    continue;
+                }
+            }
+        }
         match state
             .operation_repo
             .exists_by_fields(
@@ -407,6 +443,8 @@ pub async fn import_operations<
             imported,
             skipped,
             duplicate_rows,
+            relabeled: relabeled_rows.len(),
+            relabeled_rows,
             errors,
         }),
     ))
@@ -688,6 +726,10 @@ mod tests {
     async fn import_csv_reads_the_label_fallback_column() {
         let mut op_repo = MockOperationRepository::new();
         op_repo
+            .expect_fill_blank_label()
+            .times(1)
+            .returning(|_, _, _, _, _| Box::pin(async { Ok(false) }));
+        op_repo
             .expect_exists_by_fields()
             .withf(|_, _, _, _, label| label == "COTIS CARTE VISA")
             .times(1)
@@ -711,6 +753,49 @@ mod tests {
         assert_eq!(resp.status(), StatusCode::OK);
         let json: ImportResponse = response_json(resp).await;
         assert_eq!(json.duplicate_rows, [2]);
+    }
+
+    #[tokio::test]
+    async fn import_csv_fills_blank_labels_instead_of_importing_again() {
+        let mut op_repo = MockOperationRepository::new();
+        op_repo
+            .expect_fill_blank_label()
+            .withf(|_, account_id, _, _, label| {
+                *account_id == IMPORT_ACCOUNT && label == "COTIS CARTE VISA"
+            })
+            .times(1)
+            .returning(|_, _, _, _, _| Box::pin(async { Ok(true) }));
+        op_repo
+            .expect_exists_by_fields()
+            .withf(|_, _, _, _, label| label == "CARTE X4821")
+            .times(1)
+            .returning(|_, _, _, _, _| Box::pin(async { Ok(true) }));
+        op_repo.expect_insert().never();
+        let app = build_test_router(make_test_state(
+            MockUserRepository::new(),
+            op_repo,
+            MockBudgetRepository::new(),
+        ));
+        let params = ImportParams {
+            label_fallback_col: Some(3),
+            ..default_import_params()
+        };
+        let auth = auth_header(Uuid::new_v4(), UserRole::User);
+        let csv = b"label,amount,date,detail
+\
+            CARTE X4821,-54.20,03/10/2026,CARREFOUR\n\
+            ,-3.50,07/10/2026,COTIS CARTE VISA\n";
+        let resp = app
+            .oneshot(import_request("b", "ops.csv", csv, &params, &auth))
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        let json: ImportResponse = response_json(resp).await;
+        assert_eq!(json.relabeled, 1);
+        assert_eq!(json.relabeled_rows, [3]);
+        assert_eq!(json.duplicate_rows, [2]);
+        assert_eq!(json.imported, 0);
     }
 
     #[tokio::test]

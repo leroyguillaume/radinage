@@ -125,6 +125,7 @@
 		"error": "Import failed",
 		"resultImported": "{{count}} operation(s) imported",
 		"resultSkipped": "{{count}} duplicate(s) skipped",
+		"resultRelabeled": "{{count}} blank label(s) filled in",
 		"resultErrors": "{{count}} error(s)"
 	},
 	"importProfile": {

@@ -24,6 +24,7 @@ import type {
 	CategoryResponse,
 	ForecastResponse,
 	IgnoreRuleResponse,
+	ImportProfileResponse,
 	MonthlyOperationsResponse,
 	OperationResponse,
 } from "@/lib/types";
@@ -209,6 +210,21 @@ const accounts = [
 	},
 ];
 
+const importProfile: ImportProfileResponse = {
+	id: "p1",
+	name: "Banque en ligne",
+	accountId: "account-1",
+	labelCol: 1,
+	labelFallbackCol: 2,
+	amountCol: 3,
+	dateCol: 0,
+	dateFormat: "%d/%m/%Y",
+	skipLines: 1,
+	csvDelimiter: "semicolon",
+	lastUsedAt: null,
+	createdAt: "2026-01-01T00:00:00Z",
+};
+
 let apiCalls: Array<{
 	path: string;
 	options?: { method?: string; body?: string };
@@ -299,6 +315,19 @@ function setupMocks(
 		}
 		if (path === "/accounts") {
 			return Promise.resolve(accounts);
+		}
+		if (path === "/import-profiles") {
+			return Promise.resolve([importProfile]);
+		}
+		if (path === "/operations/import") {
+			return Promise.resolve({
+				imported: 1,
+				skipped: 3,
+				duplicateRows: [2, 3, 4],
+				relabeled: 2,
+				relabeledRows: [5, 6],
+				errors: [],
+			});
 		}
 		if (path === "/operations/account" || path === "/operations/category") {
 			return Promise.resolve({ updated: 2 });
@@ -478,6 +507,23 @@ describe("MonthlyOperationsPage", () => {
 		expect(
 			await screen.findByText("Importer des opérations"),
 		).toBeInTheDocument();
+	});
+
+	it("reports the blank labels an import filled in", async () => {
+		await renderOperationsPage();
+		const user = userEvent.setup();
+
+		await user.click(await screen.findByText("Importer des opérations"));
+		await screen.findByRole("combobox", { name: "Profil" });
+		const input = document.querySelector("input[type='file']");
+		if (!(input instanceof HTMLInputElement)) throw new Error("no file input");
+		await user.upload(input, new File(["a;b"], "releve.csv"));
+		await user.click(screen.getByRole("button", { name: "Importer" }));
+
+		expect(
+			await screen.findByText("2 libellé(s) vide(s) complété(s)"),
+		).toBeInTheDocument();
+		expect(screen.getByText("3 doublon(s) ignoré(s)")).toBeInTheDocument();
 	});
 
 	it("opens the operation sheet from a row, with no inline action", async () => {
