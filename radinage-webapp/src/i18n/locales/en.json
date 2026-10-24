@@ -952,6 +952,17 @@
 		},
 		"candidates": "Likely other side: link it if it is the right one.",
 		"link": "Link",
-		"linkTo": "Link to {{label}}"
+		"linkTo": "Link to {{label}}",
+		"pairs": {
+			"to": "to",
+			"linked": "Both sides are linked",
+			"linkedElsewhere": "Linked, the other side is in another month",
+			"oneSided": "One side only: {{account}} is not imported",
+			"missingDebit": "Debit not found on {{account}}",
+			"missingCredit": "Credit not found on {{account}}",
+			"missingCount_one": "{{count}} transfer without its other side",
+			"missingCount_other": "{{count}} transfers without their other side",
+			"missingHint": "The other side was not found in the imported statements. Open the operation to link it."
+		}
 	}
 }

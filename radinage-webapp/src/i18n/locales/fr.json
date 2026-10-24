@@ -952,6 +952,17 @@
 		},
 		"candidates": "Contrepartie probable : lie-la si c'est bien l'autre côté.",
 		"link": "Lier",
-		"linkTo": "Lier à {{label}}"
+		"linkTo": "Lier à {{label}}",
+		"pairs": {
+			"to": "vers",
+			"linked": "Les deux côtés sont liés",
+			"linkedElsewhere": "Liée, l'autre côté est dans un autre mois",
+			"oneSided": "Un seul côté : {{account}} n'est pas importé",
+			"missingDebit": "Débit introuvable sur {{account}}",
+			"missingCredit": "Crédit introuvable sur {{account}}",
+			"missingCount_one": "{{count}} virement sans contrepartie",
+			"missingCount_other": "{{count}} virements sans contrepartie",
+			"missingHint": "L'autre côté n'a pas été trouvé dans les relevés importés. Ouvre l'opération pour le lier."
+		}
 	}
 }
