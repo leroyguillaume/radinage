@@ -46,6 +46,14 @@ pub struct BalanceEntry {
     pub balance: AccountBalance,
 }
 
+/// What an account gained (or lost, when negative) over one day, apart from its balances:
+/// its operations when it receives them, what its savings budgets saved on a savings account.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DailyMovement {
+    pub date: NaiveDate,
+    pub amount: Decimal,
+}
+
 /// A bank account a user follows.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Account {

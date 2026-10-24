@@ -1,13 +1,16 @@
 use crate::{
     AppState,
     auth::middleware::AuthUser,
-    domain::account::{Account, AccountBalance, AccountFields, AccountKind, BalanceEntry},
+    domain::account::{
+        Account, AccountBalance, AccountFields, AccountKind, BalanceEntry, DailyMovement,
+    },
     error::{AppError, AppResult},
     repositories::AccountRepository,
+    services::balance_history::{self, BalancePoint},
 };
 use axum::{
     Json,
-    extract::{Path, State},
+    extract::{Path, Query, State},
     http::StatusCode,
 };
 use chrono::{DateTime, NaiveDate, Utc};
@@ -69,6 +72,57 @@ impl From<BalanceEntry> for BalanceEntryResponse {
             id: entry.id,
             amount: entry.balance.amount,
             date: entry.balance.date,
+        }
+    }
+}
+
+/// A balance in an account's history, with what was estimated for its day.
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct BalanceReadingResponse {
+    pub id: Uuid,
+    #[schemars(with = "String")]
+    pub amount: Decimal,
+    pub date: NaiveDate,
+    /// What the previous balance, plus what the account moved after it up to `date`,
+    /// estimated for that day; `amount` minus it is what the movements do not explain
+    /// (interest, market changes, fees). Null on the account's first balance.
+    #[schemars(with = "Option<String>")]
+    pub estimated: Option<Decimal>,
+}
+
+/// Query parameters of an account's balance history.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct BalanceHistoryQuery {
+    /// First day (inclusive); from the earliest day anything is known when omitted.
+    pub from: Option<NaiveDate>,
+    /// Last day (inclusive); today when omitted.
+    pub to: Option<NaiveDate>,
+}
+
+/// The balance of an account at the end of a day.
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct BalancePointResponse {
+    pub date: NaiveDate,
+    #[schemars(with = "String")]
+    pub balance: Decimal,
+    /// Whether a balance was read that day, `balance` being that reading.
+    pub read: bool,
+    /// On a balance read after an earlier one, what the earlier one plus the movements in
+    /// between estimated for that day; null otherwise.
+    #[schemars(with = "Option<String>")]
+    pub estimated: Option<Decimal>,
+}
+
+impl From<BalancePoint> for BalancePointResponse {
+    fn from(p: BalancePoint) -> Self {
+        Self {
+            date: p.date,
+            balance: p.balance,
+            read: p.read,
+            estimated: p.estimated,
         }
     }
 }
@@ -264,16 +318,63 @@ pub async fn delete_account<U, O, B, P, C, R, A: AccountRepository>(
     Ok(StatusCode::NO_CONTENT)
 }
 
+/// The balances of the user's account `id`, oldest first, and what it moved each day: 404
+/// when the account is not the user's.
+async fn readings_and_movements(
+    repo: &impl AccountRepository,
+    id: Uuid,
+    user_id: Uuid,
+) -> AppResult<(Vec<BalanceEntry>, Vec<DailyMovement>)> {
+    if repo.find(id, user_id).await?.is_none() {
+        return Err(AppError::NotFound);
+    }
+    let mut entries = repo.list_balances(id, user_id).await?;
+    entries.reverse();
+    let movements = repo.daily_movements(id, user_id).await?;
+    Ok((entries, movements))
+}
+
 pub async fn list_balances<U, O, B, P, C, R, A: AccountRepository>(
     State(state): State<AppState<U, O, B, P, C, R, A>>,
     auth_user: AuthUser,
     Path(id): Path<Uuid>,
-) -> AppResult<Json<Vec<BalanceEntryResponse>>> {
-    if state.account_repo.find(id, auth_user.id).await?.is_none() {
-        return Err(AppError::NotFound);
+) -> AppResult<Json<Vec<BalanceReadingResponse>>> {
+    let (entries, movements) =
+        readings_and_movements(&state.account_repo, id, auth_user.id).await?;
+    let readings: Vec<AccountBalance> = entries.iter().map(|e| e.balance).collect();
+    let estimated = balance_history::estimates(&readings, &movements);
+    Ok(Json(
+        entries
+            .into_iter()
+            .zip(estimated)
+            .rev()
+            .map(|(entry, estimated)| BalanceReadingResponse {
+                id: entry.id,
+                amount: entry.balance.amount,
+                date: entry.balance.date,
+                estimated,
+            })
+            .collect(),
+    ))
+}
+
+pub async fn balance_history<U, O, B, P, C, R, A: AccountRepository>(
+    State(state): State<AppState<U, O, B, P, C, R, A>>,
+    auth_user: AuthUser,
+    Path(id): Path<Uuid>,
+    Query(query): Query<BalanceHistoryQuery>,
+) -> AppResult<Json<Vec<BalancePointResponse>>> {
+    let to = query
+        .to
+        .unwrap_or_else(|| chrono::Local::now().date_naive());
+    if query.from.is_some_and(|from| from > to) {
+        return Err(AppError::BadRequest("from is after to".to_string()));
     }
-    let balances = state.account_repo.list_balances(id, auth_user.id).await?;
-    Ok(Json(balances.into_iter().map(Into::into).collect()))
+    let (entries, movements) =
+        readings_and_movements(&state.account_repo, id, auth_user.id).await?;
+    let readings: Vec<AccountBalance> = entries.iter().map(|e| e.balance).collect();
+    let points = balance_history::timeline(&readings, &movements, query.from, to);
+    Ok(Json(points.into_iter().map(Into::into).collect()))
 }
 
 pub async fn add_balance<U, O, B, P, C, R, A: AccountRepository>(
@@ -652,6 +753,129 @@ mod tests {
         assert_eq!(resp.status(), StatusCode::NOT_FOUND);
     }
 
+    fn day(m: u32, d: u32) -> NaiveDate {
+        NaiveDate::from_ymd_opt(2026, m, d).unwrap()
+    }
+
+    /// An account of `user_id` read at 1000 on March 31 and 1150 on May 31, most recent
+    /// first as the repository lists them, that gained 100 on the 10th of April to June.
+    fn account_with_history(user_id: Uuid) -> MockAccountRepository {
+        let mut repo = MockAccountRepository::new();
+        repo.expect_find()
+            .withf(move |_, uid| *uid == user_id)
+            .returning(move |_, uid| {
+                let found = account(uid, AccountKind::Savings, false);
+                Box::pin(async move { Ok(Some(found)) })
+            });
+        repo.expect_list_balances().returning(|_, _| {
+            let entry = |amount, date| BalanceEntry {
+                id: Uuid::nil(),
+                balance: AccountBalance { amount, date },
+            };
+            Box::pin(async move {
+                Ok(vec![
+                    entry(dec!(1150), day(5, 31)),
+                    entry(dec!(1000), day(3, 31)),
+                ])
+            })
+        });
+        repo.expect_daily_movements().returning(|_, _| {
+            Box::pin(async {
+                Ok([4, 5, 6]
+                    .map(|m| DailyMovement {
+                        date: day(m, 10),
+                        amount: dec!(100),
+                    })
+                    .to_vec())
+            })
+        });
+        repo
+    }
+
+    #[tokio::test]
+    async fn list_balances_gives_what_each_one_was_estimated_at() {
+        let user_id = Uuid::new_v4();
+        let id = Uuid::new_v4();
+
+        let resp = send(
+            account_with_history(user_id),
+            "GET",
+            &format!("/accounts/{id}/balances"),
+            None,
+            user_id,
+        )
+        .await;
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        let json: serde_json::Value = response_json(resp).await;
+        assert_eq!(
+            json,
+            serde_json::json!([
+                {"id": Uuid::nil(), "amount": "1150", "date": "2026-05-31", "estimated": "1200"},
+                {"id": Uuid::nil(), "amount": "1000", "date": "2026-03-31", "estimated": null},
+            ])
+        );
+    }
+
+    #[tokio::test]
+    async fn balance_history_follows_the_account_between_two_days() {
+        let user_id = Uuid::new_v4();
+        let id = Uuid::new_v4();
+
+        let resp = send(
+            account_with_history(user_id),
+            "GET",
+            &format!("/accounts/{id}/balance-history?from=2026-05-01&to=2026-06-30"),
+            None,
+            user_id,
+        )
+        .await;
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        let json: Vec<BalancePointResponse> = response_json(resp).await;
+        let summary: Vec<_> = json
+            .iter()
+            .map(|p| (p.date, p.balance, p.read, p.estimated))
+            .collect();
+        assert_eq!(
+            summary,
+            [
+                (day(5, 1), dec!(1100), false, None),
+                (day(5, 10), dec!(1200), false, None),
+                (day(5, 31), dec!(1150), true, Some(dec!(1200))),
+                (day(6, 10), dec!(1250), false, None),
+                (day(6, 30), dec!(1250), false, None),
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn balance_history_rejects_a_reversed_range_and_an_unknown_account() {
+        let mut unknown = MockAccountRepository::new();
+        unknown
+            .expect_find()
+            .returning(|_, _| Box::pin(async { Ok(None) }));
+        let id = Uuid::new_v4();
+        for (repo, query, status) in [
+            (
+                MockAccountRepository::new(),
+                "from=2026-06-01&to=2026-05-01",
+                StatusCode::BAD_REQUEST,
+            ),
+            (unknown, "to=2026-05-01", StatusCode::NOT_FOUND),
+        ] {
+            let resp = send(
+                repo,
+                "GET",
+                &format!("/accounts/{id}/balance-history?{query}"),
+                None,
+                Uuid::new_v4(),
+            )
+            .await;
+            assert_eq!(resp.status(), status, "{query}");
+        }
+    }
+
     #[tokio::test]
     async fn update_and_delete_balance_address_it_through_its_account() {
         let user_id = Uuid::new_v4();
@@ -698,6 +922,7 @@ mod tests {
             ("DELETE", format!("/accounts/{id}")),
             ("GET", format!("/accounts/{id}/balances")),
             ("POST", format!("/accounts/{id}/balances")),
+            ("GET", format!("/accounts/{id}/balance-history")),
         ] {
             let resp = app(MockAccountRepository::new())
                 .oneshot(json_request(method, &uri, None, None))

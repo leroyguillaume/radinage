@@ -1,6 +1,13 @@
 import { MantineProvider } from "@mantine/core";
 import { DatesProvider } from "@mantine/dates";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import {
+	createMemoryHistory,
+	createRootRoute,
+	createRoute,
+	createRouter,
+	RouterProvider,
+} from "@tanstack/react-router";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -92,15 +99,31 @@ function renderSection() {
 	const queryClient = new QueryClient({
 		defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
 	});
+	const rootRoute = createRootRoute();
+	const settingsRoute = createRoute({
+		getParentRoute: () => rootRoute,
+		path: "/",
+		component: AccountsSection,
+	});
+	const accountRoute = createRoute({
+		getParentRoute: () => rootRoute,
+		path: "/accounts/$accountId",
+		component: () => <p>account page</p>,
+	});
+	const router = createRouter({
+		routeTree: rootRoute.addChildren([settingsRoute, accountRoute]),
+		history: createMemoryHistory({ initialEntries: ["/"] }),
+	});
 	render(
 		<QueryClientProvider client={queryClient}>
 			<MantineProvider theme={theme} env="test">
 				<DatesProvider settings={{ locale: "fr" }}>
-					<AccountsSection />
+					<RouterProvider router={router} />
 				</DatesProvider>
 			</MantineProvider>
 		</QueryClientProvider>,
 	);
+	return router;
 }
 
 function writes() {
@@ -168,8 +191,37 @@ describe("AccountsSection", () => {
 			await screen.findByText("Alimenté par Épargne mensuelle, Coup de pouce"),
 		).toBeInTheDocument();
 		expect(
-			screen.getByText("calculé depuis le 21/10/2026"),
+			screen.getByText("estimé depuis le relevé du 21/10/2026"),
 		).toBeInTheDocument();
+		expect(
+			screen.getByText(
+				/Les intérêts et les variations boursières n'y sont pas/,
+			),
+		).toBeInTheDocument();
+		expect(screen.getByText(/≈/)).toBeInTheDocument();
+	});
+
+	it("says nothing of an estimate without a savings budget", async () => {
+		mockApi([livret]);
+		renderSection();
+
+		expect(await screen.findByText("relevé au 21/10/2026")).toBeInTheDocument();
+		expect(
+			screen.queryByText(/Les intérêts et les variations boursières/),
+		).not.toBeInTheDocument();
+	});
+
+	it("opens an account's page from its name", async () => {
+		mockApi([livret]);
+		const router = renderSection();
+		const user = userEvent.setup();
+
+		await user.click(
+			await screen.findByRole("link", { name: "Voir le compte Livret A" }),
+		);
+
+		expect(await screen.findByText("account page")).toBeInTheDocument();
+		expect(router.state.location.pathname).toBe("/accounts/livret");
 	});
 
 	it("explains why a savings account paid into must stay one", async () => {
@@ -245,7 +297,7 @@ describe("AccountsSection", () => {
 		});
 	});
 
-	it("corrects the recorded balance in place, and leaves an unchanged one alone", async () => {
+	it("edits an account without touching its balances", async () => {
 		mockApi([perso]);
 		renderSection();
 		const user = userEvent.setup();
@@ -253,28 +305,17 @@ describe("AccountsSection", () => {
 		await user.click(
 			await screen.findByRole("button", { name: "Modifier Compte perso" }),
 		);
-		await user.click(screen.getByRole("button", { name: "Enregistrer" }));
-		await waitFor(() => expect(writes()).toHaveLength(1));
-		expect(writes()[0]).toMatchObject({
-			path: "/accounts/perso",
-			method: "PUT",
-		});
-
-		apiFetchMock.mockClear();
-		await user.click(
-			await screen.findByRole("button", { name: "Modifier Compte perso" }),
-		);
-		const amount = screen.getByLabelText("Point de départ");
-		await user.clear(amount);
-		await user.type(amount, "1450,5");
+		expect(screen.queryByLabelText("Point de départ")).not.toBeInTheDocument();
 		await user.click(screen.getByRole("button", { name: "Enregistrer" }));
 
 		await waitFor(() => {
-			expect(writes()).toContainEqual({
-				path: "/accounts/perso/balances/b-perso",
-				method: "PUT",
-				body: { amount: "1450.50", date: "2025-02-03" },
-			});
+			expect(writes()).toEqual([
+				{
+					path: "/accounts/perso",
+					method: "PUT",
+					body: { name: "Compte perso", kind: "checking", imported: true },
+				},
+			]);
 		});
 	});
 

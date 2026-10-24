@@ -292,6 +292,26 @@ export interface BalanceEntry {
 
 export type AccountBalance = Omit<BalanceEntry, "id">;
 
+/** A balance in an account's history. */
+export interface BalanceReading extends BalanceEntry {
+	/**
+	 * What the previous balance plus what the account moved after it estimated for `date`;
+	 * null on the first balance.
+	 */
+	estimated: string | null;
+}
+
+/** The balance of an account at the end of a day. */
+export interface BalancePoint {
+	/** YYYY-MM-DD. */
+	date: string;
+	balance: string;
+	/** Whether a balance was read that day, `balance` being that reading. */
+	read: boolean;
+	/** On a balance read after an earlier one, what was estimated for its day. */
+	estimated: string | null;
+}
+
 /** A bank account; only an imported checking account holds operations. */
 export interface AccountResponse {
 	id: string;

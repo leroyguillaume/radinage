@@ -498,7 +498,18 @@
 		"uncategorized": "Uncategorized",
 		"otherCategories": "Others ({{count}} categories)",
 		"noIncome": "No income over the period.",
-		"noExpenses": "No expenses over the period."
+		"noExpenses": "No expenses over the period.",
+		"wealth": {
+			"title": "Net worth over time",
+			"since": "{{amount}} since {{month}}",
+			"accounts": "Accounts shown",
+			"account": "Account",
+			"start": "Start",
+			"end": "End",
+			"note": "After their latest balance, savings accounts are estimated from what their savings budgets paid in, without interest or market changes.",
+			"empty": "Record the balance of an account to follow your net worth.",
+			"fetchError": "Failed to load the balance history"
+		}
 	},
 	"forecast": {
 		"title": "Summary",
@@ -670,11 +681,56 @@
 		"computed": "computed since {{date}}",
 		"readOn": "read on {{date}}",
 		"noBalance": "no balance",
-		"clearBalance": "Clear the balance",
 		"nameTaken": "An account already has this name, or the maximum number of accounts is reached",
 		"saveError": "Could not save the account",
 		"errorAmount": "Invalid amount",
-		"errorDate": "The balance date cannot be in the future"
+		"errorDate": "The balance date cannot be in the future",
+		"estimatedFrom": "estimated since the balance of {{date}}",
+		"estimateNote": "A savings account is worth its latest balance plus what its savings budgets paid in. Interest and market changes are left out: record a balance now and then to set the estimate right.",
+		"open": "Open the account {{name}}",
+		"detail": {
+			"back": "Back to settings",
+			"notFound": "This account does not exist.",
+			"readOn": "{{amount}} read on {{date}}",
+			"movedSince": "+ {{amount}} paid in since",
+			"operationsSince": "+ {{amount}} of operations since",
+			"chartTitle": "Balance over time",
+			"period": "Period",
+			"periods": {
+				"3m": "3 months",
+				"1y": "1 year",
+				"all": "All"
+			},
+			"legend": {
+				"read": "Balance read",
+				"balance": "Balance",
+				"estimate": "Estimate since the latest balance",
+				"gap": "Gap at a balance read"
+			},
+			"noHistory": "No balance over this period.",
+			"estimateNote": "The balance is estimated from what {{budgets}} paid in. Neither interest nor market changes are counted: each balance recorded replaces the estimate and becomes the new starting point.",
+			"record": "Record a balance",
+			"history": "Balance history",
+			"noBalance": "No balance recorded: record the balance your bank shows to follow this account.",
+			"today": "Today",
+			"todayEstimated": "Estimated: latest balance + payments in",
+			"todayComputed": "Computed: latest balance + operations",
+			"estimation": "Estimate: {{amount}}",
+			"firstReading": "First balance",
+			"gapHint": "The gap compares each balance with that day's estimate: interest, market changes, fees or missing operations.",
+			"correct": "Correct the balance of {{date}}",
+			"deleteReading": "Delete the balance of {{date}}",
+			"confirmDelete": "Delete the balance of {{date}}?"
+		},
+		"balanceModal": {
+			"title": "Record a balance · {{name}}",
+			"editTitle": "Correct the balance · {{name}}",
+			"estimateOn": "Estimate on {{date}}",
+			"reading": "Balance read",
+			"gap": "Gap: interest, market changes, fees",
+			"replaces": "This balance replaces the estimate: later movements add up from it. Earlier balances stay in the history.",
+			"dateTaken": "A balance is already recorded on that date."
+		}
 	},
 	"activate": {
 		"title": "Activate your account",

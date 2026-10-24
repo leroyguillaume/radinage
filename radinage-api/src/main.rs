@@ -364,7 +364,7 @@ where
             get_with(handlers::accounts::list_balances, |op| {
                 op.tag("Accounts")
                     .summary("List the balances of an account")
-                    .description("Retrieve the balances read on an account, most recent first. Returns 404 if the account does not exist or belongs to another user.")
+                    .description("Retrieve the balances read on an account, most recent first, each with what was `estimated` for its day: the previous balance plus what the account moved after it, its operations on an account receiving them, what its savings budgets saved on a savings account. The difference is what those movements do not explain, such as interest or market changes. Returns 404 if the account does not exist or belongs to another user.")
                     .id("listAccountBalances")
             })
             .post_with(handlers::accounts::add_balance, |op| {
@@ -373,6 +373,15 @@ where
                     .description("Record the balance shown by the bank at the end of a date, today or earlier (400 otherwise). Operations accounted on that date are considered already included in the amount. The most recent balance is the starting point of an account receiving operations. Returns 409 when the account already has a balance on that date, 404 if it does not exist or belongs to another user.")
                     .id("addAccountBalance")
                     .response::<201, Json<handlers::accounts::BalanceEntryResponse>>()
+            }),
+        )
+        .api_route(
+            "/accounts/{id}/balance-history",
+            get_with(handlers::accounts::balance_history, |op| {
+                op.tag("Accounts")
+                    .summary("Follow the balance of an account over time")
+                    .description("The balance at the end of each day from `from` to `to` (inclusive, today by default) on which a balance was read or the account moved, plus both ends: the latest balance read on or before the day plus what the account moved after it, its operations on an account receiving them, ignored ones included, or what its savings budgets saved on a savings account. Before the first balance, the movements up to it are taken back out of it. The history starts no earlier than the first balance or movement, and is empty without a balance. A day a balance was read after an earlier one also carries what was `estimated` for it. Returns 400 when from is after to, 404 if the account does not exist or belongs to another user.")
+                    .id("getAccountBalanceHistory")
             }),
         )
         .api_route(
@@ -1061,6 +1070,10 @@ pub(crate) mod test_util {
                     .post(handlers::accounts::add_balance),
             )
             .route(
+                "/accounts/{id}/balance-history",
+                routing::get(handlers::accounts::balance_history),
+            )
+            .route(
                 "/accounts/{id}/balances/{balanceId}",
                 routing::put(handlers::accounts::update_balance)
                     .delete(handlers::accounts::delete_balance),
@@ -1398,11 +1411,23 @@ mod tests {
             paths["/accounts/{id}/balances/{balanceId}"]["delete"]["operationId"],
             "deleteAccountBalance"
         );
+        assert_eq!(
+            paths["/accounts/{id}/balance-history"]["get"]["operationId"],
+            "getAccountBalanceHistory"
+        );
         assert!(paths["/users/me/balance"].is_null());
         let schemas = &doc["components"]["schemas"];
         for (schema, fields) in [
             ("AccountBalanceRequest", &["amount", "date"][..]),
             ("BalanceEntryResponse", &["id", "amount", "date"][..]),
+            (
+                "BalanceReadingResponse",
+                &["id", "amount", "date", "estimated"][..],
+            ),
+            (
+                "BalancePointResponse",
+                &["date", "balance", "read", "estimated"][..],
+            ),
             (
                 "AccountResponse",
                 &["kind", "receivesOperations", "balance", "currentBalance"][..],
