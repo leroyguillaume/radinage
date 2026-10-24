@@ -132,6 +132,8 @@ apps:
     maxImportProfilesPerUser: "20"
     # -- (string) Maximum number of categories per user
     maxCategoriesPerUser: "50"
+    # -- (string) Maximum number of ignore rules per user
+    maxIgnoreRulesPerUser: "100"
     # -- (string) Base URL of the web application (used for invitation links).
     # Defaults to `<protocol>://<global.domain><ingress.apps.webapp.path>`
     webappUrl: ""

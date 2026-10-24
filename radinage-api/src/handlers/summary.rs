@@ -112,8 +112,8 @@ fn range_bounds(q: &SummaryQuery) -> AppResult<(NaiveDate, NaiveDate)> {
     Ok((start, end))
 }
 
-pub async fn get_category_summary<U, O: OperationRepository, B, P, C>(
-    State(state): State<AppState<U, O, B, P, C>>,
+pub async fn get_category_summary<U, O: OperationRepository, B, P, C, R>(
+    State(state): State<AppState<U, O, B, P, C, R>>,
     auth_user: AuthUser,
     Query(q): Query<SummaryQuery>,
 ) -> AppResult<Json<CategorySummaryResponse>> {
@@ -127,8 +127,8 @@ pub async fn get_category_summary<U, O: OperationRepository, B, P, C>(
     }))
 }
 
-pub async fn get_summary<U, O: OperationRepository, B, P, C>(
-    State(state): State<AppState<U, O, B, P, C>>,
+pub async fn get_summary<U, O: OperationRepository, B, P, C, R>(
+    State(state): State<AppState<U, O, B, P, C, R>>,
     auth_user: AuthUser,
     Query(q): Query<SummaryQuery>,
 ) -> AppResult<Json<SummaryResponse>> {

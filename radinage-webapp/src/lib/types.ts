@@ -17,6 +17,8 @@ export interface OperationResponse {
 	budgetLink: BudgetLink;
 	/** Ignored operations are left out of every total, summary and forecast. */
 	ignored: boolean;
+	/** Ignore rule that ignored the operation; null when ignored by hand or not ignored. */
+	ignoreRuleId: string | null;
 	/** Category the user put the operation in; always null when split. */
 	categoryId: string | null;
 	/** Own category, else the linked budget's; always null when split. */
@@ -222,6 +224,27 @@ export interface ApplyBudgetResponse {
 	skipped: number;
 }
 
+/** Ignores the operations whose label, and amount when given, it matches. */
+export interface IgnoreRuleResponse {
+	id: string;
+	labelPattern: LabelPattern;
+	/** Positive amount matched whatever the operation's sign; null matches any. */
+	amount: string | null;
+	createdAt: string;
+}
+
+export type IgnoreRuleRequest = Pick<
+	IgnoreRuleResponse,
+	"labelPattern" | "amount"
+>;
+
+export interface ApplyIgnoreRuleResponse {
+	/** Matching operations the rule now ignores. */
+	ignored: number;
+	/** Matching operations that were already ignored and are left as they are. */
+	alreadyIgnored: number;
+}
+
 export interface CreateUserResponse {
 	id: string;
 	username: string;
@@ -253,6 +276,8 @@ export interface ImportDataResponse {
 	skippedCategories: number;
 	importedBudgets: number;
 	skippedBudgets: number;
+	importedIgnoreRules: number;
+	skippedIgnoreRules: number;
 	importedOperations: number;
 	skippedOperations: number;
 	importedImportProfiles: number;

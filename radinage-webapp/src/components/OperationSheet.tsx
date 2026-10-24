@@ -18,6 +18,7 @@ import {
 	IconChevronDown,
 	IconEye,
 	IconEyeOff,
+	IconFilterOff,
 	IconLink,
 	IconLinkOff,
 	IconPlus,
@@ -33,6 +34,7 @@ import {
 	CategoryDot,
 	CategorySelect,
 } from "@/components/CategoryBadge";
+import { useDescribeIgnoreRule } from "@/components/IgnoreRuleForm";
 import { budgetFitsAmount } from "@/lib/budget-utils";
 import {
 	formatIsoDate,
@@ -45,6 +47,7 @@ import { budgetTypeTones } from "@/lib/tones";
 import type {
 	BudgetResponse,
 	CategoryResponse,
+	IgnoreRuleResponse,
 	OperationResponse,
 } from "@/lib/types";
 import { headingFont, palette } from "@/theme";
@@ -53,12 +56,16 @@ import { headingFont, palette } from "@/theme";
 export interface OperationHandlers {
 	budgets: BudgetResponse[];
 	categories: CategoryResponse[];
+	/** The user's ignore rules, to name the one that ignored an operation. */
+	ignoreRules: IgnoreRuleResponse[];
 	onOpen: (op: OperationResponse) => void;
 	onSetCategory: (opId: string, categoryId: string | null) => void;
 	onCreateBudget: (op: OperationResponse) => void;
 	onLink: (opId: string, budgetId: string) => void;
 	onUnlink: (opId: string) => void;
 	onSetIgnored: (opId: string, ignored: boolean) => void;
+	/** Opens a new ignore rule pre-filled from the operation's label. */
+	onIgnoreAlways: (op: OperationResponse) => void;
 	onSplit: (op: OperationResponse) => void;
 	onEditEffectiveDate: (
 		op: OperationResponse,
@@ -250,12 +257,7 @@ function SheetBody({
 			>
 				{op.label}
 			</Text>
-			{op.ignored && (
-				<Group gap={8} wrap="nowrap" c="dimmed">
-					<IconEyeOff size={16} style={{ flexShrink: 0 }} />
-					<Text size="sm">{t("operations.sheet.ignored")}</Text>
-				</Group>
-			)}
+			{op.ignored && <IgnoredNotice op={op} handlers={handlers} />}
 			<Paper p={0} radius="lg" style={{ overflow: "hidden" }}>
 				{split ? (
 					<SheetRow first>
@@ -306,6 +308,17 @@ function SheetBody({
 						? t("operations.unignoreOperation")
 						: t("operations.ignoreOperation")}
 				</Button>
+				{op.ignoreRuleId === null && (
+					<Button
+						variant="default"
+						h={48}
+						leftSection={<IconFilterOff size={18} />}
+						onClick={closeThen(() => handlers.onIgnoreAlways(op))}
+						style={{ gridColumn: "1 / -1" }}
+					>
+						{t("ignoreRules.always")}
+					</Button>
+				)}
 			</SimpleGrid>
 			{withMonthLink && (
 				<Link
@@ -322,6 +335,40 @@ function SheetBody({
 				</Link>
 			)}
 		</Stack>
+	);
+}
+
+/** Why the operation is out of the totals: by hand, or by the rule that matched it. */
+function IgnoredNotice({
+	op,
+	handlers,
+}: {
+	op: OperationResponse;
+	handlers: OperationHandlers;
+}) {
+	const { t } = useTranslation();
+	const describe = useDescribeIgnoreRule();
+	const rule = handlers.ignoreRules.find((r) => r.id === op.ignoreRuleId);
+	return (
+		<Group gap={8} wrap="nowrap" c="dimmed" align="flex-start">
+			<IconEyeOff size={16} style={{ flexShrink: 0, marginTop: 2 }} />
+			<Stack gap={4}>
+				<Text size="sm">
+					{rule
+						? t("ignoreRules.sheetIgnoredByRule", { rule: describe(rule) })
+						: t("operations.sheet.ignored")}
+				</Text>
+				{rule && (
+					<Link
+						to="/settings"
+						className="text-sm font-semibold"
+						style={{ color: "var(--mantine-color-forest-7)" }}
+					>
+						{t("ignoreRules.seeRule")}
+					</Link>
+				)}
+			</Stack>
+		</Group>
 	);
 }
 

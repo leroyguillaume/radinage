@@ -60,6 +60,7 @@ function makeOperation(
 		label: "RETRAIT DAB",
 		budgetLink: { type: "unlinked" },
 		ignored: false,
+		ignoreRuleId: null,
 		categoryId: null,
 		effectiveCategoryId: null,
 		splits: [],

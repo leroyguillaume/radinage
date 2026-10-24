@@ -111,18 +111,21 @@ sequenceDiagram
     participant R as OperationRepository
     participant M as services/matcher.rs
     participant P as ImportProfileRepository
+    participant G as IgnoreRuleRepository
     SPA->>H: POST /operations/import (multipart: file + column mapping)
     H->>I: parse_csv / parse_xlsx (by file extension)
     I-->>H: parsed rows + per-row errors
     loop each parsed row
         H->>R: exists_by_fields(user, amount, date, label)
     end
+    H->>G: list(user)
     loop each non-duplicate row
         H->>R: insert
         H->>M: match_operation(op, all user budgets)
         H->>R: set_auto_link (when a budget matches)
         H->>M: match_category(op, all user categories)
         H->>R: set_category (when a category matches)
+        H->>R: ignore_by_rule (when an ignore rule matches)
     end
     opt profileId sent
         H->>P: mark_used(profile, user)
@@ -149,6 +152,16 @@ to replace them. A rule writes the operation's own category, so it takes
 precedence over the default category of the budget the operation is linked to,
 and nothing records whether a hand or a rule set it.
 
+Ignore rules use the same label patterns, optionally with an exact amount
+compared whatever the operation's sign. Every operation created by hand or by
+an import is ignored by the first of the user's rules, oldest first, that
+matches it, independently of budget matching: an ignored operation keeps its
+budget link and counts again as soon as it is no longer ignored. Applying a rule
+(`POST /ignore-rules/{id}/apply`) ignores the existing operations it matches
+that are not ignored yet; none of these paths ever changes how an already
+ignored operation was ignored. A failure to list or apply the rules during an
+import is logged and leaves the operations counted.
+
 The column mapping travels with every import request, even when the web app
 took it from an import profile: the profile only fills the form and, through
 `profileId`, records its last use so the most recent one is offered first.
@@ -169,7 +182,10 @@ its ordered parts, each with an amount and an optional budget that becomes
 null when that budget is deleted. A split operation's own link stays unlinked,
 and every aggregation counts its parts instead of its amount. Users also own
 categories, which own their ordered label rules; an operation, each split part and each budget has an optional
-category that becomes null when that category is deleted. The schema is
+category that becomes null when that category is deleted. Users own ignore
+rules too; an ignored operation records the rule that ignored it, or none when
+it was ignored by hand, and deleting a rule stops ignoring the operations it
+ignored, in one transaction. The schema is
 defined by
 [radinage-api/migrations/](radinage-api/migrations/).
 
@@ -178,8 +194,8 @@ browser keeps the JWT and role in `localStorage`.
 
 ## Design decisions
 
-**Static dispatch over repository traits.** `AppState<U, O, B, P, C>` is generic
-over the five repository types and handlers are generic functions. Tests swap
+**Static dispatch over repository traits.** `AppState<U, O, B, P, C, R>` is generic
+over the six repository types and handlers are generic functions. Tests swap
 in mocks with no `dyn` and no runtime cost, at the price of generic parameters
 on every handler signature.
 

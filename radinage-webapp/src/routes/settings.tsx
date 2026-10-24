@@ -18,6 +18,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { type FormEvent, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { AccountBalanceSection } from "@/components/AccountBalanceSection";
+import { IgnoreRulesSection } from "@/components/IgnoreRulesSection";
 import { PageHeader } from "@/components/PageHeader";
 import { ApiError } from "@/lib/api";
 import { useChangePassword, useExportData, useImportData } from "@/lib/hooks";
@@ -166,6 +167,8 @@ export function SettingsPage() {
 
 				<AccountBalanceSection />
 
+				<IgnoreRulesSection />
+
 				<Paper>
 					<Stack>
 						<Title order={3} fz={20}>
@@ -188,6 +191,8 @@ export function SettingsPage() {
 									skippedCategories: dataSuccess.skippedCategories,
 									budgets: dataSuccess.importedBudgets,
 									skippedBudgets: dataSuccess.skippedBudgets,
+									ignoreRules: dataSuccess.importedIgnoreRules,
+									skippedIgnoreRules: dataSuccess.skippedIgnoreRules,
 									operations: dataSuccess.importedOperations,
 									skippedOperations: dataSuccess.skippedOperations,
 								})}

@@ -16,7 +16,9 @@ import { i18n } from "@/i18n";
 import type {
 	CategoryResponse,
 	ForecastResponse,
+	IgnoreRuleResponse,
 	MonthlyOperationsResponse,
+	OperationResponse,
 } from "@/lib/types";
 import { theme } from "@/theme";
 import { selectMantineOption } from "./mantine";
@@ -47,6 +49,7 @@ const mockMonthlyResponse: MonthlyOperationsResponse = {
 			label: "Groceries",
 			budgetLink: { type: "manual", budgetId: "b1" },
 			ignored: false,
+			ignoreRuleId: null,
 			categoryId: null,
 			effectiveCategoryId: null,
 			splits: [],
@@ -59,6 +62,7 @@ const mockMonthlyResponse: MonthlyOperationsResponse = {
 			label: "Restaurant",
 			budgetLink: { type: "manual", budgetId: "b1" },
 			ignored: false,
+			ignoreRuleId: null,
 			categoryId: null,
 			effectiveCategoryId: null,
 			splits: [],
@@ -71,6 +75,7 @@ const mockMonthlyResponse: MonthlyOperationsResponse = {
 			label: "Electricity",
 			budgetLink: { type: "unlinked" },
 			ignored: false,
+			ignoreRuleId: null,
 			categoryId: null,
 			effectiveCategoryId: null,
 			splits: [],
@@ -83,6 +88,7 @@ const mockMonthlyResponse: MonthlyOperationsResponse = {
 			label: "Salary",
 			budgetLink: { type: "auto", budgetId: "b2" },
 			ignored: false,
+			ignoreRuleId: null,
 			categoryId: null,
 			effectiveCategoryId: null,
 			splits: [],
@@ -169,11 +175,13 @@ function setupMocks(
 		budgets: typeof mockBudgetsResponse;
 		operations: typeof mockMonthlyResponse;
 		categories: CategoryResponse[];
+		ignoreRules: IgnoreRuleResponse[];
 	}>,
 ) {
 	const budgets = overrides?.budgets ?? mockBudgetsResponse;
 	const operations = overrides?.operations ?? mockMonthlyResponse;
 	const categories = overrides?.categories ?? [];
+	const ignoreRules = overrides?.ignoreRules ?? [];
 
 	apiCalls = [];
 	apiFetchMock.mockImplementation((path: string, options?: unknown) => {
@@ -203,6 +211,7 @@ function setupMocks(
 				label: "Op",
 				budgetLink: { type: "unlinked" },
 				ignored: false,
+				ignoreRuleId: null,
 				categoryId: null,
 				effectiveCategoryId: null,
 				splits: [],
@@ -229,6 +238,9 @@ function setupMocks(
 		}
 		if (path === "/categories") {
 			return Promise.resolve(categories);
+		}
+		if (path === "/ignore-rules") {
+			return Promise.resolve(ignoreRules);
 		}
 		if (/^\/operations\/[^/]+(\/category)?$/.test(path)) {
 			return Promise.resolve(operations.operations[0]);
@@ -554,6 +566,7 @@ describe("MonthlyOperationsPage", () => {
 					label: "Groceries",
 					budgetLink: { type: "manual", budgetId: "b1" },
 					ignored: false,
+					ignoreRuleId: null,
 					categoryId: null,
 					effectiveCategoryId: null,
 					splits: [],
@@ -566,6 +579,7 @@ describe("MonthlyOperationsPage", () => {
 					label: "Bus ticket",
 					budgetLink: { type: "manual", budgetId: "b4" },
 					ignored: false,
+					ignoreRuleId: null,
 					categoryId: null,
 					effectiveCategoryId: null,
 					splits: [],
@@ -578,6 +592,7 @@ describe("MonthlyOperationsPage", () => {
 					label: "Salary",
 					budgetLink: { type: "auto", budgetId: "b2" },
 					ignored: false,
+					ignoreRuleId: null,
 					categoryId: null,
 					effectiveCategoryId: null,
 					splits: [],
@@ -590,6 +605,7 @@ describe("MonthlyOperationsPage", () => {
 					label: "Freelance gig",
 					budgetLink: { type: "auto", budgetId: "b5" },
 					ignored: false,
+					ignoreRuleId: null,
 					categoryId: null,
 					effectiveCategoryId: null,
 					splits: [],
@@ -668,6 +684,7 @@ describe("MonthlyOperationsPage", () => {
 					label: "Groceries",
 					budgetLink: { type: "manual", budgetId: "b1" },
 					ignored: false,
+					ignoreRuleId: null,
 					categoryId: null,
 					effectiveCategoryId: null,
 					splits: [],
@@ -680,6 +697,7 @@ describe("MonthlyOperationsPage", () => {
 					label: "Bus ticket",
 					budgetLink: { type: "manual", budgetId: "b4" },
 					ignored: false,
+					ignoreRuleId: null,
 					categoryId: null,
 					effectiveCategoryId: null,
 					splits: [],
@@ -721,6 +739,7 @@ describe("MonthlyOperationsPage", () => {
 					label: "Groceries",
 					budgetLink: { type: "manual" as const, budgetId: "b1" },
 					ignored: false,
+					ignoreRuleId: null,
 					categoryId: null,
 					effectiveCategoryId: null,
 					splits: [],
@@ -733,6 +752,7 @@ describe("MonthlyOperationsPage", () => {
 					label: "Restaurant",
 					budgetLink: { type: "manual" as const, budgetId: "b1" },
 					ignored: false,
+					ignoreRuleId: null,
 					categoryId: null,
 					effectiveCategoryId: null,
 					splits: [],
@@ -766,6 +786,7 @@ describe("MonthlyOperationsPage", () => {
 					label: "Salary",
 					budgetLink: { type: "unlinked" },
 					ignored: false,
+					ignoreRuleId: null,
 					categoryId: null,
 					effectiveCategoryId: null,
 					splits: [],
@@ -778,6 +799,7 @@ describe("MonthlyOperationsPage", () => {
 					label: "Groceries",
 					budgetLink: { type: "unlinked" },
 					ignored: false,
+					ignoreRuleId: null,
 					categoryId: null,
 					effectiveCategoryId: null,
 					splits: [],
@@ -790,6 +812,7 @@ describe("MonthlyOperationsPage", () => {
 					label: "Taxi",
 					budgetLink: { type: "unlinked" },
 					ignored: false,
+					ignoreRuleId: null,
 					categoryId: null,
 					effectiveCategoryId: null,
 					splits: [],
@@ -883,6 +906,7 @@ describe("MonthlyOperationsPage", () => {
 					label: "Groceries",
 					budgetLink: { type: "manual", budgetId: "b1" },
 					ignored: false,
+					ignoreRuleId: null,
 					categoryId: null,
 					effectiveCategoryId: null,
 					splits: [],
@@ -909,6 +933,7 @@ describe("MonthlyOperationsPage", () => {
 					label: "Salary",
 					budgetLink: { type: "auto", budgetId: "b2" },
 					ignored: false,
+					ignoreRuleId: null,
 					categoryId: null,
 					effectiveCategoryId: null,
 					splits: [],
@@ -934,6 +959,7 @@ describe("MonthlyOperationsPage", () => {
 					label: "Groceries",
 					budgetLink: { type: "manual", budgetId: "b1" },
 					ignored: false,
+					ignoreRuleId: null,
 					categoryId: null,
 					effectiveCategoryId: null,
 					splits: [],
@@ -946,6 +972,7 @@ describe("MonthlyOperationsPage", () => {
 					label: "CASH WITHDRAWAL",
 					budgetLink: { type: "unlinked" },
 					ignored: false,
+					ignoreRuleId: null,
 					categoryId: null,
 					effectiveCategoryId: null,
 					splits: [
@@ -973,6 +1000,7 @@ describe("MonthlyOperationsPage", () => {
 					label: "Taxi",
 					budgetLink: { type: "unlinked" },
 					ignored: false,
+					ignoreRuleId: null,
 					categoryId: null,
 					effectiveCategoryId: null,
 					splits: [],
@@ -1057,6 +1085,7 @@ describe("MonthlyOperationsPage", () => {
 					label: "Internal transfer",
 					budgetLink: { type: "unlinked" },
 					ignored: true,
+					ignoreRuleId: null,
 					categoryId: null,
 					effectiveCategoryId: null,
 					splits: [],
@@ -1116,6 +1145,36 @@ describe("MonthlyOperationsPage", () => {
 			expect(
 				await screen.findByText("Aucune opération ignorée ce mois-ci"),
 			).toBeInTheDocument();
+		});
+
+		it("tells the operations a rule ignored from those ignored by hand", async () => {
+			const rule: IgnoreRuleResponse = {
+				id: "r1",
+				labelPattern: { type: "startsWith", value: "VIR" },
+				amount: null,
+				createdAt: "2026-01-01T00:00:00Z",
+			};
+			const byRule = {
+				...operations.operations[0],
+				id: "op-by-rule",
+				label: "VIR LIVRET A",
+				ignored: true,
+				ignoreRuleId: "r1",
+			} satisfies OperationResponse;
+			setupMocks({
+				operations: { operations: [...operations.operations, byRule] },
+				ignoreRules: [rule],
+			});
+			await renderOperationsPage();
+			await showIgnored();
+
+			const section = within(
+				await screen.findByRole("region", { name: "Opérations ignorées" }),
+			);
+			expect(
+				await section.findByText("Ignorée par une règle"),
+			).toBeInTheDocument();
+			expect(section.getByText("Ignorée")).toBeInTheDocument();
 		});
 
 		it("stops ignoring an operation", async () => {
@@ -1344,6 +1403,23 @@ describe("operation sheet", () => {
 
 			const dialog = within(await screen.findByRole("dialog"));
 			expect(dialog.getByText("Diviser l'opération")).toBeInTheDocument();
+		});
+
+		it("creates an ignore rule from the operation", async () => {
+			await renderOperationsPage();
+			const { user, sheet } = await openSheet(/KAFFIHUS/);
+
+			await user.click(
+				sheet.getByRole("button", { name: "Toujours ignorer…" }),
+			);
+
+			const dialog = within(await screen.findByRole("dialog"));
+			expect(
+				dialog.getByRole("heading", { name: "Nouvelle règle d'ignore" }),
+			).toBeInTheDocument();
+			expect(dialog.getByRole("textbox", { name: /Valeur/ })).toHaveValue(
+				longLabel,
+			);
 		});
 
 		it("creates a budget from the operation", async () => {

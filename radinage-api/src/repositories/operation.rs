@@ -230,7 +230,16 @@ pub trait OperationRepository: Send + Sync + 'static {
         user_id: Uuid,
     ) -> impl std::future::Future<Output = AppResult<Vec<Operation>>> + Send;
 
-    /// Set or clear the ignored flag on an operation. Returns `true` if found.
+    /// Mark a not yet ignored operation as ignored by the rule; one already ignored keeps how
+    /// it was.
+    fn ignore_by_rule(
+        &self,
+        op_id: Uuid,
+        rule_id: Uuid,
+    ) -> impl std::future::Future<Output = AppResult<()>> + Send;
+
+    /// Set or clear the ignored flag on an operation, by hand: it no longer records a rule.
+    /// Returns `true` if found.
     fn set_ignored(
         &self,
         id: Uuid,
@@ -299,7 +308,7 @@ impl PgOperationRepository {
 
 /// Columns read into an [`Operation`], from `operations o`.
 const OPERATION_COLUMNS: &str = "o.id, o.user_id, o.amount, o.date, o.effective_date, o.label, \
-     o.budget_link_type, o.budget_link_id, o.ignored, o.category_id, \
+     o.budget_link_type, o.budget_link_id, o.ignored, o.ignore_rule_id, o.category_id, \
      (SELECT b.category_id FROM budgets b WHERE b.id = o.budget_link_id) AS budget_category_id";
 
 /// Effective category of an unsplit operation `o`.
@@ -411,6 +420,7 @@ fn row_to_operation(row: &sqlx::postgres::PgRow) -> AppResult<Operation> {
         label: row.try_get("label")?,
         budget_link: budget_link_from_cols(link_type, link_id),
         ignored: row.try_get("ignored").unwrap_or(false),
+        ignore_rule_id: row.try_get("ignore_rule_id")?,
         category_id: row.try_get("category_id")?,
         budget_category_id: row.try_get("budget_category_id")?,
         splits: Vec::new(),
@@ -639,15 +649,29 @@ impl OperationRepository for PgOperationRepository {
         Ok(ops)
     }
 
+    async fn ignore_by_rule(&self, op_id: Uuid, rule_id: Uuid) -> AppResult<()> {
+        sqlx::query(
+            "UPDATE operations SET ignored = TRUE, ignore_rule_id = $2 \
+             WHERE id = $1 AND ignored = FALSE",
+        )
+        .bind(op_id)
+        .bind(rule_id)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
     async fn set_ignored(&self, id: Uuid, user_id: Uuid, ignored: bool) -> AppResult<bool> {
-        let affected =
-            sqlx::query("UPDATE operations SET ignored = $1 WHERE id = $2 AND user_id = $3")
-                .bind(ignored)
-                .bind(id)
-                .bind(user_id)
-                .execute(&self.pool)
-                .await?
-                .rows_affected();
+        let affected = sqlx::query(
+            "UPDATE operations SET ignored = $1, ignore_rule_id = NULL \
+                 WHERE id = $2 AND user_id = $3",
+        )
+        .bind(ignored)
+        .bind(id)
+        .bind(user_id)
+        .execute(&self.pool)
+        .await?
+        .rows_affected();
         Ok(affected > 0)
     }
 

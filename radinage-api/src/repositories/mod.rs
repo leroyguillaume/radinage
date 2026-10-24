@@ -1,5 +1,6 @@
 pub mod budget;
 pub mod category;
+pub mod ignore_rule;
 pub mod import_profile;
 pub mod operation;
 pub mod user;
@@ -13,6 +14,7 @@ use serde::Deserialize;
 
 pub use budget::{BudgetRepository, BudgetSortField, ListBudgetsParams, PgBudgetRepository};
 pub use category::{CategoryRepository, PgCategoryRepository};
+pub use ignore_rule::{IgnoreRuleRepository, PgIgnoreRuleRepository};
 pub use import_profile::{ImportProfileRepository, PgImportProfileRepository};
 pub use operation::{
     CategoryFilter, CategoryTotal, ListOperationsParams, OperationDirection, OperationRepository,
@@ -66,6 +68,8 @@ fn label_pattern_from_cols(pattern_type: &str, value: String) -> AppResult<Label
 pub use budget::MockBudgetRepository;
 #[cfg(test)]
 pub use category::MockCategoryRepository;
+#[cfg(test)]
+pub use ignore_rule::MockIgnoreRuleRepository;
 #[cfg(test)]
 pub use import_profile::MockImportProfileRepository;
 #[cfg(test)]

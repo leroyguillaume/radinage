@@ -5,10 +5,11 @@ use crate::{
         BudgetLink, NewOperationSplit, Operation, OperationSplit, validate_splits,
     },
     error::{AppError, AppResult},
-    handlers::categories::ensure_category_is_users,
+    handlers::{categories::ensure_category_is_users, ignore_rules::auto_ignore_operation},
     repositories::{
-        BudgetRepository, CategoryFilter, CategoryRepository, ListOperationsParams,
-        OperationDirection, OperationRepository, OperationSortField, OperationTotals, SortOrder,
+        BudgetRepository, CategoryFilter, CategoryRepository, IgnoreRuleRepository,
+        ListOperationsParams, OperationDirection, OperationRepository, OperationSortField,
+        OperationTotals, SortOrder,
     },
     services::matcher::{MatcherService, MatcherServiceImpl},
 };
@@ -45,6 +46,8 @@ pub struct OperationResponse {
     pub budget_link: BudgetLink,
     /// Whether this operation is ignored (excluded from summaries and budgets).
     pub ignored: bool,
+    /// Ignore rule that ignored this operation, `null` when it is ignored by hand or not ignored.
+    pub ignore_rule_id: Option<Uuid>,
     /// Category the user put this operation in, `null` when none. Always `null` when split.
     pub category_id: Option<Uuid>,
     /// Category the operation counts towards: its own, else its linked budget's. Always `null`
@@ -95,6 +98,7 @@ impl From<Operation> for OperationResponse {
             label: op.label,
             budget_link: op.budget_link,
             ignored: op.ignored,
+            ignore_rule_id: op.ignore_rule_id,
             category_id: op.category_id,
             effective_category_id,
             splits: op
@@ -306,8 +310,8 @@ pub fn compute_max_page(total: i64, page_size: u32) -> u32 {
 
 // ── Handlers ─────────────────────────────────────────────────────────────────
 
-pub async fn list_operations<U, O: OperationRepository, B, P, C>(
-    State(state): State<AppState<U, O, B, P, C>>,
+pub async fn list_operations<U, O: OperationRepository, B, P, C, R>(
+    State(state): State<AppState<U, O, B, P, C, R>>,
     auth_user: AuthUser,
     Query(q): Query<ListOperationsQuery>,
 ) -> AppResult<Json<OperationListResponse>> {
@@ -353,8 +357,8 @@ pub async fn list_operations<U, O: OperationRepository, B, P, C>(
     }))
 }
 
-pub async fn get_operation<U, O: OperationRepository, B, P, C>(
-    State(state): State<AppState<U, O, B, P, C>>,
+pub async fn get_operation<U, O: OperationRepository, B, P, C, R>(
+    State(state): State<AppState<U, O, B, P, C, R>>,
     auth_user: AuthUser,
     Path(id): Path<Uuid>,
 ) -> AppResult<Json<OperationResponse>> {
@@ -368,8 +372,9 @@ pub async fn create_operation<
     B: BudgetRepository,
     P,
     C: CategoryRepository,
+    R: IgnoreRuleRepository,
 >(
-    State(state): State<AppState<U, O, B, P, C>>,
+    State(state): State<AppState<U, O, B, P, C, R>>,
     auth_user: AuthUser,
     Json(body): Json<CreateOperationRequest>,
 ) -> AppResult<(StatusCode, Json<OperationResponse>)> {
@@ -396,6 +401,7 @@ pub async fn create_operation<
         label: body.label,
         budget_link: BudgetLink::Unlinked,
         ignored: false,
+        ignore_rule_id: None,
         category_id: None,
         budget_category_id: None,
         splits: Vec::new(),
@@ -407,13 +413,15 @@ pub async fn create_operation<
         &op,
     )
     .await?;
+    let ignore_rules = state.ignore_rule_repo.list(user_id).await?;
+    auto_ignore_operation(&state.operation_repo, &ignore_rules, &op).await?;
 
     let updated = state.operation_repo.find_by_id(id, user_id).await?;
     Ok((StatusCode::CREATED, Json(updated.into())))
 }
 
-pub async fn update_operation<U, O: OperationRepository, B, P, C>(
-    State(state): State<AppState<U, O, B, P, C>>,
+pub async fn update_operation<U, O: OperationRepository, B, P, C, R>(
+    State(state): State<AppState<U, O, B, P, C, R>>,
     auth_user: AuthUser,
     Path(id): Path<Uuid>,
     Json(body): Json<UpdateOperationRequest>,
@@ -442,8 +450,8 @@ pub async fn update_operation<U, O: OperationRepository, B, P, C>(
     Ok(Json(op.into()))
 }
 
-pub async fn delete_operation<U, O: OperationRepository, B, P, C>(
-    State(state): State<AppState<U, O, B, P, C>>,
+pub async fn delete_operation<U, O: OperationRepository, B, P, C, R>(
+    State(state): State<AppState<U, O, B, P, C, R>>,
     auth_user: AuthUser,
     Path(id): Path<Uuid>,
 ) -> AppResult<StatusCode> {
@@ -454,8 +462,8 @@ pub async fn delete_operation<U, O: OperationRepository, B, P, C>(
     Ok(StatusCode::NO_CONTENT)
 }
 
-pub async fn link_budget<U, O: OperationRepository, B: BudgetRepository, P, C>(
-    State(state): State<AppState<U, O, B, P, C>>,
+pub async fn link_budget<U, O: OperationRepository, B: BudgetRepository, P, C, R>(
+    State(state): State<AppState<U, O, B, P, C, R>>,
     auth_user: AuthUser,
     Path(op_id): Path<Uuid>,
     Json(body): Json<LinkBudgetRequest>,
@@ -481,8 +489,8 @@ pub async fn link_budget<U, O: OperationRepository, B: BudgetRepository, P, C>(
     Ok(Json(op.into()))
 }
 
-pub async fn unlink_budget<U, O: OperationRepository, B, P, C>(
-    State(state): State<AppState<U, O, B, P, C>>,
+pub async fn unlink_budget<U, O: OperationRepository, B, P, C, R>(
+    State(state): State<AppState<U, O, B, P, C, R>>,
     auth_user: AuthUser,
     Path(id): Path<Uuid>,
 ) -> AppResult<Json<OperationResponse>> {
@@ -498,8 +506,8 @@ pub async fn unlink_budget<U, O: OperationRepository, B, P, C>(
     Ok(Json(op.into()))
 }
 
-pub async fn set_category<U, O: OperationRepository, B, P, C: CategoryRepository>(
-    State(state): State<AppState<U, O, B, P, C>>,
+pub async fn set_category<U, O: OperationRepository, B, P, C: CategoryRepository, R>(
+    State(state): State<AppState<U, O, B, P, C, R>>,
     auth_user: AuthUser,
     Path(id): Path<Uuid>,
     Json(body): Json<SetCategoryRequest>,
@@ -520,8 +528,8 @@ pub async fn set_category<U, O: OperationRepository, B, P, C: CategoryRepository
     .await
 }
 
-pub async fn clear_category<U, O: OperationRepository, B, P, C>(
-    State(state): State<AppState<U, O, B, P, C>>,
+pub async fn clear_category<U, O: OperationRepository, B, P, C, R>(
+    State(state): State<AppState<U, O, B, P, C, R>>,
     auth_user: AuthUser,
     Path(id): Path<Uuid>,
 ) -> AppResult<Json<OperationResponse>> {
@@ -543,8 +551,8 @@ async fn store_category(
     Ok(Json(op.into()))
 }
 
-pub async fn ignore_operation<U, O: OperationRepository, B, P, C>(
-    State(state): State<AppState<U, O, B, P, C>>,
+pub async fn ignore_operation<U, O: OperationRepository, B, P, C, R>(
+    State(state): State<AppState<U, O, B, P, C, R>>,
     auth_user: AuthUser,
     Path(id): Path<Uuid>,
 ) -> AppResult<Json<OperationResponse>> {
@@ -559,8 +567,8 @@ pub async fn ignore_operation<U, O: OperationRepository, B, P, C>(
     Ok(Json(op.into()))
 }
 
-pub async fn unignore_operation<U, O: OperationRepository, B, P, C>(
-    State(state): State<AppState<U, O, B, P, C>>,
+pub async fn unignore_operation<U, O: OperationRepository, B, P, C, R>(
+    State(state): State<AppState<U, O, B, P, C, R>>,
     auth_user: AuthUser,
     Path(id): Path<Uuid>,
 ) -> AppResult<Json<OperationResponse>> {
@@ -581,8 +589,9 @@ pub async fn replace_splits<
     B: BudgetRepository,
     P,
     C: CategoryRepository,
+    R,
 >(
-    State(state): State<AppState<U, O, B, P, C>>,
+    State(state): State<AppState<U, O, B, P, C, R>>,
     auth_user: AuthUser,
     Path(id): Path<Uuid>,
     Json(body): Json<ReplaceOperationSplitsRequest>,
@@ -619,8 +628,8 @@ pub async fn replace_splits<
     Ok(Json(op.into()))
 }
 
-pub async fn clear_splits<U, O: OperationRepository, B, P, C>(
-    State(state): State<AppState<U, O, B, P, C>>,
+pub async fn clear_splits<U, O: OperationRepository, B, P, C, R>(
+    State(state): State<AppState<U, O, B, P, C, R>>,
     auth_user: AuthUser,
     Path(id): Path<Uuid>,
 ) -> AppResult<Json<OperationResponse>> {
@@ -716,6 +725,7 @@ mod tests {
             label: "Test".to_string(),
             budget_link: BudgetLink::Unlinked,
             ignored: false,
+            ignore_rule_id: None,
             category_id: None,
             budget_category_id: None,
             splits: vec![],
@@ -849,6 +859,75 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn create_operation_is_ignored_by_a_matching_rule() {
+        use crate::{
+            domain::{
+                budget::LabelPattern,
+                ignore_rule::{IgnoreRule, IgnoreRuleFields},
+            },
+            repositories::MockIgnoreRuleRepository,
+            test_util::make_test_state_with_ignore_rules,
+        };
+
+        let user_id = Uuid::new_v4();
+        let rule = IgnoreRule {
+            id: Uuid::new_v4(),
+            user_id,
+            fields: IgnoreRuleFields {
+                label_pattern: LabelPattern::StartsWith("VIR INTERNE".to_string()),
+                amount: None,
+            },
+            created_at: chrono::Utc::now(),
+        };
+        let rule_id = rule.id;
+        let mut rule_repo = MockIgnoreRuleRepository::new();
+        rule_repo
+            .expect_list()
+            .withf(move |id| *id == user_id)
+            .returning(move |_| {
+                let rule = rule.clone();
+                Box::pin(async move { Ok(vec![rule]) })
+            });
+        let mut budget_repo = MockBudgetRepository::new();
+        budget_repo
+            .expect_list_all_for_user()
+            .returning(|_| Box::pin(async { Ok(vec![]) }));
+        let mut op_repo = MockOperationRepository::new();
+        op_repo
+            .expect_insert()
+            .returning(|_, _, _, _, _, _| Box::pin(async { Ok(()) }));
+        op_repo
+            .expect_ignore_by_rule()
+            .withf(move |_, r| *r == rule_id)
+            .once()
+            .returning(|_, _| Box::pin(async { Ok(()) }));
+        let op = make_op(Uuid::new_v4(), user_id);
+        op_repo.expect_find_by_id().returning(move |_, _| {
+            let op = op.clone();
+            Box::pin(async { Ok(op) })
+        });
+
+        let app = build_test_router(make_test_state_with_ignore_rules(
+            MockUserRepository::new(),
+            op_repo,
+            budget_repo,
+            rule_repo,
+        ));
+        let auth = auth_header(user_id, UserRole::User);
+        let body = serde_json::to_string(&CreateOperationRequest {
+            amount: Decimal::new(-500, 0),
+            date: NaiveDate::from_ymd_opt(2026, 10, 14).unwrap(),
+            effective_date: None,
+            label: "VIR INTERNE VERS LIVRET A".to_string(),
+        })
+        .unwrap();
+        let req = json_request("POST", "/operations", Some(&body), Some(&auth));
+        let resp = app.oneshot(req).await.unwrap();
+
+        assert_eq!(resp.status(), StatusCode::CREATED);
+    }
+
+    #[tokio::test]
     async fn update_operation_not_found_returns_404() {
         let user_id = Uuid::new_v4();
         let op_id = Uuid::new_v4();
@@ -922,6 +1001,7 @@ mod tests {
         let op_id = Uuid::new_v4();
         let op = Operation {
             ignored: true,
+            ignore_rule_id: None,
             ..make_op(op_id, user_id)
         };
         let mut op_repo = MockOperationRepository::new();

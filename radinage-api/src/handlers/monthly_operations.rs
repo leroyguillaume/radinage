@@ -30,8 +30,8 @@ pub struct MonthlyOperationsQuery {
     pub include_ignored: bool,
 }
 
-pub async fn get_monthly_operations<U, O: OperationRepository, B, P, C>(
-    State(state): State<AppState<U, O, B, P, C>>,
+pub async fn get_monthly_operations<U, O: OperationRepository, B, P, C, R>(
+    State(state): State<AppState<U, O, B, P, C, R>>,
     auth_user: AuthUser,
     Path((year, month)): Path<(i32, u32)>,
     Query(q): Query<MonthlyOperationsQuery>,
@@ -87,6 +87,7 @@ mod tests {
             effective_date: None,
             budget_link: BudgetLink::Unlinked,
             ignored: false,
+            ignore_rule_id: None,
             category_id: None,
             budget_category_id: None,
             splits: vec![],

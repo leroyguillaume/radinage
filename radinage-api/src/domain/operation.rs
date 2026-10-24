@@ -17,6 +17,8 @@ pub struct Operation {
     pub label: String,
     pub budget_link: BudgetLink,
     pub ignored: bool,
+    /// Rule that ignored the operation; `None` when ignored by hand or not ignored.
+    pub ignore_rule_id: Option<Uuid>,
     /// Category the user put the operation in, if any.
     pub category_id: Option<Uuid>,
     /// Category of the budget the operation is linked to, its default category.
@@ -248,6 +250,7 @@ mod tests {
             label: "Op".to_string(),
             budget_link: BudgetLink::Unlinked,
             ignored: false,
+            ignore_rule_id: None,
             category_id: None,
             budget_category_id: None,
             splits: vec![],

@@ -3,12 +3,14 @@ import {
 	type BudgetInitialValues,
 	BudgetModal,
 } from "@/components/BudgetModal";
+import { IgnoreRuleModal } from "@/components/IgnoreRuleForm";
 import {
 	type OperationHandlers,
 	OperationSheet,
 } from "@/components/OperationSheet";
 import { SplitOperationModal } from "@/components/SplitOperationModal";
 import {
+	useIgnoreRules,
 	useLinkBudget,
 	useSetOperationCategory,
 	useSetOperationIgnored,
@@ -18,6 +20,7 @@ import {
 import type {
 	BudgetResponse,
 	CategoryResponse,
+	LabelPattern,
 	OperationResponse,
 } from "@/lib/types";
 
@@ -48,6 +51,7 @@ export function useOperationActions({
 	const setOperationIgnored = useSetOperationIgnored();
 	const setOperationCategory = useSetOperationCategory();
 	const updateEffectiveDate = useUpdateEffectiveDate();
+	const ignoreRules = useIgnoreRules().data ?? [];
 
 	const [sheetId, setSheetId] = useState<string | null>(null);
 	const [splitTarget, setSplitTarget] = useState<OperationResponse | null>(
@@ -58,11 +62,17 @@ export function useOperationActions({
 		BudgetInitialValues | undefined
 	>();
 
+	const [ignorePattern, setIgnorePattern] = useState<LabelPattern | null>(null);
+
+	/** The label text the user selected, else the whole label. */
+	function labelToMatch(op: OperationResponse): string {
+		return window.getSelection()?.toString().trim() || op.label;
+	}
+
 	function createBudgetFrom(op: OperationResponse) {
-		const selection = window.getSelection()?.toString().trim();
 		setBudgetInitial({
 			amount: op.amount,
-			rules: [{ patternType: "contains", patternValue: selection || op.label }],
+			rules: [{ patternType: "contains", patternValue: labelToMatch(op) }],
 		});
 		setBudgetModalOpened(true);
 	}
@@ -70,6 +80,7 @@ export function useOperationActions({
 	const handlers: OperationHandlers = {
 		budgets,
 		categories,
+		ignoreRules,
 		onOpen: (op) => setSheetId(op.id),
 		onSetCategory: (opId, categoryId) =>
 			setOperationCategory.mutate({ opId, categoryId }),
@@ -78,6 +89,8 @@ export function useOperationActions({
 		onUnlink: (opId) => unlinkBudget.mutate(opId),
 		onSetIgnored: (opId, ignored) =>
 			setOperationIgnored.mutate({ opId, ignored }),
+		onIgnoreAlways: (op) =>
+			setIgnorePattern({ type: "contains", value: labelToMatch(op) }),
 		onSplit: setSplitTarget,
 		onEditEffectiveDate: (op, effectiveDate) =>
 			updateEffectiveDate.mutate({ op, effectiveDate }),
@@ -101,6 +114,10 @@ export function useOperationActions({
 				onClose={() => setBudgetModalOpened(false)}
 				budget={null}
 				initialValues={budgetInitial}
+			/>
+			<IgnoreRuleModal
+				initialPattern={ignorePattern}
+				onClose={() => setIgnorePattern(null)}
 			/>
 			<SplitOperationModal
 				operation={splitTarget}

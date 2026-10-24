@@ -16,6 +16,7 @@ import type {
 	AccountBalance,
 	ApplyBudgetResponse,
 	ApplyCategoryResponse,
+	ApplyIgnoreRuleResponse,
 	BudgetResponse,
 	CategoryRequest,
 	CategoryResponse,
@@ -25,6 +26,8 @@ import type {
 	ExportDataResponse,
 	ForecastMonthBreakdown,
 	ForecastResponse,
+	IgnoreRuleRequest,
+	IgnoreRuleResponse,
 	ImportDataResponse,
 	ImportPreviewResponse,
 	ImportProfileRequest,
@@ -420,6 +423,7 @@ export function useImportData() {
 			queryClient.invalidateQueries({ queryKey: ["operation-search"] });
 			queryClient.invalidateQueries({ queryKey: ["budgets"] });
 			queryClient.invalidateQueries({ queryKey: categoriesKey });
+			queryClient.invalidateQueries({ queryKey: ignoreRulesKey });
 			queryClient.invalidateQueries({ queryKey: ["summary"] });
 			queryClient.invalidateQueries({ queryKey: ["forecast"] });
 			queryClient.invalidateQueries({ queryKey: accountBalanceKey });
@@ -584,6 +588,58 @@ export function useDeleteCategory() {
 				queryClient.invalidateQueries({ queryKey });
 			}
 		},
+	});
+}
+
+const ignoreRulesKey = ["ignore-rules"];
+
+/** Ignore rules, oldest first: the order they are tried in. */
+export function useIgnoreRules() {
+	return useQuery({
+		queryKey: ignoreRulesKey,
+		queryFn: () => apiFetch<IgnoreRuleResponse[]>("/ignore-rules"),
+	});
+}
+
+export function useSaveIgnoreRule() {
+	const queryClient = useQueryClient();
+	return useMutation({
+		mutationFn: ({ id, body }: { id?: string; body: IgnoreRuleRequest }) =>
+			apiFetch<IgnoreRuleResponse>(
+				id === undefined ? "/ignore-rules" : `/ignore-rules/${id}`,
+				{
+					method: id === undefined ? "POST" : "PUT",
+					body: JSON.stringify(body),
+				},
+			),
+		onSuccess: () => {
+			queryClient.invalidateQueries({ queryKey: ignoreRulesKey });
+		},
+	});
+}
+
+export function useDeleteIgnoreRule() {
+	const queryClient = useQueryClient();
+	const invalidate = useInvalidateOperationData();
+	return useMutation({
+		mutationFn: (id: string) =>
+			apiFetch<void>(`/ignore-rules/${id}`, { method: "DELETE" }),
+		onSuccess: () => {
+			// The operations the rule ignored count again.
+			queryClient.invalidateQueries({ queryKey: ignoreRulesKey });
+			invalidate();
+		},
+	});
+}
+
+export function useApplyIgnoreRule() {
+	const invalidate = useInvalidateOperationData();
+	return useMutation({
+		mutationFn: (id: string) =>
+			apiFetch<ApplyIgnoreRuleResponse>(`/ignore-rules/${id}/apply`, {
+				method: "POST",
+			}),
+		onSuccess: invalidate,
 	});
 }
 

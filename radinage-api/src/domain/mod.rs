@@ -38,6 +38,7 @@ macro_rules! string_enum {
 
 pub mod budget;
 pub mod category;
+pub mod ignore_rule;
 pub mod import_profile;
 pub mod operation;
 pub mod user;

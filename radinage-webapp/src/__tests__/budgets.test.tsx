@@ -99,6 +99,7 @@ function makeLinkedOperation(
 		label: `OP ${id}`,
 		budgetLink: { type: "auto", budgetId },
 		ignored: false,
+		ignoreRuleId: null,
 		categoryId: null,
 		effectiveCategoryId: null,
 		splits: [],
@@ -592,6 +593,7 @@ describe("BudgetsPage", () => {
 					label: "RETRAIT DAB",
 					budgetLink: { type: "unlinked" },
 					ignored: false,
+					ignoreRuleId: null,
 					categoryId: null,
 					effectiveCategoryId: null,
 					splits: [
