@@ -1,12 +1,12 @@
 import {
 	Alert,
+	Anchor,
 	Badge,
 	Box,
 	Group,
 	Loader,
 	Paper,
 	Progress,
-	SegmentedControl,
 	SimpleGrid,
 	Stack,
 	Table,
@@ -19,7 +19,7 @@ import {
 	IconAlertTriangle,
 	IconChevronRight,
 } from "@tabler/icons-react";
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { type CSSProperties, type ReactNode, useId, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ForecastMonthDrawer } from "@/components/ForecastMonthDrawer";
@@ -44,29 +44,14 @@ import type {
 } from "@/lib/types";
 import { headingFont, palette } from "@/theme";
 
-const forecastModes = ["year", "rolling"] as const;
-type ForecastMode = (typeof forecastModes)[number];
-
-function isForecastMode(value: string): value is ForecastMode {
-	return (forecastModes as readonly string[]).includes(value);
-}
-
-const ROLLING_MONTHS = 12;
-
-/**
- * `mode` is only written for the rolling view, so a bare `?year=` link is the
- * calendar-year view. `year` is kept in rolling mode to switch back to it.
- */
 interface ForecastSearch {
 	year: number;
-	mode?: "rolling";
 }
 
 export const Route = createFileRoute("/summary")({
 	component: ForecastPage,
 	validateSearch: (search: Record<string, unknown>): ForecastSearch => {
-		const year = Number(search.year) || new Date().getFullYear();
-		return search.mode === "rolling" ? { year, mode: "rolling" } : { year };
+		return { year: Number(search.year) || new Date().getFullYear() };
 	},
 });
 
@@ -146,57 +131,6 @@ const cardTitleProps = {
 	fz: 15,
 	fw: 600,
 } as const;
-
-interface ModeSwitchProps {
-	mode: ForecastMode;
-	year: number;
-	/** Short labels, stretched to share a phone-width row with the stepper. */
-	compact?: boolean;
-	onChange: (mode: ForecastMode) => void;
-}
-
-function ModeSwitch({
-	mode,
-	year,
-	compact = false,
-	onChange,
-}: ModeSwitchProps) {
-	const { t } = useTranslation();
-	return (
-		<SegmentedControl
-			radius="xl"
-			size="md"
-			flex={compact ? 1 : undefined}
-			aria-label={t("forecast.mode")}
-			value={mode}
-			onChange={(value) => {
-				if (isForecastMode(value)) onChange(value);
-			}}
-			data={[
-				{
-					value: "year",
-					label: compact
-						? t("forecast.modeYearShort")
-						: t("forecast.modeYear", { year }),
-				},
-				{
-					value: "rolling",
-					label: t(
-						compact ? "forecast.modeRollingShort" : "forecast.modeRolling",
-					),
-				},
-			]}
-			styles={{
-				label: {
-					minHeight: 44,
-					display: "flex",
-					alignItems: "center",
-					justifyContent: "center",
-				},
-			}}
-		/>
-	);
-}
 
 interface HeroCardProps {
 	title: ReactNode;
@@ -344,7 +278,6 @@ interface ForecastViewProps {
 	forecast: MonthForecast[];
 	locale: string;
 	firstNegativeMonth: YearMonth | null;
-	showYear: boolean;
 	onSelectMonth: (month: YearMonth) => void;
 }
 
@@ -369,7 +302,6 @@ function BalanceChart({
 	forecast,
 	locale,
 	firstNegativeMonth,
-	showYear,
 	onSelectMonth,
 }: ForecastViewProps) {
 	const { t } = useTranslation();
@@ -518,11 +450,6 @@ function BalanceChart({
 										</Text>
 										{isFirstNegative && <FirstNegativeMarker />}
 									</Group>
-									{showYear && (
-										<Text className="tabular-nums" fz={11} c="dimmed">
-											{m.year}
-										</Text>
-									)}
 								</UnstyledButton>
 							);
 						})}
@@ -552,7 +479,6 @@ function MonthlyTable({
 	forecast,
 	locale,
 	firstNegativeMonth,
-	showYear,
 	onSelectMonth,
 }: ForecastViewProps) {
 	const { t } = useTranslation();
@@ -628,9 +554,7 @@ function MonthlyTable({
 												td="underline"
 												style={{ textUnderlineOffset: 3 }}
 											>
-												{showYear
-													? formatMonthYear(m, locale)
-													: monthName(m.year, m.month, locale, "long")}
+												{monthName(m.year, m.month, locale, "long")}
 											</UnstyledButton>
 											{isCurrent && (
 												<Badge variant="filled" color="forest" tt="none">
@@ -708,7 +632,6 @@ function MonthList({
 	forecast,
 	locale,
 	firstNegativeMonth,
-	showYear,
 	onSelectMonth,
 }: ForecastViewProps) {
 	const { t } = useTranslation();
@@ -736,7 +659,7 @@ function MonthList({
 					{t("forecast.monthlyDetail")}
 				</Title>
 				<Text size="xs" fw={600} c="dimmed">
-					{t("forecast.balance")}
+					{t("forecast.balanceAndCumulative")}
 				</Text>
 			</Group>
 			<Box
@@ -794,7 +717,6 @@ function MonthList({
 									</Group>
 									<Text fz={11} fw={600} c="dimmed">
 										{t(statusLabelKeys[m.status])}
-										{showYear && ` · ${m.year}`}
 									</Text>
 								</div>
 								<Stack gap={3} aria-hidden>
@@ -811,15 +733,19 @@ function MonthList({
 										style={{ borderRadius: 999 }}
 									/>
 								</Stack>
-								<Text
-									className="tabular-nums"
-									fz={15}
-									fw={700}
-									c={balanceTextColor(m.balance)}
-									style={{ whiteSpace: "nowrap" }}
-								>
-									{formatSignedAmount(m.balance)}
-								</Text>
+								<Box ta="right" style={{ whiteSpace: "nowrap" }}>
+									<Text
+										className="tabular-nums"
+										fz={15}
+										fw={700}
+										c={balanceTextColor(m.balance)}
+									>
+										{formatSignedAmount(m.balance)}
+									</Text>
+									<Text className="tabular-nums" fz={12} fw={600} c="dimmed">
+										{formatSignedAmount(m.cumulative)}
+									</Text>
+								</Box>
 								<IconChevronRight
 									aria-hidden
 									size={18}
@@ -910,98 +836,189 @@ function RemainingDaysBadge({ count }: { count: number }) {
 	);
 }
 
-interface MobileHeroProps {
-	title: string;
-	headline: number;
-	forecast: MonthForecast[];
+interface DailyBudgetCardProps {
 	dailyBudget: number | null;
 	daysLeft: number;
+	yearProgress: number;
+	compact: boolean;
+}
+
+function DailyBudgetCard({
+	dailyBudget,
+	daysLeft,
+	yearProgress,
+	compact,
+}: DailyBudgetCardProps) {
+	const { t } = useTranslation();
+	return (
+		<HeroCard
+			variant="filled"
+			title={t("forecast.dailyBudget")}
+			titleAside={<RemainingDaysBadge count={daysLeft} />}
+		>
+			<BigAmount
+				value={dailyBudget === null ? "—" : formatAmount(dailyBudget)}
+				color={
+					dailyBudget !== null && dailyBudget < 0 ? "tangerine.3" : undefined
+				}
+				fz={compact ? 36 : undefined}
+			/>
+			<Text size="sm" c="forest.1">
+				{dailyBudget === null
+					? t("forecast.dailyBudgetOver")
+					: dailyBudget < 0
+						? t("forecast.dailyBudgetNegativeHint")
+						: t("forecast.dailyBudgetHint")}
+			</Text>
+			<Stack gap={6} mt="auto">
+				<Text size="sm" c="forest.1">
+					{t("forecast.yearProgress", { percent: Math.round(yearProgress) })}
+				</Text>
+				<Progress
+					value={yearProgress}
+					color="gold.5"
+					size={8}
+					styles={{
+						root: { backgroundColor: "var(--mantine-color-forest-8)" },
+					}}
+				/>
+			</Stack>
+		</HeroCard>
+	);
+}
+
+interface SurplusCardProps {
+	year: number;
 	income: number;
 	expenses: number;
 	savings: number;
+	unbudgetedRate: number | null;
+	compact: boolean;
 }
 
-function MobileHero({
-	title,
-	headline,
-	forecast,
-	dailyBudget,
-	daysLeft,
+function SurplusCard({
+	year,
 	income,
 	expenses,
 	savings,
-}: MobileHeroProps) {
+	unbudgetedRate,
+	compact,
+}: SurplusCardProps) {
 	const { t } = useTranslation();
-	const titleId = useId();
-	const strip = [
-		{
-			label: t("forecast.totalIncome"),
-			amount: income,
-			tone: budgetTypeTones.income,
-		},
-		{
-			label: t("forecast.totalExpenses"),
-			amount: expenses,
-			tone: budgetTypeTones.expense,
-		},
-		{
-			label: t("forecast.totalSavings"),
-			amount: savings,
-			tone: budgetTypeTones.savings,
-		},
-	];
+	const surplus = income + expenses;
+
+	function shareOfIncome(amount: number): number {
+		return income > 0 ? Math.abs(amount) / income : 0;
+	}
+
 	return (
-		<Paper component="section" aria-labelledby={titleId} p="md">
-			<Stack gap={12}>
-				<div>
-					<Text {...cardTitleProps} id={titleId} fz={13} c="dimmed">
-						{title}
+		<HeroCard title={t("forecast.surplusTitle", { year })}>
+			<BigAmount
+				value={formatSignedAmount(surplus)}
+				color={balanceTextColor(surplus)}
+				fz={compact ? 22 : undefined}
+			/>
+			{compact ? (
+				<Text size="xs" c="dimmed">
+					{t("forecast.surplusHintShort")}
+				</Text>
+			) : (
+				<>
+					<Text size="sm" c="dimmed">
+						{t("forecast.surplusHint")}
 					</Text>
-					<BigAmount
-						value={formatSignedAmount(headline)}
-						color={balanceTextColor(headline)}
-						fz={36}
+					<TotalRow
+						label={t("forecast.totalIncome")}
+						amount={income}
+						ratio={income > 0 ? 1 : 0}
+						tone={budgetTypeTones.income}
 					/>
-				</div>
-				<CumulativeSparkline forecast={forecast} />
-				<Group justify="space-between" align="center" gap="xs" wrap="nowrap">
-					<Text size="sm" fw={600} c="dimmed">
-						{t("forecast.dailyBudget")}
-					</Text>
-					<Group gap={8} wrap="nowrap">
-						<Text
-							className="tabular-nums"
-							fw={700}
-							c={
-								dailyBudget !== null && dailyBudget < 0
-									? budgetTypeTones.expense.text
-									: undefined
-							}
-						>
-							{dailyBudget === null ? "—" : formatAmount(dailyBudget)}
+					<TotalRow
+						label={t("forecast.totalExpenses")}
+						amount={expenses}
+						ratio={shareOfIncome(expenses)}
+						tone={budgetTypeTones.expense}
+					/>
+					<TotalRow
+						label={t("forecast.totalSavings")}
+						amount={savings}
+						ratio={shareOfIncome(savings)}
+						tone={budgetTypeTones.savings}
+					/>
+					{unbudgetedRate !== null && (
+						<Text size="sm" c="dimmed" mt="auto">
+							{t("forecast.unbudgetedRate", {
+								amount: formatAmount(-unbudgetedRate),
+							})}
 						</Text>
-						<RemainingDaysBadge count={daysLeft} />
-					</Group>
-				</Group>
-				<SimpleGrid
-					cols={3}
-					spacing={8}
-					pt={12}
-					style={{ borderTop: `1px solid ${palette.divider}` }}
-				>
-					{strip.map(({ label, amount, tone }) => (
-						<div key={label}>
-							<Text fz={12} fw={600} c="dimmed">
-								{label}
-							</Text>
-							<Text className="tabular-nums" fz={14} fw={700} c={tone.text}>
-								{formatAmount(amount)}
-							</Text>
-						</div>
-					))}
-				</SimpleGrid>
-			</Stack>
-		</Paper>
+					)}
+				</>
+			)}
+		</HeroCard>
+	);
+}
+
+interface BalanceCardProps {
+	year: number;
+	startingBalance: number | null;
+	endBalance: number;
+	forecast: MonthForecast[];
+	compact: boolean;
+}
+
+function BalanceCard({
+	year,
+	startingBalance,
+	endBalance,
+	forecast,
+	compact,
+}: BalanceCardProps) {
+	const { t, i18n } = useTranslation();
+	const title = t("forecast.projectedBalance", {
+		date: longDate(new Date(year, 11, 31), i18n.language),
+	});
+	if (startingBalance === null) {
+		return (
+			<HeroCard title={title}>
+				<BigAmount value="—" color="dimmed" fz={compact ? 22 : undefined} />
+				<Text size={compact ? "xs" : "sm"} c="dimmed">
+					{t("forecast.noBalanceHint")}{" "}
+					<Anchor component={Link} to="/settings" inherit>
+						{t("forecast.noBalanceLink")}
+					</Anchor>
+				</Text>
+			</HeroCard>
+		);
+	}
+	const start = t("forecast.startingBalance", {
+		date: longDate(new Date(year, 0, 1), i18n.language),
+		amount: formatAmount(startingBalance),
+	});
+	return (
+		<HeroCard title={title}>
+			<BigAmount
+				value={formatSignedAmount(endBalance)}
+				color={balanceTextColor(endBalance)}
+				fz={compact ? 22 : undefined}
+			/>
+			{compact ? (
+				<Text size="xs" c="dimmed">
+					{start}
+				</Text>
+			) : (
+				<>
+					<Text size="sm" c="dimmed">
+						{t("forecast.projectedBalanceHint")}
+					</Text>
+					<Stack gap="xs" mt="auto">
+						<CumulativeSparkline forecast={forecast} />
+						<Text size="xs" c="dimmed">
+							{start}
+						</Text>
+					</Stack>
+				</>
+			)}
+		</HeroCard>
 	);
 }
 
@@ -1010,14 +1027,7 @@ function ForecastPage() {
 	const navigate = useNavigate();
 	const search = Route.useSearch();
 	const selectedYear = search.year;
-	const mode: ForecastMode = search.mode ?? "year";
-	const rolling = mode === "rolling";
-	const today = new Date();
-	const forecastQuery = useForecast(
-		rolling ? today.getFullYear() : selectedYear,
-		rolling ? today.getMonth() + 1 : 1,
-		rolling ? ROLLING_MONTHS : 12,
-	);
+	const forecastQuery = useForecast(selectedYear, 1, 12);
 	const { isLoading, isError } = forecastQuery;
 	const [selectedMonth, setSelectedMonth] = useState<YearMonth | null>(null);
 	const isMobile = useBelowBreakpoint("sm");
@@ -1026,54 +1036,21 @@ function ForecastPage() {
 	const totals = forecastQuery.data?.totals;
 	const endBalance = Number(forecastQuery.data?.endBalance ?? 0);
 	const rawStartingBalance = forecastQuery.data?.startingBalance ?? null;
-	const firstMonth = forecast[0];
-	const lastMonth = forecast[forecast.length - 1];
+	const startingBalance =
+		rawStartingBalance === null ? null : Number(rawStartingBalance);
 
 	const daysLeft = forecastQuery.data?.daysLeft ?? 0;
 	const rawDailyBudget = forecastQuery.data?.dailyBudget ?? null;
 	const dailyBudget = rawDailyBudget === null ? null : Number(rawDailyBudget);
 	const firstNegativeMonth = forecastQuery.data?.firstNegativeMonth ?? null;
-	const horizonDays = forecast.reduce((sum, m) => sum + daysInMonth(m), 0);
+	const yearDays = forecast.reduce((sum, m) => sum + daysInMonth(m), 0);
+	const yearProgress =
+		yearDays > 0 ? ((yearDays - daysLeft) / yearDays) * 100 : 0;
 
-	const totalIncome = Number(totals?.income ?? 0);
-	const totalExpenses = Number(totals?.expenses ?? 0);
-	const totalSavings = Number(totals?.savings ?? 0);
-	const unbudgetedRate = Number(forecastQuery.data?.unbudgetedRate ?? 0);
 	const forecastsUnbudgeted = forecast.some((m) => m.unbudgetedForecast !== 0);
-
-	const surplus = totalIncome + totalExpenses;
-
-	const showYear =
-		firstMonth !== undefined &&
-		lastMonth !== undefined &&
-		firstMonth.year !== lastMonth.year;
-	const horizonEnd = lastMonth
-		? longDate(new Date(lastMonth.year, lastMonth.month, 0), i18n.language)
-		: "";
-
-	const savedLine = (
-		<AmountLine
-			label={t("forecast.savedBy", { date: horizonEnd })}
-			amount={formatAmount(-totalSavings)}
-			dot={budgetTypeTones.savings.fill}
-			color={budgetTypeTones.savings.text}
-		/>
-	);
-
-	const headlineTitle =
-		rawStartingBalance !== null
-			? t("forecast.projectedBalance", { date: horizonEnd })
-			: rolling
-				? t("forecast.rollingSurplusTitle", { count: forecast.length })
-				: t("forecast.surplusTitle", { year: selectedYear });
-	const headline = rawStartingBalance !== null ? endBalance : surplus;
-
-	const periodProgress =
-		horizonDays > 0 ? ((horizonDays - daysLeft) / horizonDays) * 100 : 0;
-
-	function shareOfIncome(amount: number): number {
-		return totalIncome > 0 ? Math.abs(amount) / totalIncome : 0;
-	}
+	const unbudgetedRate = forecastsUnbudgeted
+		? Number(forecastQuery.data?.unbudgetedRate ?? 0)
+		: null;
 
 	function navigateYear(delta: number) {
 		navigate({
@@ -1082,35 +1059,44 @@ function ForecastPage() {
 		});
 	}
 
-	function switchMode(next: ForecastMode) {
-		navigate({
-			to: "/summary",
-			search:
-				next === "rolling"
-					? { year: selectedYear, mode: "rolling" }
-					: { year: selectedYear },
-		});
-	}
-
-	const periodControls = (
-		<>
-			<ModeSwitch
-				mode={mode}
-				year={selectedYear}
-				compact={isMobile}
-				onChange={switchMode}
-			/>
-			{!rolling && <YearStepper year={selectedYear} onChange={navigateYear} />}
-		</>
+	const yearStepper = (
+		<YearStepper year={selectedYear} onChange={navigateYear} />
 	);
 
 	const viewProps: ForecastViewProps = {
 		forecast,
 		locale: i18n.language,
 		firstNegativeMonth,
-		showYear,
 		onSelectMonth: setSelectedMonth,
 	};
+
+	const dailyBudgetCard = (
+		<DailyBudgetCard
+			dailyBudget={dailyBudget}
+			daysLeft={daysLeft}
+			yearProgress={yearProgress}
+			compact={isMobile}
+		/>
+	);
+	const surplusCard = (
+		<SurplusCard
+			year={selectedYear}
+			income={Number(totals?.income ?? 0)}
+			expenses={Number(totals?.expenses ?? 0)}
+			savings={Number(totals?.savings ?? 0)}
+			unbudgetedRate={unbudgetedRate}
+			compact={isMobile}
+		/>
+	);
+	const balanceCard = (
+		<BalanceCard
+			year={selectedYear}
+			startingBalance={startingBalance}
+			endBalance={endBalance}
+			forecast={forecast}
+			compact={isMobile}
+		/>
+	);
 
 	return (
 		<div className="h-full overflow-auto">
@@ -1125,13 +1111,9 @@ function ForecastPage() {
 					title={t("forecast.title")}
 					subtitle={t("forecast.subtitle")}
 					subtitleInfoLabel={t("forecast.subtitleInfo")}
-					actions={isMobile ? undefined : periodControls}
+					actions={isMobile ? undefined : yearStepper}
 				/>
-				{isMobile && (
-					<Group gap="xs" wrap="nowrap">
-						{periodControls}
-					</Group>
-				)}
+				{isMobile && yearStepper}
 
 				{isLoading && (
 					<Group justify="center" py="xl">
@@ -1164,153 +1146,21 @@ function ForecastPage() {
 						)}
 						{isMobile ? (
 							<>
-								<MobileHero
-									title={headlineTitle}
-									headline={headline}
-									forecast={forecast}
-									dailyBudget={dailyBudget}
-									daysLeft={daysLeft}
-									income={totalIncome}
-									expenses={totalExpenses}
-									savings={totalSavings}
-								/>
+								{dailyBudgetCard}
+								<SimpleGrid cols={2} spacing="sm">
+									{surplusCard}
+									{balanceCard}
+								</SimpleGrid>
 								<MonthList {...viewProps} />
 							</>
 						) : (
 							<>
 								<SimpleGrid cols={{ base: 1, md: 3 }} spacing="md">
-									<HeroCard
-										variant="filled"
-										title={t("forecast.dailyBudget")}
-										titleAside={<RemainingDaysBadge count={daysLeft} />}
-									>
-										<BigAmount
-											value={
-												dailyBudget === null ? "—" : formatAmount(dailyBudget)
-											}
-											color={
-												dailyBudget !== null && dailyBudget < 0
-													? "tangerine.3"
-													: undefined
-											}
-										/>
-										<Text size="sm" c="forest.1">
-											{dailyBudget === null
-												? t("forecast.dailyBudgetOver")
-												: dailyBudget < 0
-													? t("forecast.dailyBudgetNegativeHint")
-													: t("forecast.dailyBudgetHint")}
-										</Text>
-										<Stack gap={6} mt="auto">
-											<Text size="sm" c="forest.1">
-												{t(
-													rolling
-														? "forecast.periodProgress"
-														: "forecast.yearProgress",
-													{ percent: Math.round(periodProgress) },
-												)}
-											</Text>
-											<Progress
-												value={periodProgress}
-												color="gold.5"
-												size={8}
-												styles={{
-													root: {
-														backgroundColor: "var(--mantine-color-forest-8)",
-													},
-												}}
-											/>
-										</Stack>
-									</HeroCard>
-
-									{rawStartingBalance !== null ? (
-										<HeroCard title={headlineTitle}>
-											<BigAmount
-												value={formatSignedAmount(headline)}
-												color={balanceTextColor(headline)}
-											/>
-											<Text size="sm" c="dimmed">
-												{t("forecast.projectedBalanceHint")}
-											</Text>
-											<Stack gap="xs" mt="auto">
-												{savedLine}
-												{firstMonth && (
-													<Text size="xs" c="dimmed">
-														{t("forecast.startingBalance", {
-															date: longDate(
-																new Date(
-																	firstMonth.year,
-																	firstMonth.month - 1,
-																	1,
-																),
-																i18n.language,
-															),
-															amount: formatAmount(rawStartingBalance),
-														})}
-													</Text>
-												)}
-											</Stack>
-										</HeroCard>
-									) : (
-										<HeroCard title={headlineTitle}>
-											<BigAmount
-												value={formatSignedAmount(headline)}
-												color={balanceTextColor(headline)}
-											/>
-											<Text size="sm" c="dimmed">
-												{t("forecast.surplusHint")}
-											</Text>
-											<Stack gap="xs" mt="auto">
-												{savedLine}
-												<AmountLine
-													label={t("forecast.surplusLeftOnAccount")}
-													amount={formatSignedAmount(endBalance)}
-													dot={neutralTone.fill}
-													color={balanceTextColor(endBalance)}
-												/>
-											</Stack>
-										</HeroCard>
-									)}
-
-									<HeroCard
-										title={
-											rolling
-												? t("forecast.rollingTotalsTitle", {
-														count: forecast.length,
-													})
-												: t("forecast.totalsTitle", { year: selectedYear })
-										}
-									>
-										<TotalRow
-											label={t("forecast.totalIncome")}
-											amount={totalIncome}
-											ratio={totalIncome > 0 ? 1 : 0}
-											tone={budgetTypeTones.income}
-										/>
-										<TotalRow
-											label={t("forecast.totalExpenses")}
-											amount={totalExpenses}
-											ratio={shareOfIncome(totalExpenses)}
-											tone={budgetTypeTones.expense}
-										/>
-										<TotalRow
-											label={t("forecast.totalSavings")}
-											amount={totalSavings}
-											ratio={shareOfIncome(totalSavings)}
-											tone={budgetTypeTones.savings}
-										/>
-										{forecastsUnbudgeted && (
-											<Text size="sm" c="dimmed" mt="auto">
-												{t("forecast.unbudgetedRate", {
-													amount: formatAmount(-unbudgetedRate),
-												})}
-											</Text>
-										)}
-									</HeroCard>
+									{dailyBudgetCard}
+									{surplusCard}
+									{balanceCard}
 								</SimpleGrid>
-
 								<BalanceChart {...viewProps} />
-
 								<MonthlyTable {...viewProps} />
 							</>
 						)}
