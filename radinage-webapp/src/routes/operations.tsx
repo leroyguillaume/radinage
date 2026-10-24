@@ -20,6 +20,8 @@ import {
 import { MonthPickerInput } from "@mantine/dates";
 import {
 	IconAlertCircle,
+	IconAlertTriangle,
+	IconArrowRight,
 	IconCheck,
 	IconChevronDown,
 	IconChevronLeft,
@@ -46,7 +48,7 @@ import {
 	getBudgetedAmountForMonth,
 	getUnbudgetedForecastForMonth,
 } from "@/lib/budget-utils";
-import { formatAmount, formatSignedAmount } from "@/lib/format";
+import { formatAmount, formatIsoDate, formatSignedAmount } from "@/lib/format";
 import {
 	useBudgets,
 	useCategories,
@@ -60,6 +62,7 @@ import {
 	neutralTone,
 	type Tone,
 } from "@/lib/tones";
+import { pairTransfers, type TransferPair } from "@/lib/transfer-pairs";
 import { transferFlow, transferTone } from "@/lib/transfers";
 import type {
 	AccountResponse,
@@ -1089,16 +1092,22 @@ function BudgetGroupRow({
 			) : (
 				<Box className={GROUP_ROW_CLASS}>{cells}</Box>
 			)}
-			{opened && hasOps && (
-				<OperationList
-					entries={group.entries}
-					handlers={handlers}
-					selection={selection}
-				/>
-			)}
+			{opened &&
+				hasOps &&
+				(group.budgetType === "transfers" ? (
+					<TransferPairList entries={group.entries} handlers={handlers} />
+				) : (
+					<OperationList
+						entries={group.entries}
+						handlers={handlers}
+						selection={selection}
+					/>
+				))}
 		</Box>
 	);
 }
+
+const OPERATION_LIST_CLASS = "list-none px-4 pt-1 pb-3 sm:pr-5 sm:pl-14";
 
 function OperationList({
 	entries,
@@ -1109,69 +1118,240 @@ function OperationList({
 	handlers: OperationHandlers;
 	selection?: EntrySelection | null;
 }) {
-	const { t } = useTranslation();
 	return (
 		<Box
 			component="ul"
 			m={0}
 			bg={palette.surfaceMuted}
-			className="list-none px-4 pt-1 pb-3 sm:pr-5 sm:pl-14"
+			className={OPERATION_LIST_CLASS}
 			style={{ borderTop: `1px solid ${palette.divider}` }}
 		>
-			{entries.map((entry) => {
-				const category = entry.categoryId
-					? handlers.categories.find((c) => c.id === entry.categoryId)
-					: undefined;
-				const budget = entry.budgetId
-					? handlers.budgets.find((b) => b.id === entry.budgetId)
-					: undefined;
-				return (
-					<OperationRow
-						key={entry.key}
-						op={entry.operation}
-						amount={entry.amount}
-						date={entry.date}
-						category={
-							category && (
-								<CategoryBadge
-									category={category}
-									inherited={entry.categoryFromBudget}
-								/>
-							)
-						}
-						budget={budget?.label ?? ""}
-						badge={
-							entry.part && (
-								<Tooltip
-									label={t("operations.split.splitInto", {
-										count: entry.part.count,
-									})}
-								>
-									<Badge
-										size="sm"
-										color="forest"
-										c="forest.8"
-										tt="none"
-										flex="none"
-									>
-										{t("operations.split.partBadge", entry.part)}
-									</Badge>
-								</Tooltip>
-							)
-						}
-						onOpen={handlers.onOpen}
-						selection={
-							selection
-								? {
-										selected: selection.ids.has(entry.operation.id),
-										onToggle: selection.onToggle,
-									}
-								: undefined
-						}
-					/>
-				);
-			})}
+			{entries.map((entry) => (
+				<EntryRow
+					key={entry.key}
+					entry={entry}
+					handlers={handlers}
+					selection={selection}
+				/>
+			))}
 		</Box>
+	);
+}
+
+function EntryRow({
+	entry,
+	handlers,
+	selection,
+}: {
+	entry: OperationEntry;
+	handlers: OperationHandlers;
+	selection: EntrySelection | null;
+}) {
+	const { t } = useTranslation();
+	const category = entry.categoryId
+		? handlers.categories.find((c) => c.id === entry.categoryId)
+		: undefined;
+	const budget = entry.budgetId
+		? handlers.budgets.find((b) => b.id === entry.budgetId)
+		: undefined;
+	return (
+		<OperationRow
+			op={entry.operation}
+			amount={entry.amount}
+			date={entry.date}
+			category={
+				category && (
+					<CategoryBadge
+						category={category}
+						inherited={entry.categoryFromBudget}
+					/>
+				)
+			}
+			budget={budget?.label ?? ""}
+			badge={
+				entry.part && (
+					<Tooltip
+						label={t("operations.split.splitInto", {
+							count: entry.part.count,
+						})}
+					>
+						<Badge size="sm" color="forest" c="forest.8" tt="none" flex="none">
+							{t("operations.split.partBadge", entry.part)}
+						</Badge>
+					</Tooltip>
+				)
+			}
+			onOpen={handlers.onOpen}
+			selection={
+				selection
+					? {
+							selected: selection.ids.has(entry.operation.id),
+							onToggle: selection.onToggle,
+						}
+					: undefined
+			}
+		/>
+	);
+}
+
+/** The transfers of `entries`, one row each, warning about those missing their other side. */
+function TransferPairList({
+	entries,
+	handlers,
+}: {
+	entries: OperationEntry[];
+	handlers: OperationHandlers;
+}) {
+	const { t } = useTranslation();
+	const pairs = pairTransfers(entries, handlers.accounts);
+	const missing = pairs.filter((p) => p.status === "missing").length;
+	return (
+		<Box
+			bg={palette.surfaceMuted}
+			style={{ borderTop: `1px solid ${palette.divider}` }}
+		>
+			{missing > 0 && (
+				<Alert
+					icon={<IconAlertTriangle size={16} />}
+					color="tangerine"
+					mx={{ base: "md", sm: 20 }}
+					mt="sm"
+					title={t("transfers.pairs.missingCount", { count: missing })}
+				>
+					{t("transfers.pairs.missingHint")}
+				</Alert>
+			)}
+			<Box component="ul" m={0} className={OPERATION_LIST_CLASS}>
+				{pairs.map((pair) => (
+					<TransferPairRow key={pair.key} pair={pair} handlers={handlers} />
+				))}
+			</Box>
+		</Box>
+	);
+}
+
+function TransferPairRow({
+	pair,
+	handlers,
+}: {
+	pair: TransferPair;
+	handlers: OperationHandlers;
+}) {
+	const { t, i18n } = useTranslation();
+	const [opened, setOpened] = useState(false);
+	const accountName = (id: string) =>
+		handlers.accounts.find((a) => a.id === id)?.name ?? "?";
+	const from = accountName(pair.fromAccountId);
+	const to = accountName(pair.toAccountId);
+	const shown = pair.debit ?? pair.credit;
+	const flow = shown && transferFlow(shown.operation, handlers.accounts);
+	const missingSide =
+		pair.status === "missing"
+			? pair.debit === null
+				? t("transfers.pairs.missingDebit", { account: from })
+				: t("transfers.pairs.missingCredit", { account: to })
+			: null;
+
+	return (
+		<Box
+			component="li"
+			style={{
+				borderBottom: `1px dashed ${palette.border}`,
+				boxShadow: missingSide
+					? "inset 3px 0 0 var(--mantine-color-tangerine-4)"
+					: undefined,
+			}}
+		>
+			<UnstyledButton
+				aria-expanded={opened}
+				onClick={() => setOpened((o) => !o)}
+				className="grid min-h-[44px] w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1 py-2 pl-2 text-left"
+			>
+				<Group gap={6} wrap="wrap" miw={0}>
+					<AccountChip name={from} />
+					<IconArrowRight
+						size={14}
+						color={palette.dimmed}
+						aria-label={t("transfers.pairs.to")}
+					/>
+					<AccountChip name={to} />
+				</Group>
+				<Text
+					fw={700}
+					className="tabular-nums"
+					c={flow ? transferTone(flow).text : undefined}
+					style={{ whiteSpace: "nowrap" }}
+				>
+					{formatAmount(pair.amount)}
+				</Text>
+				<Group gap="xs" wrap="wrap" className="col-span-2">
+					<Text span size="sm" c="dimmed" className="tabular-nums">
+						{formatIsoDate(pair.date, i18n.language)}
+					</Text>
+					{missingSide ? (
+						<Badge
+							size="sm"
+							color="tangerine"
+							c="tangerine.9"
+							variant="light"
+							tt="none"
+							leftSection={<IconAlertTriangle size={12} aria-hidden />}
+						>
+							{missingSide}
+						</Badge>
+					) : (
+						<Text span size="sm" c="dimmed">
+							{pair.status === "linked"
+								? t(
+										pair.debit && pair.credit
+											? "transfers.pairs.linked"
+											: "transfers.pairs.linkedElsewhere",
+									)
+								: t("transfers.pairs.oneSided", {
+										account: pair.debit ? to : from,
+									})}
+						</Text>
+					)}
+					<IconChevronDown
+						size={14}
+						color={palette.dimmed}
+						aria-hidden
+						style={{ transform: opened ? "rotate(180deg)" : undefined }}
+					/>
+				</Group>
+			</UnstyledButton>
+			{opened && (
+				<Box component="ul" m={0} p={0} className="list-none pb-2 pl-2">
+					{[pair.debit, pair.credit].map((entry) =>
+						entry ? (
+							<EntryRow
+								key={entry.key}
+								entry={entry}
+								handlers={handlers}
+								selection={null}
+							/>
+						) : null,
+					)}
+				</Box>
+			)}
+		</Box>
+	);
+}
+
+function AccountChip({ name }: { name: string }) {
+	return (
+		<Text
+			span
+			size="sm"
+			fw={600}
+			px={8}
+			bg={palette.surface}
+			truncate
+			maw="100%"
+			style={{ border: `1px solid ${palette.border}`, borderRadius: 6 }}
+		>
+			{name}
+		</Text>
 	);
 }
 

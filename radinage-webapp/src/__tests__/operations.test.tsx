@@ -1724,6 +1724,18 @@ describe("transfers", () => {
 		],
 	};
 
+	async function openTransfer(
+		user: ReturnType<typeof userEvent.setup>,
+		pair: RegExp,
+		label: RegExp,
+	) {
+		const section = within(
+			await screen.findByRole("region", { name: "Virements" }),
+		);
+		await user.click(await section.findByRole("button", { name: pair }));
+		await user.click(section.getByRole("button", { name: label }));
+	}
+
 	function statText(label: string): string {
 		return (
 			screen
@@ -1738,10 +1750,10 @@ describe("transfers", () => {
 		await renderOperationsPage();
 
 		const section = await screen.findByRole("region", { name: "Virements" });
-		expect(within(section).getByText("Vers Livret A")).toBeInTheDocument();
 		expect(
-			within(section).getByText("Depuis Compte joint"),
+			within(section).getByText("Un seul côté : Livret A n'est pas importé"),
 		).toBeInTheDocument();
+		expect(within(section).queryByText(/VIR INTERNE/)).not.toBeInTheDocument();
 		const daily = screen.getByRole("region", {
 			name: "Opérations quotidiennes",
 		});
@@ -1751,6 +1763,57 @@ describe("transfers", () => {
 		expect(statText("Revenus")).toMatch(/0,00/);
 		expect(statText("Épargne")).toMatch(/-300,00/);
 		expect(statText("Virements internes")).toMatch(/\+450,00/);
+	});
+
+	it("warns about a transfer whose other side was not found", async () => {
+		setupMocks({ budgets: [], operations });
+		await renderOperationsPage();
+
+		const section = within(
+			await screen.findByRole("region", { name: "Virements" }),
+		);
+		expect(
+			section.getByText("1 virement sans contrepartie"),
+		).toBeInTheDocument();
+		expect(
+			section.getByText("Débit introuvable sur Compte joint"),
+		).toBeInTheDocument();
+	});
+
+	it("shows both linked sides of a transfer in one row", async () => {
+		const out = op("p1", "VIR VERS COMPTE JOINT", "-800.00", {
+			accountId: "account-2",
+			ruleId: null,
+			operationId: "p2",
+		});
+		const back = {
+			...op("p2", "VIR RECU PERSO", "800.00", {
+				accountId: "account-1",
+				ruleId: null,
+				operationId: "p1",
+			}),
+			accountId: "account-2",
+		};
+		setupMocks({ budgets: [], operations: { operations: [out, back] } });
+		await renderOperationsPage();
+		const user = userEvent.setup();
+
+		const section = within(
+			await screen.findByRole("region", { name: "Virements" }),
+		);
+		expect(section.queryByText(/sans contrepartie/)).not.toBeInTheDocument();
+		const pair = section.getByRole("button", {
+			name: /Les deux côtés sont liés/,
+		});
+		expect(pair).toHaveTextContent(/Compte perso.*Compte joint.*800,00/);
+
+		await user.click(pair);
+		expect(
+			section.getByRole("button", { name: /VIR VERS COMPTE JOINT/ }),
+		).toBeInTheDocument();
+		expect(
+			section.getByRole("button", { name: /VIR RECU PERSO/ }),
+		).toBeInTheDocument();
 	});
 
 	it("makes an operation a transfer from its sheet", async () => {
@@ -1778,9 +1841,7 @@ describe("transfers", () => {
 		setupMocks({ budgets: [], operations });
 		await renderOperationsPage();
 		const user = userEvent.setup();
-		await user.click(
-			await screen.findByRole("button", { name: /VIR INTERNE VERS LIVRET A/ }),
-		);
+		await openTransfer(user, /Un seul côté/, /VIR INTERNE VERS LIVRET A/);
 		const sheet = within(await screen.findByRole("dialog"));
 
 		expect(
@@ -1840,9 +1901,7 @@ describe("transfers", () => {
 		});
 		await renderOperationsPage();
 		const user = userEvent.setup();
-		await user.click(
-			await screen.findByRole("button", { name: /VIR SEPA COMPTE JOINT/ }),
-		);
+		await openTransfer(user, /Débit introuvable/, /VIR SEPA COMPTE JOINT/);
 		const sheet = within(await screen.findByRole("dialog"));
 
 		await user.click(
