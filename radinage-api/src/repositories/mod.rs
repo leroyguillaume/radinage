@@ -17,8 +17,9 @@ pub use category::{CategoryRepository, PgCategoryRepository};
 pub use ignore_rule::{IgnoreRuleRepository, PgIgnoreRuleRepository};
 pub use import_profile::{ImportProfileRepository, PgImportProfileRepository};
 pub use operation::{
-    CategoryFilter, CategoryTotal, ListOperationsParams, OperationDirection, OperationRepository,
-    OperationSortField, OperationTotals, PgOperationRepository, SummaryCategory, SummaryRow,
+    CategoryFilter, CategoryTotal, IgnoredFilter, ListOperationsParams, OperationDirection,
+    OperationRepository, OperationSortField, OperationTotals, PgOperationRepository,
+    SummaryCategory, SummaryRow,
 };
 pub use user::{PgUserRepository, UserRepository};
 

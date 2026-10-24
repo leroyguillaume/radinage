@@ -311,11 +311,9 @@ function FilterControls({
 			<Box className="flex min-h-[44px] items-end sm:pb-2">
 				<Checkbox
 					size="md"
-					label={t("search.includeIgnored")}
-					checked={filters.includeIgnored ?? false}
-					onChange={(e) =>
-						onChange({ includeIgnored: e.currentTarget.checked })
-					}
+					label={t("search.onlyIgnored")}
+					checked={filters.ignored ?? false}
+					onChange={(e) => onChange({ ignored: e.currentTarget.checked })}
 				/>
 			</Box>
 		</SimpleGrid>
@@ -388,11 +386,11 @@ function useFilterChips(
 			patch: { dateFrom: undefined, dateTo: undefined },
 		});
 	}
-	if (filters.includeIgnored) {
+	if (filters.ignored) {
 		chips.push({
 			key: "ignored",
-			label: t("search.includeIgnored"),
-			patch: { includeIgnored: undefined },
+			label: t("search.onlyIgnored"),
+			patch: { ignored: undefined },
 		});
 	}
 	return chips;

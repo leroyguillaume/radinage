@@ -7,7 +7,7 @@ use crate::{
     error::{AppError, AppResult},
     handlers::{categories::ensure_category_is_users, ignore_rules::auto_ignore_operation},
     repositories::{
-        BudgetRepository, CategoryFilter, CategoryRepository, IgnoreRuleRepository,
+        BudgetRepository, CategoryFilter, CategoryRepository, IgnoreRuleRepository, IgnoredFilter,
         ListOperationsParams, OperationDirection, OperationRepository, OperationSortField,
         OperationTotals, SortOrder,
     },
@@ -237,9 +237,9 @@ pub struct ListOperationsQuery {
     /// Number of results per page (1–500, default: 100).
     #[schemars(range(min = 1, max = 500), default = "default_operations_page_size")]
     pub page_size: Option<u32>,
-    /// Include ignored operations in results (default: false).
+    /// Include only ignored operations, instead of leaving them out (default: false).
     #[serde(default)]
-    pub include_ignored: bool,
+    pub ignored: bool,
     /// Include only operations counting towards one of these categories: an unsplit
     /// operation through its effective category, a split one through any of its parts.
     /// Repeat the parameter for several categories.
@@ -343,7 +343,11 @@ pub async fn list_operations<U, O: OperationRepository, B, P, C, R>(
         order: q.order.unwrap_or_default(),
         limit: page_size as i64,
         offset: ((page - 1) * page_size) as i64,
-        include_ignored: q.include_ignored,
+        ignored: if q.ignored {
+            IgnoredFilter::Only
+        } else {
+            IgnoredFilter::Excluded
+        },
         category: CategoryFilter {
             category_ids: q.category_id,
             uncategorized: q.uncategorized,
@@ -1819,6 +1823,15 @@ mod tests {
                 && params.direction == Some(OperationDirection::Expense)
                 && params.amount_min == Some(Decimal::new(5, 0))
                 && params.amount_max == Some(Decimal::new(505, 1))
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    async fn list_operations_keeps_only_ignored_operations_when_asked() {
+        expect_list_params("", |params| params.ignored == IgnoredFilter::Excluded).await;
+        expect_list_params("ignored=true", |params| {
+            params.ignored == IgnoredFilter::Only
         })
         .await;
     }

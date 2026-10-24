@@ -294,6 +294,18 @@ describe("SearchPage", () => {
 		await waitFor(() => expect(lastSearch().get("direction")).toBe("expense"));
 	});
 
+	it("searches only the ignored operations when asked", async () => {
+		await renderSearchPage();
+		await screen.findByText("LOYER FEVRIER");
+		expect(lastSearch().has("ignored")).toBe(false);
+
+		fireEvent.click(
+			screen.getByRole("checkbox", { name: "Ignorées seulement" }),
+		);
+
+		await waitFor(() => expect(lastSearch().get("ignored")).toBe("true"));
+	});
+
 	it("does not send an invalid amount", async () => {
 		await renderSearchPage();
 		await screen.findByText("LOYER FEVRIER");
@@ -308,13 +320,13 @@ describe("SearchPage", () => {
 
 	it("restores the filters of a shared link", async () => {
 		await renderSearchPage(
-			'/search?budgetIds=["b-rent"]&includeIgnored=true&sort=amount&order=asc',
+			'/search?budgetIds=["b-rent"]&ignored=true&sort=amount&order=asc',
 		);
 		await screen.findByText("LOYER FEVRIER");
 
 		const params = lastSearch();
 		expect(params.getAll("budgetId")).toEqual(["b-rent"]);
-		expect(params.get("includeIgnored")).toBe("true");
+		expect(params.get("ignored")).toBe("true");
 		expect(params.get("sort")).toBe("amount");
 		expect(params.get("order")).toBe("asc");
 	});
@@ -404,7 +416,7 @@ describe("SearchPage", () => {
 		setupMocks(() =>
 			page([operation({ label: "REMBOURSEMENT", ignored: true })]),
 		);
-		await renderSearchPage("/search?includeIgnored=true");
+		await renderSearchPage("/search?ignored=true");
 
 		expect(await screen.findByText("REMBOURSEMENT")).toHaveStyle({
 			textDecoration: "line-through",
@@ -422,7 +434,7 @@ describe("SearchPage", () => {
 				}),
 			]),
 		);
-		await renderSearchPage("/search?includeIgnored=true");
+		await renderSearchPage("/search?ignored=true");
 
 		fireEvent.click(
 			await screen.findByRole("button", { name: /REMBOURSEMENT/ }),

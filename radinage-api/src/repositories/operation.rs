@@ -56,12 +56,22 @@ pub struct ListOperationsParams {
     pub order: SortOrder,
     pub limit: i64,
     pub offset: i64,
-    /// When false (default), ignored operations are excluded from results.
-    pub include_ignored: bool,
+    pub ignored: IgnoredFilter,
     pub category: CategoryFilter,
     /// When not empty, keeps the operations linked to one of these budgets, a split operation
     /// through any of its parts.
     pub budget_ids: Vec<Uuid>,
+}
+
+/// Which operations a listing keeps by their ignored flag.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum IgnoredFilter {
+    /// Leaves the ignored operations out.
+    #[default]
+    Excluded,
+    Included,
+    /// Keeps the ignored operations alone.
+    Only,
 }
 
 /// Which categories the operations listed must count towards: an unsplit operation through
@@ -341,10 +351,10 @@ fn whole_or_any_part(operation_test: &str, split_test: &str) -> String {
 /// Filters shared by the listing and its totals, binding `$1` to `$9` as [`bind_list_filters`]
 /// does.
 fn list_filters_sql(params: &ListOperationsParams) -> String {
-    let ignored = if params.include_ignored {
-        ""
-    } else {
-        "AND o.ignored = FALSE"
+    let ignored = match params.ignored {
+        IgnoredFilter::Excluded => "AND o.ignored = FALSE",
+        IgnoredFilter::Included => "",
+        IgnoredFilter::Only => "AND o.ignored = TRUE",
     };
     let direction = match params.direction {
         None => "",
@@ -1773,6 +1783,32 @@ mod integration_tests {
             (vec![split, none, through_budget, own], 4)
         );
         assert_eq!(listed_ids(&repo, user_id, sorted_params()).await.1, 5);
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn list_filters_by_ignored_flag(pool: PgPool) {
+        let repo = PgOperationRepository::new(pool.clone());
+        let user_id = setup_user(&pool).await;
+        let ignored = insert_op(&repo, user_id, dec!(-1)).await;
+        repo.set_ignored(ignored, user_id, true).await.unwrap();
+        let kept = insert_op(&repo, user_id, dec!(-2)).await;
+
+        let by_ignored = |ignored| ListOperationsParams {
+            ignored,
+            ..sorted_params()
+        };
+        assert_eq!(
+            listed_ids(&repo, user_id, by_ignored(IgnoredFilter::Excluded)).await,
+            (vec![kept], 1)
+        );
+        assert_eq!(
+            listed_ids(&repo, user_id, by_ignored(IgnoredFilter::Included)).await,
+            (vec![kept, ignored], 2)
+        );
+        assert_eq!(
+            listed_ids(&repo, user_id, by_ignored(IgnoredFilter::Only)).await,
+            (vec![ignored], 1)
+        );
     }
 
     #[sqlx::test(migrations = "./migrations")]

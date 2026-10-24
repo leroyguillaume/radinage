@@ -4,7 +4,9 @@ use crate::{
     domain::last_day_of_month,
     error::AppResult,
     handlers::operations::OperationResponse,
-    repositories::{ListOperationsParams, OperationRepository, OperationSortField, SortOrder},
+    repositories::{
+        IgnoredFilter, ListOperationsParams, OperationRepository, OperationSortField, SortOrder,
+    },
 };
 use axum::{
     Json,
@@ -49,7 +51,11 @@ pub async fn get_monthly_operations<U, O: OperationRepository, B, P, C, R>(
         sort: OperationSortField::Date,
         order: SortOrder::Desc,
         limit: i64::MAX,
-        include_ignored: q.include_ignored,
+        ignored: if q.include_ignored {
+            IgnoredFilter::Included
+        } else {
+            IgnoredFilter::Excluded
+        },
         ..Default::default()
     };
 
@@ -160,7 +166,7 @@ mod tests {
         let mut or = MockOperationRepository::new();
         let (tx, rx) = std::sync::mpsc::channel();
         or.expect_list().returning(move |_, params| {
-            tx.send(params.include_ignored).unwrap();
+            tx.send(params.ignored == IgnoredFilter::Included).unwrap();
             Box::pin(async { Ok((vec![], OperationTotals::default())) })
         });
         let app = build_app(or);

@@ -21,7 +21,8 @@ export interface OperationFilters {
 	/** YYYY-MM-DD bounds on the accounting date. */
 	dateFrom?: string;
 	dateTo?: string;
-	includeIgnored?: boolean;
+	/** Keeps the ignored operations alone, which are otherwise left out. */
+	ignored?: boolean;
 	sort?: OperationSort;
 	order?: SortOrder;
 }
@@ -98,7 +99,7 @@ export function parseOperationFilters(
 		amountMax: asMatching(search.amountMax, DECIMAL_PATTERN),
 		dateFrom: asMatching(search.dateFrom, DATE_PATTERN),
 		dateTo: asMatching(search.dateTo, DATE_PATTERN),
-		includeIgnored: asFlag(search.includeIgnored),
+		ignored: asFlag(search.ignored),
 		sort: asOneOf(search.sort, OPERATION_SORTS),
 		order: asOneOf(search.order, SORT_ORDERS),
 	});
@@ -121,7 +122,7 @@ export function operationSearchQuery(
 	if (filters.amountMax) params.set("amountMax", filters.amountMax);
 	if (filters.dateFrom) params.set("dateFrom", filters.dateFrom);
 	if (filters.dateTo) params.set("dateTo", filters.dateTo);
-	if (filters.includeIgnored) params.set("includeIgnored", "true");
+	if (filters.ignored) params.set("ignored", "true");
 	if (filters.sort) params.set("sort", filters.sort);
 	if (filters.order) params.set("order", filters.order);
 	params.set("page", String(page));
@@ -137,7 +138,7 @@ export function activeFilterCount(filters: OperationFilters): number {
 		filters.direction ? 1 : 0,
 		filters.amountMin || filters.amountMax ? 1 : 0,
 		filters.dateFrom || filters.dateTo ? 1 : 0,
-		filters.includeIgnored ? 1 : 0,
+		filters.ignored ? 1 : 0,
 	].reduce((sum, n) => sum + n, 0);
 }
 
