@@ -55,6 +55,19 @@ pub struct BudgetedTotals {
     pub savings: Decimal,
 }
 
+/// Totals of the operations not linked to any budget, split by sign: an unlinked refund must not
+/// offset an unlinked expense.
+#[derive(Debug, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct UnbudgetedTotals {
+    /// Sum of the positive amounts.
+    #[schemars(with = "String")]
+    pub income: Decimal,
+    /// Sum of the negative amounts (zero or negative).
+    #[schemars(with = "String")]
+    pub expense: Decimal,
+}
+
 /// Totals of the transfers with other accounts that are not linked to a budget, signed like
 /// operations.
 #[derive(Debug, Default, Serialize, Deserialize, JsonSchema)]
@@ -79,9 +92,8 @@ pub struct MonthlySummary {
     pub year: i32,
     /// Month of this entry (1–12).
     pub month: u32,
-    /// Total of operations not linked to any budget.
-    #[schemars(with = "String")]
-    pub unbudgeted: Decimal,
+    /// Totals of operations not linked to any budget.
+    pub unbudgeted: UnbudgetedTotals,
     /// Totals of operations linked to a budget, grouped by budget type.
     pub budgeted: BudgetedTotals,
     /// Totals of the transfers not linked to a budget.
@@ -276,7 +288,7 @@ pub async fn get_summary<U, O: OperationRepository, B, P, C, R, A>(
             .list_for_summary(user_id, month_start, month_end)
             .await?;
 
-        let mut unbudgeted = Decimal::ZERO;
+        let mut unbudgeted = UnbudgetedTotals::default();
         let mut expense = Decimal::ZERO;
         let mut income = Decimal::ZERO;
         let mut savings = Decimal::ZERO;
@@ -284,7 +296,10 @@ pub async fn get_summary<U, O: OperationRepository, B, P, C, R, A>(
 
         for row in summary_rows {
             match row.category() {
-                Some(SummaryCategory::Unbudgeted) => unbudgeted += row.amount,
+                Some(SummaryCategory::Unbudgeted) if row.amount < Decimal::ZERO => {
+                    unbudgeted.expense += row.amount;
+                }
+                Some(SummaryCategory::Unbudgeted) => unbudgeted.income += row.amount,
                 Some(SummaryCategory::Budgeted(BudgetType::Expense)) => expense += row.amount,
                 Some(SummaryCategory::Budgeted(BudgetType::Income)) => income += row.amount,
                 Some(SummaryCategory::Budgeted(BudgetType::Savings)) => savings += row.amount,
@@ -376,7 +391,8 @@ mod tests {
         assert_eq!(json.months.len(), 1);
         assert_eq!(json.months[0].year, 2024);
         assert_eq!(json.months[0].month, 1);
-        assert_eq!(json.months[0].unbudgeted, Decimal::ZERO);
+        assert_eq!(json.months[0].unbudgeted.income, Decimal::ZERO);
+        assert_eq!(json.months[0].unbudgeted.expense, Decimal::ZERO);
         assert_eq!(json.months[0].budgeted.expense, Decimal::ZERO);
         assert_eq!(json.months[0].budgeted.income, Decimal::ZERO);
         assert_eq!(json.months[0].budgeted.savings, Decimal::ZERO);
@@ -435,6 +451,15 @@ mod tests {
                         account_id: Uuid::nil(),
                         date: NaiveDate::from_ymd_opt(2024, 1, 15).unwrap(),
                         budget_id: None,
+                        amount: Decimal::new(12, 0),
+                        budget_link_type: "unlinked".to_string(),
+                        budget_type: None,
+                        transfer_account_kind: None,
+                    },
+                    SummaryRow {
+                        account_id: Uuid::nil(),
+                        date: NaiveDate::from_ymd_opt(2024, 1, 15).unwrap(),
+                        budget_id: None,
                         amount: Decimal::new(3000, 0),
                         budget_link_type: "auto".to_string(),
                         budget_type: Some("income".to_string()),
@@ -465,7 +490,8 @@ mod tests {
 
         let json: SummaryResponse = response_json(resp).await;
         let m = &json.months[0];
-        assert_eq!(m.unbudgeted, Decimal::new(-50, 0));
+        assert_eq!(m.unbudgeted.income, Decimal::new(12, 0));
+        assert_eq!(m.unbudgeted.expense, Decimal::new(-50, 0));
         assert_eq!(m.budgeted.expense, Decimal::new(-800, 0));
         assert_eq!(m.budgeted.income, Decimal::new(3000, 0));
         assert_eq!(m.budgeted.savings, Decimal::new(-200, 0));

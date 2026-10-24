@@ -259,26 +259,20 @@ function StatsPage() {
 
 	const months = summaryQuery.data?.months ?? [];
 
-	// `unbudgeted` is a net sum (mixed income + expense on unlinked ops);
-	// without a per-operation breakdown we attribute its positive part to
-	// income and its negative part to expenses.
-	const perMonth = months.map((m) => {
-		const unbudgeted = Number(m.unbudgeted);
-		return {
-			label: new Date(m.year, m.month - 1).toLocaleDateString(i18n.language, {
-				month: "short",
-				year: "2-digit",
-			}),
-			expenses: Number(m.budgeted.expense) + Math.min(0, unbudgeted),
-			income: Number(m.budgeted.income) + Math.max(0, unbudgeted),
-			// Net savings: money taken back from savings is deducted, not counted as income.
-			savings:
-				Number(m.budgeted.savings) +
-				Number(m.transfers.toSavings) +
-				Number(m.transfers.fromSavings),
-			internal: Number(m.transfers.internal),
-		};
-	});
+	const perMonth = months.map((m) => ({
+		label: new Date(m.year, m.month - 1).toLocaleDateString(i18n.language, {
+			month: "short",
+			year: "2-digit",
+		}),
+		expenses: Number(m.budgeted.expense) + Number(m.unbudgeted.expense),
+		income: Number(m.budgeted.income) + Number(m.unbudgeted.income),
+		// Net savings: money taken back from savings is deducted, not counted as income.
+		savings:
+			Number(m.budgeted.savings) +
+			Number(m.transfers.toSavings) +
+			Number(m.transfers.fromSavings),
+		internal: Number(m.transfers.internal),
+	}));
 
 	let totalExpenses = 0;
 	let totalIncome = 0;

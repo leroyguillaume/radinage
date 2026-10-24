@@ -48,7 +48,7 @@ const mockSummaryResponse = {
 		{
 			year: 2026,
 			month: 1,
-			unbudgeted: "-100.00",
+			unbudgeted: { income: "0", expense: "-100.00" },
 			budgeted: {
 				expense: "-500.00",
 				income: "2000.00",
@@ -59,7 +59,7 @@ const mockSummaryResponse = {
 		{
 			year: 2026,
 			month: 2,
-			unbudgeted: "-150.00",
+			unbudgeted: { income: "0", expense: "-150.00" },
 			budgeted: {
 				expense: "-600.00",
 				income: "2200.00",
@@ -70,7 +70,7 @@ const mockSummaryResponse = {
 		{
 			year: 2026,
 			month: 3,
-			unbudgeted: "-200.00",
+			unbudgeted: { income: "0", expense: "-200.00" },
 			budgeted: {
 				expense: "-700.00",
 				income: "2500.00",
@@ -280,23 +280,14 @@ describe("StatsPage", () => {
 		expect(screen.getByText("Épargne")).toBeInTheDocument();
 	});
 
-	it("attributes positive unbudgeted to income and negative to expenses", async () => {
-		// Only unlinked operations, no budgets. Month 1 is net-positive
-		// (income-like), month 2 is net-negative (expense-like).
+	it("counts unbudgeted income and expenses apart, without netting them", async () => {
 		setupMocks({
 			months: [
 				{
 					year: 2026,
 					month: 1,
-					unbudgeted: "1500.00",
-					budgeted: { expense: "0.00", income: "0.00", savings: "0.00" },
-					transfers: { toSavings: "0", fromSavings: "0", internal: "0" },
-				},
-				{
-					year: 2026,
-					month: 2,
-					unbudgeted: "-400.00",
-					budgeted: { expense: "0.00", income: "0.00", savings: "0.00" },
+					unbudgeted: { income: "8.54", expense: "-408.54" },
+					budgeted: { expense: "0.00", income: "1500.00", savings: "0.00" },
 					transfers: { toSavings: "0", fromSavings: "0", internal: "0" },
 				},
 			],
@@ -315,10 +306,8 @@ describe("StatsPage", () => {
 			)
 				.replace(/\s/g, "")
 				.match(/-?\d+,\d{2}€$/)?.[0];
-		// Without the fix the page would show +1100 as expenses and no income.
-		expect(tileAmount("Revenus")).toBe("1500,00€");
-		expect(tileAmount("Dépenses")).toBe("-400,00€");
-		// Balance = 1500 - 400 + 0 = 1100 (not 1100 on the expense side).
+		expect(tileAmount("Revenus")).toBe("1508,54€");
+		expect(tileAmount("Dépenses")).toBe("-408,54€");
 		expect(tileAmount("Balance")).toBe("1100,00€");
 	});
 
