@@ -254,17 +254,24 @@ function periodsOverlap(periods: PeriodForm[]): boolean {
 	return false;
 }
 
+/** Prefixes an amount with "-": an expense budget's amounts are negative. */
+function withMinus(amount: string): string {
+	return amount === "" || amount.startsWith("-") ? amount : `-${amount}`;
+}
+
 function AmountInput({
 	label,
 	displayValue,
 	onChange,
 	locale,
+	negative,
 	required,
 }: {
 	label: string;
 	displayValue: string;
 	onChange: (raw: string, display: string) => void;
 	locale: string;
+	negative: boolean;
 	required?: boolean;
 }) {
 	return (
@@ -272,7 +279,8 @@ function AmountInput({
 			label={label}
 			value={displayValue}
 			onChange={(e) => {
-				const display = e.currentTarget.value;
+				const typed = e.currentTarget.value;
+				const display = negative ? withMinus(typed) : typed;
 				onChange(toRawAmount(display, locale), display);
 			}}
 			onBlur={() => {
@@ -429,6 +437,24 @@ export function BudgetModal({
 
 	function update(patch: Partial<BudgetForm>) {
 		setForm((prev) => ({ ...prev, ...patch }));
+	}
+
+	function changeBudgetType(budgetType: BudgetType) {
+		setForm((prev) =>
+			budgetType === "expense"
+				? {
+						...prev,
+						budgetType,
+						periods: prev.periods.map((p) => ({
+							...p,
+							amount: withMinus(p.amount),
+							displayAmount: withMinus(p.displayAmount),
+						})),
+						occasionalAmount: withMinus(prev.occasionalAmount),
+						displayOccasionalAmount: withMinus(prev.displayOccasionalAmount),
+					}
+				: { ...prev, budgetType },
+		);
 	}
 
 	function updatePeriod(index: number, patch: Partial<PeriodForm>) {
@@ -595,9 +621,7 @@ export function BudgetModal({
 					label={t("budgets.fields.budgetType")}
 					value={form.budgetType}
 					onChange={(v) =>
-						update({
-							budgetType: (v as BudgetType | null) ?? "expense",
-						})
+						changeBudgetType((v as BudgetType | null) ?? "expense")
 					}
 					data={[
 						{ value: "expense", label: t("budgets.types.expense") },
@@ -730,6 +754,7 @@ export function BudgetModal({
 												})
 											}
 											locale={locale}
+											negative={form.budgetType === "expense"}
 											required
 										/>
 									</Stack>
@@ -751,6 +776,7 @@ export function BudgetModal({
 								})
 							}
 							locale={locale}
+							negative={form.budgetType === "expense"}
 							required
 						/>
 						<MonthPickerInput

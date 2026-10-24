@@ -435,6 +435,40 @@ describe("BudgetModal", () => {
 		expect(amountInput).toHaveValue("-50,50");
 	});
 
+	it("prefixes expense amounts with a minus sign", async () => {
+		renderModal();
+		const user = userEvent.setup();
+
+		const amountInput = screen.getByLabelText("Montant *");
+		await user.type(amountInput, "42,5");
+		fireEvent.blur(amountInput);
+
+		expect(amountInput).toHaveValue("-42,50");
+	});
+
+	it("keeps income amounts as typed", async () => {
+		renderModal();
+		const user = userEvent.setup();
+
+		await selectMantineOption(/^Type/, "Revenu");
+		const amountInput = screen.getByLabelText("Montant *");
+		await user.type(amountInput, "42");
+
+		expect(amountInput).toHaveValue("42");
+	});
+
+	it("negates typed amounts when switching to expense", async () => {
+		renderModal();
+		const user = userEvent.setup();
+
+		await selectMantineOption(/^Type/, "Revenu");
+		const amountInput = screen.getByLabelText("Montant *");
+		await user.type(amountInput, "42");
+		await selectMantineOption(/^Type/, "Dépense");
+
+		expect(amountInput).toHaveValue("-42,00");
+	});
+
 	it("sends dot-separated amount in payload even when typed with comma", async () => {
 		apiFetchMock.mockResolvedValueOnce(makeRecurringBudget("monthly"));
 
