@@ -13,6 +13,7 @@ import {
 } from "@mantine/core";
 import {
 	IconAlertCircle,
+	IconInfoCircle,
 	IconPencil,
 	IconPlus,
 	IconTrash,
@@ -20,6 +21,7 @@ import {
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { AccountForm } from "@/components/AccountForm";
+import { AnchorLink } from "@/components/AnchorLink";
 import { ApiError } from "@/lib/api";
 import { formatAmount, formatIsoDate } from "@/lib/format";
 import { useAccounts, useBudgets, useDeleteAccount } from "@/lib/hooks";
@@ -55,13 +57,16 @@ function AccountRow({
 	const date = account.balance
 		? formatIsoDate(account.balance.date, i18n.language)
 		: null;
+	const estimated = savedBy.length > 0;
 	const detail =
 		date === null
 			? t("accounts.noBalance")
 			: t(
-					account.receivesOperations || savedBy.length > 0
+					account.receivesOperations
 						? "accounts.computed"
-						: "accounts.readOn",
+						: estimated
+							? "accounts.estimatedFrom"
+							: "accounts.readOn",
 					{
 						date,
 					},
@@ -104,9 +109,17 @@ function AccountRow({
 				<Stack gap="xs">
 					<Group justify="space-between" wrap="nowrap" gap="xs">
 						<Box miw={0}>
-							<Text size="sm" fw={600} className="[overflow-wrap:anywhere]">
+							<AnchorLink
+								to="/accounts/$accountId"
+								params={{ accountId: account.id }}
+								aria-label={t("accounts.open", { name: account.name })}
+								size="sm"
+								fw={600}
+								c="inherit"
+								className="[overflow-wrap:anywhere]"
+							>
 								{account.name}
-							</Text>
+							</AnchorLink>
 							<Text size="xs" c="dimmed">
 								{detail}
 							</Text>
@@ -125,6 +138,11 @@ function AccountRow({
 									c={balanceTextColor(Number(account.currentBalance))}
 									mr="xs"
 								>
+									{estimated && (
+										<Text component="span" inherit c="dimmed" fw={500}>
+											≈{" "}
+										</Text>
+									)}
 									{formatAmount(account.currentBalance)}
 								</Text>
 							)}
@@ -231,6 +249,20 @@ export function AccountsSection() {
 											{formatAmount(total)}
 										</Text>
 									</Group>
+									{group === "savings" &&
+										members.some((a) =>
+											budgets.some((b) => b.accountId === a.id),
+										) && (
+											<Alert
+												color="gold"
+												variant="light"
+												c="gold.9"
+												icon={<IconInfoCircle size={16} />}
+												my="xs"
+											>
+												{t("accounts.estimateNote")}
+											</Alert>
+										)}
 									<Box component="ul" m={0} p={0} className="list-none">
 										{members.map((account) =>
 											editing.kind === "edit" && editing.id === account.id ? (

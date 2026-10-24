@@ -19,6 +19,7 @@ import { useTranslation } from "react-i18next";
 import { CATEGORY_MARK_SIZE, CategoryDot } from "@/components/CategoryBadge";
 import { PageHeader } from "@/components/PageHeader";
 import { StatTile } from "@/components/StatTile";
+import { WealthEvolution } from "@/components/WealthEvolution";
 import {
 	type CategoryRow,
 	type CategorySide,
@@ -498,6 +499,13 @@ function StatsPage() {
 								</Paper>
 							</>
 						)}
+
+						<WealthEvolution
+							fromYear={fromYear}
+							fromMonth={fromMonth}
+							toYear={toYear}
+							toMonth={toMonth}
+						/>
 
 						{categorySummaryQuery.data && categoriesQuery.data?.length ? (
 							<SimpleGrid cols={{ base: 1, lg: 2 }} spacing="lg">

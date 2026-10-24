@@ -498,7 +498,18 @@
 		"uncategorized": "Sans catégorie",
 		"otherCategories": "Autres ({{count}} catégories)",
 		"noIncome": "Aucun revenu sur la période.",
-		"noExpenses": "Aucune dépense sur la période."
+		"noExpenses": "Aucune dépense sur la période.",
+		"wealth": {
+			"title": "Évolution du patrimoine",
+			"since": "{{amount}} depuis {{month}}",
+			"accounts": "Comptes affichés",
+			"account": "Compte",
+			"start": "Début",
+			"end": "Fin",
+			"note": "Après leur dernier relevé, les comptes épargne sont estimés avec les versements de leurs budgets d'épargne, sans les intérêts ni les variations boursières.",
+			"empty": "Relève le solde d'un compte pour suivre ton patrimoine.",
+			"fetchError": "Impossible de charger l'historique des soldes"
+		}
 	},
 	"forecast": {
 		"title": "Résumé",
@@ -670,11 +681,56 @@
 		"computed": "calculé depuis le {{date}}",
 		"readOn": "relevé au {{date}}",
 		"noBalance": "sans solde",
-		"clearBalance": "Effacer le solde",
 		"nameTaken": "Un compte porte déjà ce nom, ou le nombre maximal de comptes est atteint",
 		"saveError": "Erreur lors de l'enregistrement du compte",
 		"errorAmount": "Montant invalide",
-		"errorDate": "La date du solde ne peut pas être dans le futur"
+		"errorDate": "La date du solde ne peut pas être dans le futur",
+		"estimatedFrom": "estimé depuis le relevé du {{date}}",
+		"estimateNote": "Un compte épargne vaut son dernier solde relevé plus les versements de ses budgets d'épargne. Les intérêts et les variations boursières n'y sont pas : relève un solde de temps en temps pour recaler l'estimation.",
+		"open": "Voir le compte {{name}}",
+		"detail": {
+			"back": "Retour aux réglages",
+			"notFound": "Ce compte n'existe pas.",
+			"readOn": "{{amount}} relevés le {{date}}",
+			"movedSince": "+ {{amount}} versés depuis",
+			"operationsSince": "+ {{amount}} d'opérations depuis",
+			"chartTitle": "Évolution du solde",
+			"period": "Période",
+			"periods": {
+				"3m": "3 mois",
+				"1y": "1 an",
+				"all": "Tout"
+			},
+			"legend": {
+				"read": "Solde relevé",
+				"balance": "Solde",
+				"estimate": "Estimation depuis le dernier relevé",
+				"gap": "Écart au relevé"
+			},
+			"noHistory": "Aucun solde sur cette période.",
+			"estimateNote": "Le solde est estimé avec les versements de {{budgets}}. Il ne tient compte ni des intérêts, ni des variations boursières : chaque solde relevé remplace l'estimation et devient le nouveau point de départ.",
+			"record": "Relever un solde",
+			"history": "Historique des soldes",
+			"noBalance": "Aucun solde relevé : relève le solde affiché par ta banque pour suivre ce compte.",
+			"today": "Aujourd'hui",
+			"todayEstimated": "Estimé : dernier relevé + versements",
+			"todayComputed": "Calculé : dernier relevé + opérations",
+			"estimation": "Estimation : {{amount}}",
+			"firstReading": "Premier relevé",
+			"gapHint": "L'écart compare chaque relevé à l'estimation de ce jour-là : intérêts, variations boursières, frais ou opérations manquantes.",
+			"correct": "Corriger le solde du {{date}}",
+			"deleteReading": "Supprimer le solde du {{date}}",
+			"confirmDelete": "Supprimer le solde du {{date}} ?"
+		},
+		"balanceModal": {
+			"title": "Relever un solde · {{name}}",
+			"editTitle": "Corriger le solde · {{name}}",
+			"estimateOn": "Estimation au {{date}}",
+			"reading": "Solde relevé",
+			"gap": "Écart : intérêts, variations, frais",
+			"replaces": "Ce solde remplace l'estimation : les mouvements suivants s'y ajouteront. Les soldes précédents restent dans l'historique.",
+			"dateTaken": "Un solde est déjà relevé à cette date."
+		}
 	},
 	"activate": {
 		"title": "Activer votre compte",

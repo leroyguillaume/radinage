@@ -20,6 +20,7 @@ import { Route as SearchRouteImport } from './routes/search'
 import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as StatsRouteImport } from './routes/stats'
 import { Route as SummaryRouteImport } from './routes/summary'
+import { Route as AccountsAccountIdRouteImport } from './routes/accounts.$accountId'
 import { Route as BudgetsBudgetIdRouteImport } from './routes/budgets_.$budgetId'
 
 const IndexRoute = IndexRouteImport.update({
@@ -77,6 +78,11 @@ const SummaryRoute = SummaryRouteImport.update({
   path: '/summary',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AccountsAccountIdRoute = AccountsAccountIdRouteImport.update({
+  id: '/accounts/$accountId',
+  path: '/accounts/$accountId',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const BudgetsBudgetIdRoute = BudgetsBudgetIdRouteImport.update({
   id: '/budgets_/$budgetId',
   path: '/budgets/$budgetId',
@@ -95,6 +101,7 @@ export interface FileRoutesByFullPath {
   '/settings': typeof SettingsRoute
   '/stats': typeof StatsRoute
   '/summary': typeof SummaryRoute
+  '/accounts/$accountId': typeof AccountsAccountIdRoute
   '/budgets/$budgetId': typeof BudgetsBudgetIdRoute
 }
 export interface FileRoutesByTo {
@@ -109,6 +116,7 @@ export interface FileRoutesByTo {
   '/settings': typeof SettingsRoute
   '/stats': typeof StatsRoute
   '/summary': typeof SummaryRoute
+  '/accounts/$accountId': typeof AccountsAccountIdRoute
   '/budgets/$budgetId': typeof BudgetsBudgetIdRoute
 }
 export interface FileRoutesById {
@@ -124,6 +132,7 @@ export interface FileRoutesById {
   '/settings': typeof SettingsRoute
   '/stats': typeof StatsRoute
   '/summary': typeof SummaryRoute
+  '/accounts/$accountId': typeof AccountsAccountIdRoute
   '/budgets_/$budgetId': typeof BudgetsBudgetIdRoute
 }
 export interface FileRouteTypes {
@@ -140,6 +149,7 @@ export interface FileRouteTypes {
     | '/settings'
     | '/stats'
     | '/summary'
+    | '/accounts/$accountId'
     | '/budgets/$budgetId'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -154,6 +164,7 @@ export interface FileRouteTypes {
     | '/settings'
     | '/stats'
     | '/summary'
+    | '/accounts/$accountId'
     | '/budgets/$budgetId'
   id:
     | '__root__'
@@ -168,6 +179,7 @@ export interface FileRouteTypes {
     | '/settings'
     | '/stats'
     | '/summary'
+    | '/accounts/$accountId'
     | '/budgets_/$budgetId'
   fileRoutesById: FileRoutesById
 }
@@ -183,6 +195,7 @@ export interface RootRouteChildren {
   SettingsRoute: typeof SettingsRoute
   StatsRoute: typeof StatsRoute
   SummaryRoute: typeof SummaryRoute
+  AccountsAccountIdRoute: typeof AccountsAccountIdRoute
   BudgetsBudgetIdRoute: typeof BudgetsBudgetIdRoute
 }
 
@@ -265,6 +278,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SummaryRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/accounts/$accountId': {
+      id: '/accounts/$accountId'
+      path: '/accounts/$accountId'
+      fullPath: '/accounts/$accountId'
+      preLoaderRoute: typeof AccountsAccountIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/budgets_/$budgetId': {
       id: '/budgets_/$budgetId'
       path: '/budgets/$budgetId'
@@ -287,6 +307,7 @@ const rootRouteChildren: RootRouteChildren = {
   SettingsRoute: SettingsRoute,
   StatsRoute: StatsRoute,
   SummaryRoute: SummaryRoute,
+  AccountsAccountIdRoute: AccountsAccountIdRoute,
   BudgetsBudgetIdRoute: BudgetsBudgetIdRoute,
 }
 export const routeTree = rootRouteImport

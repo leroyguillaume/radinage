@@ -333,6 +333,23 @@ account is worth its most recent balance. Correcting an account's
 starting point is recording a newer balance; the older ones stay in its
 history.
 
+**A balance read replaces the estimate, and keeps it.** The same movements
+(an account's operations when it receives them, what its savings budgets saved
+otherwise) rebuild an account's balance day by day: the latest balance read on
+or before a day plus what moved after it up to that day, and before the first
+balance, that balance minus what moved from the day to it. `GET
+/accounts/{id}/balance-history` returns that timeline, starting no earlier than
+the first balance or movement, since nothing is known before. Each balance read
+after an earlier one also carries what the earlier one plus the movements in
+between `estimated` for its day, in that timeline and in
+`GET /accounts/{id}/balances`: the difference is what the movements cannot
+explain, interest and market changes on a savings account, a missing operation
+on a checking one. Interest and market changes are left out of the estimate on
+purpose: they are not in any statement the app reads, and a guessed rate would
+make the estimate look surer than it is. The web app derives its month-by-month
+net worth from these timelines, taking each account's balance at the end of
+every month.
+
 **Same-origin web app.** nginx serves the SPA and proxies `/api/` on the same
 origin, so the browser needs no CORS and the API address is a deployment
 setting of the web app image rather than a build-time constant.

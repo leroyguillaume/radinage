@@ -4,6 +4,7 @@ import {
 	keepPreviousData,
 	useInfiniteQuery,
 	useMutation,
+	useQueries,
 	useQuery,
 	useQueryClient,
 } from "@tanstack/react-query";
@@ -20,6 +21,8 @@ import type {
 	ApplyCategoryResponse,
 	ApplyIgnoreRuleResponse,
 	BalanceEntry,
+	BalancePoint,
+	BalanceReading,
 	BudgetResponse,
 	BudgetSummaryResponse,
 	CategoryRequest,
@@ -389,6 +392,38 @@ export function useAccounts() {
 	return useQuery({
 		queryKey: accountsKey,
 		queryFn: () => apiFetch<AccountResponse[]>("/accounts"),
+	});
+}
+
+/** The balances read on an account, most recent first, each with its day's estimate. */
+export function useAccountBalances(accountId: string) {
+	return useQuery({
+		queryKey: [...accountsKey, accountId, "balances"],
+		queryFn: () =>
+			apiFetch<BalanceReading[]>(`/accounts/${accountId}/balances`),
+	});
+}
+
+function balanceHistoryQuery(accountId: string, from: string | null) {
+	const query = from === null ? "" : `?from=${from}`;
+	return {
+		queryKey: [...accountsKey, accountId, "balance-history", from],
+		queryFn: () =>
+			apiFetch<BalancePoint[]>(
+				`/accounts/${accountId}/balance-history${query}`,
+			),
+	};
+}
+
+/** An account's balance from `from` (YYYY-MM-DD, or its earliest known day) to today. */
+export function useBalanceHistory(accountId: string, from: string | null) {
+	return useQuery(balanceHistoryQuery(accountId, from));
+}
+
+/** The balance history of each of `accountIds` from `from` to today, in the same order. */
+export function useBalanceHistories(accountIds: string[], from: string) {
+	return useQueries({
+		queries: accountIds.map((id) => balanceHistoryQuery(id, from)),
 	});
 }
 

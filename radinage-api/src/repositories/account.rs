@@ -1,33 +1,60 @@
 use crate::{
-    domain::account::{Account, AccountBalance, AccountFields, BalanceEntry},
+    domain::account::{Account, AccountBalance, AccountFields, BalanceEntry, DailyMovement},
     error::{AppError, AppResult},
 };
 use sqlx::{PgPool, Row, postgres::PgRow};
 use uuid::Uuid;
 
+/// The amounts linked to the savings budgets of account `a`, by bank date: what left the
+/// account they are on to land on `a`, so their sign is flipped when they are added to it.
+/// Ignored operations count towards no budget, so they saved nothing.
+macro_rules! saved_amounts {
+    () => {
+        "SELECT o.date, o.amount FROM operations o
+         JOIN budgets sb ON sb.id = o.budget_link_id
+         WHERE sb.account_id = a.id AND NOT o.ignored
+           AND NOT EXISTS (SELECT 1 FROM operation_splits s WHERE s.operation_id = o.id)
+         UNION ALL
+         SELECT o.date, s.amount FROM operation_splits s
+         JOIN operations o ON o.id = s.operation_id
+         JOIN budgets sb ON sb.id = s.budget_id
+         WHERE sb.account_id = a.id AND NOT o.ignored"
+    };
+}
+
 /// An account `a` with its latest balance `b` and its current balance, filtered by the
-/// `WHERE` clause appended to it. The amounts linked to a savings budget leave the account
-/// they are on to land on the budget's account, hence the minus sign.
-const ACCOUNT_SELECT: &str = "SELECT a.id, a.user_id, a.name, a.kind, a.imported, a.created_at,
+/// `WHERE` clause appended to it.
+const ACCOUNT_SELECT: &str = concat!(
+    "SELECT a.id, a.user_id, a.name, a.kind, a.imported, a.created_at,
             b.id AS balance_id, b.amount AS balance_amount, b.date AS balance_date,
             b.amount + CASE WHEN a.kind = 'checking' AND a.imported
                 THEN COALESCE((SELECT SUM(o.amount) FROM operations o
                                WHERE o.account_id = a.id AND o.date > b.date), 0)
-                ELSE -COALESCE((SELECT SUM(saved.amount) FROM (
-                         SELECT o.amount FROM operations o
-                         JOIN budgets sb ON sb.id = o.budget_link_id
-                         WHERE sb.account_id = a.id AND o.date > b.date AND NOT o.ignored
-                           AND NOT EXISTS (SELECT 1 FROM operation_splits s
-                                           WHERE s.operation_id = o.id)
-                         UNION ALL
-                         SELECT s.amount FROM operation_splits s
-                         JOIN operations o ON o.id = s.operation_id
-                         JOIN budgets sb ON sb.id = s.budget_id
-                         WHERE sb.account_id = a.id AND o.date > b.date AND NOT o.ignored
-                     ) saved), 0) END AS current_balance
+                ELSE -COALESCE((SELECT SUM(saved.amount) FROM (",
+    saved_amounts!(),
+    ") saved WHERE saved.date > b.date), 0) END AS current_balance
      FROM accounts a
      LEFT JOIN LATERAL (SELECT id, amount, date FROM account_balances
-                        WHERE account_id = a.id ORDER BY date DESC LIMIT 1) b ON TRUE";
+                        WHERE account_id = a.id ORDER BY date DESC LIMIT 1) b ON TRUE"
+);
+
+/// What account `$1` of user `$2` moved each day, the way its current balance adds it up:
+/// every operation of an account receiving them, ignored ones included since they still
+/// moved the money, or else what its savings budgets saved.
+const DAILY_MOVEMENTS: &str = concat!(
+    "SELECT m.date, SUM(m.amount) AS amount FROM accounts a
+     CROSS JOIN LATERAL (
+         SELECT o.date, o.amount FROM operations o
+         WHERE o.account_id = a.id AND a.kind = 'checking' AND a.imported
+         UNION ALL
+         SELECT saved.date, -saved.amount FROM (",
+    saved_amounts!(),
+    ") saved WHERE NOT (a.kind = 'checking' AND a.imported)
+     ) m
+     WHERE a.id = $1 AND a.user_id = $2
+     GROUP BY m.date
+     ORDER BY m.date"
+);
 
 /// Data access interface for accounts and their balances.
 #[cfg_attr(test, mockall::automock)]
@@ -92,6 +119,14 @@ pub trait AccountRepository: Send + Sync + 'static {
         account_id: Uuid,
         user_id: Uuid,
     ) -> impl std::future::Future<Output = AppResult<Vec<BalanceEntry>>> + Send;
+
+    /// What a user's account moved each day, apart from its balances, sorted by date; empty
+    /// for another user's account.
+    fn daily_movements(
+        &self,
+        account_id: Uuid,
+        user_id: Uuid,
+    ) -> impl std::future::Future<Output = AppResult<Vec<DailyMovement>>> + Send;
 
     /// Add a balance to a user's account. Returns `None` if the account is not the user's,
     /// `AppError::Conflict` if it already has a balance on that date.
@@ -318,6 +353,26 @@ impl AccountRepository for PgAccountRepository {
         .fetch_all(&self.pool)
         .await?;
         rows.iter().map(row_to_entry).collect()
+    }
+
+    async fn daily_movements(
+        &self,
+        account_id: Uuid,
+        user_id: Uuid,
+    ) -> AppResult<Vec<DailyMovement>> {
+        let rows = sqlx::query(DAILY_MOVEMENTS)
+            .bind(account_id)
+            .bind(user_id)
+            .fetch_all(&self.pool)
+            .await?;
+        rows.iter()
+            .map(|row| {
+                Ok(DailyMovement {
+                    date: row.try_get("date")?,
+                    amount: row.try_get("amount")?,
+                })
+            })
+            .collect()
     }
 
     async fn add_balance(
@@ -647,6 +702,58 @@ mod tests {
                 .has_savings_budgets(livret.id, Uuid::new_v4())
                 .await
                 .unwrap()
+        );
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn daily_movements_sum_what_each_account_moved_per_day(pool: PgPool) {
+        let alice = make_user(&pool, "alice").await;
+        let bob = make_user(&pool, "bob").await;
+        let repo = PgAccountRepository::new(pool.clone());
+        let perso = repo.create(alice, &checking("Perso")).await.unwrap();
+        let livret = repo.create(alice, &savings("Livret A")).await.unwrap();
+        let to_livret = insert_savings_budget(&pool, alice, livret.id).await;
+
+        let saved =
+            insert_operation(&pool, alice, perso.id, dec!(-200), date(2026, 3, 5), false).await;
+        link(&pool, saved, to_livret).await;
+        insert_operation(&pool, alice, perso.id, dec!(-15), date(2026, 3, 5), false).await;
+        let ignored =
+            insert_operation(&pool, alice, perso.id, dec!(-999), date(2026, 3, 8), true).await;
+        link(&pool, ignored, to_livret).await;
+        let split =
+            insert_operation(&pool, alice, perso.id, dec!(-80), date(2026, 3, 9), false).await;
+        sqlx::query(
+            "INSERT INTO operation_splits (operation_id, position, amount, budget_id)
+             VALUES ($1, 0, -60, $2), ($1, 1, -20, NULL)",
+        )
+        .bind(split)
+        .bind(to_livret)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let moved = |on, amount| DailyMovement { date: on, amount };
+        assert_eq!(
+            repo.daily_movements(perso.id, alice).await.unwrap(),
+            [
+                moved(date(2026, 3, 5), dec!(-215)),
+                moved(date(2026, 3, 8), dec!(-999)),
+                moved(date(2026, 3, 9), dec!(-80)),
+            ]
+        );
+        assert_eq!(
+            repo.daily_movements(livret.id, alice).await.unwrap(),
+            [
+                moved(date(2026, 3, 5), dec!(200)),
+                moved(date(2026, 3, 9), dec!(60)),
+            ]
+        );
+        assert!(
+            repo.daily_movements(perso.id, bob)
+                .await
+                .unwrap()
+                .is_empty()
         );
     }
 
