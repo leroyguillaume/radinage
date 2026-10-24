@@ -582,7 +582,7 @@
 		"allBudgets": "Tous les budgets",
 		"dates": "Dates",
 		"allDates": "Toutes les dates",
-		"includeIgnored": "Inclure les ignorées",
+		"onlyIgnored": "Ignorées seulement",
 		"ignored": "Ignorée",
 		"reset": "Réinitialiser",
 		"filters": "Filtres",

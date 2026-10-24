@@ -18,7 +18,7 @@ describe("parseOperationFilters", () => {
 				amountMax: "abc",
 				dateFrom: "2026-01-01",
 				dateTo: "01/02/2026",
-				includeIgnored: true,
+				ignored: true,
 				uncategorized: "true",
 				sort: "amount",
 				order: "up",
@@ -28,7 +28,7 @@ describe("parseOperationFilters", () => {
 			categoryIds: ["a"],
 			amountMin: "12.5",
 			dateFrom: "2026-01-01",
-			includeIgnored: true,
+			ignored: true,
 			uncategorized: true,
 			sort: "amount",
 		});
@@ -43,8 +43,8 @@ describe("mergeFilters", () => {
 	it("removes the keys cleared by the patch", () => {
 		expect(
 			mergeFilters(
-				{ label: "x", categoryIds: ["a"], includeIgnored: true },
-				{ label: undefined, categoryIds: [], includeIgnored: false },
+				{ label: "x", categoryIds: ["a"], ignored: true },
+				{ label: undefined, categoryIds: [], ignored: false },
 			),
 		).toEqual({});
 	});
