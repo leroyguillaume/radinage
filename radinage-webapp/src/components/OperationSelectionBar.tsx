@@ -1,11 +1,14 @@
 import {
+	ActionIcon,
 	Button,
+	Checkbox,
 	Group,
 	Modal,
 	Paper,
 	Select,
 	Stack,
 	Text,
+	Tooltip,
 } from "@mantine/core";
 import {
 	IconBuildingBank,
@@ -69,33 +72,38 @@ export function OperationSelectionBar({
 				radius="lg"
 				className="sticky bottom-0 z-10"
 				role="region"
-				aria-label={t("search.selection.region")}
+				aria-label={t("selection.region")}
 			>
 				<Stack gap="xs">
 					<Group justify="space-between" wrap="nowrap" gap="xs">
-						<Text fw={700} aria-live="polite">
-							{t("search.selection.count", { count })}
-						</Text>
-						<Group gap={4} wrap="nowrap">
-							<Button
-								variant="subtle"
-								h={44}
-								onClick={allSelected ? onClear : onSelectAll}
-							>
-								{allSelected
-									? t("search.selection.selectNone")
-									: t("search.selection.selectAll")}
-							</Button>
-							<Button
+						<Checkbox
+							size="md"
+							checked={count > 0 && allSelected}
+							indeterminate={count > 0 && !allSelected}
+							onChange={allSelected ? onClear : onSelectAll}
+							aria-label={
+								allSelected
+									? t("selection.selectNone")
+									: t("selection.selectAll")
+							}
+							label={
+								<Text span fw={700} aria-live="polite">
+									{t("selection.count", { count })}
+								</Text>
+							}
+							styles={{ body: { alignItems: "center", minHeight: 44 } }}
+						/>
+						<Tooltip label={t("selection.done")}>
+							<ActionIcon
 								variant="subtle"
 								color="gray"
-								h={44}
-								leftSection={<IconX size={18} />}
+								size={44}
+								aria-label={t("selection.done")}
 								onClick={onDone}
 							>
-								{t("search.selection.done")}
-							</Button>
-						</Group>
+								<IconX size={20} />
+							</ActionIcon>
+						</Tooltip>
 					</Group>
 					<Group grow gap="xs">
 						<Button
@@ -105,7 +113,7 @@ export function OperationSelectionBar({
 							disabled={count === 0}
 							onClick={() => setEditing("account")}
 						>
-							{t("search.selection.account")}
+							{t("selection.account")}
 						</Button>
 						<Button
 							variant="light"
@@ -114,7 +122,7 @@ export function OperationSelectionBar({
 							disabled={count === 0 || categories.length === 0}
 							onClick={() => setEditing("category")}
 						>
-							{t("search.selection.category")}
+							{t("selection.category")}
 						</Button>
 					</Group>
 				</Stack>
@@ -156,7 +164,7 @@ function AccountModal({
 	return (
 		<EditModal
 			{...props}
-			title={t("search.selection.accountTitle", {
+			title={t("selection.accountTitle", {
 				count: props.selected.length,
 			})}
 			canApply={accountId !== null}
@@ -175,7 +183,7 @@ function AccountModal({
 				data={options.map((a) => ({ value: a.id, label: a.name }))}
 				value={accountId}
 				onChange={setAccountId}
-				placeholder={t("search.selection.pick")}
+				placeholder={t("selection.pick")}
 				leftSection={<IconBuildingBank size={18} />}
 				comboboxProps={{ withinPortal: true }}
 				data-autofocus
@@ -197,7 +205,7 @@ function CategoryModal({
 	return (
 		<EditModal
 			{...props}
-			title={t("search.selection.categoryTitle", {
+			title={t("selection.categoryTitle", {
 				count: props.selected.length,
 			})}
 			canApply={choice !== null && unsplit.length > 0}
@@ -218,17 +226,17 @@ function CategoryModal({
 				label={t("operations.sheet.category")}
 				categories={categories}
 				extraOptions={[
-					{ value: NO_CATEGORY, label: t("search.selection.noCategory") },
+					{ value: NO_CATEGORY, label: t("selection.noCategory") },
 				]}
 				value={choice}
 				onChange={setChoice}
-				placeholder={t("search.selection.pick")}
+				placeholder={t("selection.pick")}
 				leftSection={<IconTag size={18} />}
 				data-autofocus
 			/>
 			{splitCount > 0 && (
 				<Text size="sm" c="dimmed">
-					{t("search.selection.splitKept", { count: splitCount })}
+					{t("selection.splitKept", { count: splitCount })}
 				</Text>
 			)}
 		</EditModal>
@@ -278,7 +286,7 @@ function EditModal({
 						loading={pending}
 						onClick={onApply}
 					>
-						{t("search.selection.apply")}
+						{t("selection.apply")}
 					</Button>
 				</Group>
 			</Stack>

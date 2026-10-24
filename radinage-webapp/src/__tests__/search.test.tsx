@@ -396,7 +396,9 @@ describe("SearchPage", () => {
 		await screen.findByText("RETRAIT DAB");
 
 		fireEvent.click(screen.getByRole("button", { name: "Sélectionner" }));
-		fireEvent.click(screen.getByRole("button", { name: "Tout sélectionner" }));
+		fireEvent.click(
+			screen.getByRole("checkbox", { name: "Tout sélectionner" }),
+		);
 		fireEvent.click(screen.getByRole("button", { name: "Catégorie" }));
 		const dialog = within(
 			await screen.findByRole("dialog", {
