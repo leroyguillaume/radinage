@@ -73,7 +73,7 @@ interface MonthForecast {
 	income: number;
 	expenses: number;
 	savings: number;
-	/** Money taken back from savings, positive: net savings are `savings + withdrawals`. */
+	/** Money taken back from savings, positive. */
 	withdrawals: number;
 	balance: number;
 	committed: number;
@@ -97,11 +97,17 @@ function toMonthForecast(m: ForecastMonth): MonthForecast {
 	};
 }
 
+/**
+ * What savings gained over the period: `savings` is negative and `withdrawals`
+ * positive as seen from the current account, so the sum is flipped.
+ */
+function netSavings(savings: number, withdrawals: number): number {
+	return -(savings + withdrawals);
+}
+
 /** Savings gold, orange once more was taken back from savings than was put in. */
-function netSavingsTone(savings: number, withdrawals: number): Tone {
-	return savings + withdrawals > 0
-		? budgetTypeTones.expense
-		: budgetTypeTones.savings;
+function netSavingsTone(net: number): Tone {
+	return net < 0 ? budgetTypeTones.expense : budgetTypeTones.savings;
 }
 
 function daysInMonth({ year, month }: YearMonth): number {
@@ -547,6 +553,7 @@ function MonthlyTable({
 						{forecast.map((m) => {
 							const isCurrent = m.status === "current";
 							const isFirstNegative = isSameMonth(m, firstNegativeMonth);
+							const monthSavings = netSavings(m.savings, m.withdrawals);
 							return (
 								<Table.Tr
 									key={`${m.year}-${m.month}`}
@@ -612,11 +619,8 @@ function MonthlyTable({
 											</Text>
 										)}
 									</Table.Td>
-									<Table.Td
-										ta="right"
-										c={netSavingsTone(m.savings, m.withdrawals).text}
-									>
-										{formatAmount(m.savings + m.withdrawals)}
+									<Table.Td ta="right" c={netSavingsTone(monthSavings).text}>
+										{formatAmount(monthSavings)}
 										{m.withdrawals !== 0 && (
 											<Text size="xs" fw={400} c="dimmed">
 												{t("forecast.withdrawn", {
@@ -938,6 +942,7 @@ function SurplusCard({
 }: SurplusCardProps) {
 	const { t } = useTranslation();
 	const surplus = income + expenses;
+	const net = netSavings(savings, withdrawals);
 
 	function shareOfIncome(amount: number): number {
 		return income > 0 ? Math.abs(amount) / income : 0;
@@ -977,9 +982,9 @@ function SurplusCard({
 								? t("forecast.totalSavings")
 								: t("forecast.netSavings")
 						}
-						amount={savings + withdrawals}
-						ratio={shareOfIncome(Math.min(0, savings + withdrawals))}
-						tone={netSavingsTone(savings, withdrawals)}
+						amount={net}
+						ratio={shareOfIncome(Math.max(0, net))}
+						tone={netSavingsTone(net)}
 					/>
 					{withdrawals !== 0 && (
 						<Text size="sm" c="dimmed">
@@ -987,8 +992,7 @@ function SurplusCard({
 								saved: formatAmount(-savings),
 								withdrawn: formatAmount(withdrawals),
 							})}
-							{savings + withdrawals > 0 &&
-								` · ${t("forecast.negativeSavings")}`}
+							{net < 0 && ` · ${t("forecast.negativeSavings")}`}
 						</Text>
 					)}
 					{unbudgetedRate !== null && (

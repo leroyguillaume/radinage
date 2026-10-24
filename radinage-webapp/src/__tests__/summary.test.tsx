@@ -432,11 +432,35 @@ describe("SummaryPage", () => {
 			name: "Excédent 2025",
 		});
 		const text = compact(card);
-		expect(text).toMatch(/Épargnenette-4300,00€/);
+		expect(text).toMatch(/Épargnenette4300,00€/);
 		expect(text).toMatch(/4800,00€versés,500,00€repris/);
 		expect(text).not.toMatch(/Plusreprisqueversé/);
 		const july = within(screen.getByRole("table")).getAllByRole("row")[7];
-		expect(compact(july as HTMLElement)).toMatch(/100,00€dont500,00€repris/);
+		expect(compact(july as HTMLElement)).toMatch(/-100,00€dont500,00€repris/);
+	});
+
+	it("shows net savings as negative when more was taken back than paid in", async () => {
+		setupMocks((year) =>
+			makeForecast(year, (month) =>
+				month === 7
+					? { income: 2000, expenses: -1500, savings: -400, withdrawals: 9000 }
+					: { income: 2000, expenses: -1500, savings: -400 },
+			),
+		);
+
+		await renderSummaryPage("?year=2025");
+
+		const card = await screen.findByRole("region", {
+			name: "Excédent 2025",
+		});
+		const text = compact(card);
+		expect(text).toMatch(/Épargnenette-4200,00€/);
+		expect(text).toMatch(/4800,00€versés,9000,00€repris·Plusreprisqueversé/);
+		const july = within(screen.getByRole("table")).getAllByRole("row")[7];
+		expect(compact(july as HTMLElement)).toMatch(/-8600,00€dont9000,00€repris/);
+		const june = within(screen.getByRole("table")).getAllByRole("row")[6];
+		expect(compact(june as HTMLElement)).toMatch(/400,00€/);
+		expect(compact(june as HTMLElement)).not.toMatch(/-400,00€/);
 	});
 
 	it("shows the projected balance next to the surplus from the recorded balance", async () => {
@@ -474,7 +498,7 @@ describe("SummaryPage", () => {
 		const surplus = screen.getByRole("region", { name: "Excédent 2025" });
 		const text = compact(surplus);
 		expect(text).toMatch(/\+19200,00€Cequireste/);
-		expect(text).toMatch(/Épargne-3600,00€/);
+		expect(text).toMatch(/Épargne3600,00€/);
 	});
 
 	it("shows the projected balance title in English too", async () => {
