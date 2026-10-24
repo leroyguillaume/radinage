@@ -9,11 +9,18 @@ import {
 	Outlet,
 	RouterProvider,
 } from "@tanstack/react-router";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import {
+	fireEvent,
+	render,
+	screen,
+	waitFor,
+	within,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { i18n } from "@/i18n";
 import type {
+	AccountResponse,
 	CategoryResponse,
 	ForecastResponse,
 	IgnoreRuleResponse,
@@ -169,6 +176,24 @@ const forecastResponse: ForecastResponse = {
 	firstNegativeMonth: null,
 };
 
+function account(id: string, name: string): AccountResponse {
+	return {
+		id,
+		name,
+		kind: "checking",
+		imported: true,
+		receivesOperations: true,
+		balance: null,
+		currentBalance: null,
+		createdAt: "2026-01-01T00:00:00Z",
+	};
+}
+
+const accounts = [
+	account("account-1", "Compte perso"),
+	account("account-2", "Compte joint"),
+];
+
 let apiCalls: Array<{
 	path: string;
 	options?: { method?: string; body?: string };
@@ -247,6 +272,12 @@ function setupMocks(
 		}
 		if (path === "/ignore-rules") {
 			return Promise.resolve(ignoreRules);
+		}
+		if (path === "/accounts") {
+			return Promise.resolve(accounts);
+		}
+		if (path === "/operations/account" || path === "/operations/category") {
+			return Promise.resolve({ updated: 2 });
 		}
 		if (/^\/operations\/[^/]+(\/category)?$/.test(path)) {
 			return Promise.resolve(operations.operations[0]);
@@ -1318,6 +1349,110 @@ describe("MonthlyOperationsPage", () => {
 			expect(await screen.findByText("Food")).toBeInTheDocument();
 			expect(
 				screen.queryByRole("combobox", { name: "Filtrer par catégorie" }),
+			).not.toBeInTheDocument();
+		});
+	});
+
+	describe("selecting daily operations", () => {
+		const categories: CategoryResponse[] = [
+			{
+				id: "c1",
+				name: "Courses",
+				color: "#12b886",
+				icon: null,
+				rules: [],
+				createdAt: "2026-01-01T00:00:00Z",
+			},
+		];
+		const bakery: OperationResponse = {
+			...mockMonthlyResponse.operations[2],
+			id: "op5",
+			label: "Bakery",
+			amount: "-8.00",
+			date: "2026-04-20",
+		};
+		const operations: MonthlyOperationsResponse = {
+			operations: [...mockMonthlyResponse.operations, bakery],
+		};
+
+		it("moves the selected operations to another account at once", async () => {
+			setupMocks({ operations, categories });
+			await renderOperationsPage();
+			const section = within(
+				await screen.findByRole("region", { name: "Opérations quotidiennes" }),
+			);
+
+			fireEvent.click(section.getByRole("button", { name: "Sélectionner" }));
+			fireEvent.click(section.getByRole("checkbox", { name: /Electricity/ }));
+			fireEvent.click(section.getByRole("checkbox", { name: /Bakery/ }));
+			const bar = within(
+				screen.getByRole("region", { name: "Opérations sélectionnées" }),
+			);
+			expect(bar.getByText("2 sélectionnées")).toBeInTheDocument();
+
+			fireEvent.click(bar.getByRole("button", { name: "Compte" }));
+			await screen.findByRole("dialog", {
+				name: "Changer le compte de 2 opérations",
+			});
+			await selectMantineOption("Compte", "Compte joint");
+			fireEvent.click(screen.getByRole("button", { name: "Appliquer" }));
+
+			await waitFor(() =>
+				expect(findApiCall("/operations/account", "PUT")?.options?.body).toBe(
+					JSON.stringify({
+						operationIds: ["op5", "op3"],
+						accountId: "account-2",
+					}),
+				),
+			);
+			await waitFor(() =>
+				expect(bar.getByText("0 sélectionnée")).toBeInTheDocument(),
+			);
+		});
+
+		it("selects only the operations outside any budget", async () => {
+			setupMocks({ operations, categories });
+			await renderOperationsPage();
+			await screen.findByText("Opérations quotidiennes");
+
+			expect(
+				screen.getAllByRole("button", { name: "Sélectionner" }),
+			).toHaveLength(1);
+			fireEvent.click(screen.getByRole("button", { name: "Sélectionner" }));
+			fireEvent.click(screen.getByRole("button", { name: /Food/ }));
+			expect(
+				screen.getByRole("button", { name: /Groceries/ }),
+			).toBeInTheDocument();
+
+			fireEvent.click(
+				screen.getByRole("button", { name: "Tout sélectionner" }),
+			);
+			fireEvent.click(screen.getByRole("button", { name: "Catégorie" }));
+			await screen.findByRole("dialog", {
+				name: "Changer la catégorie de 2 opérations",
+			});
+			await selectMantineOption("Catégorie", "Courses");
+			fireEvent.click(screen.getByRole("button", { name: "Appliquer" }));
+
+			await waitFor(() =>
+				expect(findApiCall("/operations/category", "PUT")?.options?.body).toBe(
+					JSON.stringify({ operationIds: ["op5", "op3"], categoryId: "c1" }),
+				),
+			);
+		});
+
+		it("opens the sheet again once the selection is done", async () => {
+			setupMocks({ operations, categories });
+			await renderOperationsPage();
+			await screen.findByText("Opérations quotidiennes");
+
+			fireEvent.click(screen.getByRole("button", { name: "Sélectionner" }));
+			fireEvent.click(screen.getByRole("button", { name: "Terminer" }));
+			fireEvent.click(screen.getByRole("button", { name: /Electricity/ }));
+
+			expect(await screen.findByRole("dialog")).toBeInTheDocument();
+			expect(
+				screen.queryByRole("region", { name: "Opérations sélectionnées" }),
 			).not.toBeInTheDocument();
 		});
 	});

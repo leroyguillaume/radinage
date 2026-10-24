@@ -25,6 +25,7 @@ import {
 	IconChevronLeft,
 	IconChevronRight,
 	IconEyeOff,
+	IconListCheck,
 	IconSortAscending,
 	IconSortDescending,
 	IconTag,
@@ -38,6 +39,7 @@ import { CategoryBadge, CategorySelect } from "@/components/CategoryBadge";
 import { ImportModal } from "@/components/ImportModal";
 import { useOperationActions } from "@/components/OperationActions";
 import { OperationRow } from "@/components/OperationRow";
+import { OperationSelectionBar } from "@/components/OperationSelectionBar";
 import type { OperationHandlers } from "@/components/OperationSheet";
 import { StatTile } from "@/components/StatTile";
 import {
@@ -366,6 +368,7 @@ function MonthlyOperationsPage() {
 	const [importResult, setImportResult] = useState<ImportResult | null>(null);
 	const [showIgnored, setShowIgnored] = useState(false);
 	const [categoryFilter, setCategoryFilter] = useState<CategoryFilter>(null);
+	const [selectedIds, setSelectedIds] = useState<Set<string> | null>(null);
 	const operationsQuery = useMonthlyOperations(year, month, showIgnored);
 	const budgetsQuery = useBudgets();
 	const categoriesQuery = useCategories();
@@ -378,6 +381,7 @@ function MonthlyOperationsPage() {
 	const currentDate = new Date(year, month - 1);
 
 	function navigateToDate(date: Date) {
+		setSelectedIds(null);
 		navigate({
 			to: "/operations",
 			search: {
@@ -449,6 +453,27 @@ function MonthlyOperationsPage() {
 	);
 
 	const sections = buildSections(groups);
+
+	// Only the unbudgeted operations on screen can be selected, whatever was picked before.
+	const selectable = [
+		...new Set(
+			groups
+				.find((g) => g.budgetId === null)
+				?.entries.map((entry) => entry.operation),
+		),
+	];
+	const selected = selectedIds
+		? selectable.filter((op) => selectedIds.has(op.id))
+		: [];
+	const selection: EntrySelection | null = selectedIds && {
+		ids: selectedIds,
+		onToggle: (op) =>
+			setSelectedIds((ids) => {
+				const next = new Set(ids);
+				if (!next.delete(op.id)) next.add(op.id);
+				return next;
+			}),
+	};
 
 	return (
 		<div className="h-full overflow-auto">
@@ -604,6 +629,12 @@ function MonthlyOperationsPage() {
 								key={section.type}
 								section={section}
 								handlers={handlers}
+								selection={section.type === "monthly" ? selection : null}
+								onSelect={
+									section.type === "monthly" && selectedIds === null
+										? () => setSelectedIds(new Set())
+										: undefined
+								}
 							/>
 						))}
 					</>
@@ -616,6 +647,20 @@ function MonthlyOperationsPage() {
 						month={month}
 						loading={operationsQuery.isPlaceholderData}
 						handlers={handlers}
+					/>
+				)}
+
+				{selectedIds !== null && (
+					<OperationSelectionBar
+						selected={selected}
+						selectable={selectable.length}
+						accounts={handlers.accounts}
+						categories={categories}
+						onSelectAll={() =>
+							setSelectedIds(new Set(selectable.map((op) => op.id)))
+						}
+						onClear={() => setSelectedIds(new Set())}
+						onDone={() => setSelectedIds(null)}
 					/>
 				)}
 			</Stack>
@@ -688,12 +733,24 @@ function SortControl({
 	);
 }
 
+/** The ids of the selected operations, and how to toggle one of them. */
+interface EntrySelection {
+	ids: Set<string>;
+	onToggle: (op: OperationResponse) => void;
+}
+
 function SectionCard({
 	section,
 	handlers,
+	selection,
+	onSelect,
 }: {
 	section: BudgetSection;
 	handlers: OperationHandlers;
+	/** Turns the unbudgeted operations' rows into checkboxes. */
+	selection: EntrySelection | null;
+	/** Enters the selection mode, offered when set. */
+	onSelect?: () => void;
 }) {
 	const { t } = useTranslation();
 	const titleId = useId();
@@ -760,6 +817,16 @@ function SectionCard({
 							)}`}
 					</Text>
 				</Stack>
+				{onSelect && (
+					<Button
+						variant="default"
+						h={44}
+						leftSection={<IconListCheck size={18} />}
+						onClick={onSelect}
+					>
+						{t("selection.start")}
+					</Button>
+				)}
 				{sortable && (
 					<SortControl
 						sort={sort}
@@ -779,6 +846,7 @@ function SectionCard({
 						group={group}
 						tone={tone}
 						handlers={handlers}
+						selection={group.budgetId === null ? selection : null}
 					/>
 				))}
 			</Box>
@@ -845,14 +913,18 @@ function BudgetGroupRow({
 	group,
 	tone,
 	handlers,
+	selection,
 }: {
 	group: BudgetGroup;
 	tone: Tone;
 	handlers: OperationHandlers;
+	selection: EntrySelection | null;
 }) {
 	const { t } = useTranslation();
 	// The daily group starts open: its operations are the ones waiting to be sorted.
-	const [opened, setOpened] = useState(group.budgetId === null);
+	const [openedByUser, setOpened] = useState(group.budgetId === null);
+	// Selecting needs the rows on screen.
+	const opened = openedByUser || selection !== null;
 
 	const label =
 		group.budgetId === null ? t(group.budgetLabel) : group.budgetLabel;
@@ -957,7 +1029,11 @@ function BudgetGroupRow({
 				<Box className={GROUP_ROW_CLASS}>{cells}</Box>
 			)}
 			{opened && hasOps && (
-				<OperationList entries={group.entries} handlers={handlers} />
+				<OperationList
+					entries={group.entries}
+					handlers={handlers}
+					selection={selection}
+				/>
 			)}
 		</Box>
 	);
@@ -966,9 +1042,11 @@ function BudgetGroupRow({
 function OperationList({
 	entries,
 	handlers,
+	selection = null,
 }: {
 	entries: OperationEntry[];
 	handlers: OperationHandlers;
+	selection?: EntrySelection | null;
 }) {
 	const { t } = useTranslation();
 	return (
@@ -1021,6 +1099,14 @@ function OperationList({
 							)
 						}
 						onOpen={handlers.onOpen}
+						selection={
+							selection
+								? {
+										selected: selection.ids.has(entry.operation.id),
+										onToggle: selection.onToggle,
+									}
+								: undefined
+						}
 					/>
 				);
 			})}

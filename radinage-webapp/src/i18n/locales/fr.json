@@ -747,27 +747,27 @@
 			"title": "Aucune opération ne correspond",
 			"hint": "Essaie un libellé plus court ou moins de filtres."
 		},
-		"fetchError": "Impossible de rechercher les opérations",
-		"selection": {
-			"start": "Sélectionner",
-			"region": "Opérations sélectionnées",
-			"count_one": "{{count}} sélectionnée",
-			"count_other": "{{count}} sélectionnées",
-			"selectAll": "Tout sélectionner",
-			"selectNone": "Tout désélectionner",
-			"done": "Terminer",
-			"account": "Compte",
-			"category": "Catégorie",
-			"accountTitle_one": "Changer le compte d'une opération",
-			"accountTitle_other": "Changer le compte de {{count}} opérations",
-			"categoryTitle_one": "Changer la catégorie d'une opération",
-			"categoryTitle_other": "Changer la catégorie de {{count}} opérations",
-			"pick": "À choisir",
-			"noCategory": "Aucune catégorie",
-			"apply": "Appliquer",
-			"splitKept_one": "Une opération ventilée garde les catégories de ses parts.",
-			"splitKept_other": "{{count}} opérations ventilées gardent les catégories de leurs parts."
-		}
+		"fetchError": "Impossible de rechercher les opérations"
+	},
+	"selection": {
+		"start": "Sélectionner",
+		"region": "Opérations sélectionnées",
+		"count_one": "{{count}} sélectionnée",
+		"count_other": "{{count}} sélectionnées",
+		"selectAll": "Tout sélectionner",
+		"selectNone": "Tout désélectionner",
+		"done": "Terminer",
+		"account": "Compte",
+		"category": "Catégorie",
+		"accountTitle_one": "Changer le compte d'une opération",
+		"accountTitle_other": "Changer le compte de {{count}} opérations",
+		"categoryTitle_one": "Changer la catégorie d'une opération",
+		"categoryTitle_other": "Changer la catégorie de {{count}} opérations",
+		"pick": "À choisir",
+		"noCategory": "Aucune catégorie",
+		"apply": "Appliquer",
+		"splitKept_one": "Une opération ventilée garde les catégories de ses parts.",
+		"splitKept_other": "{{count}} opérations ventilées gardent les catégories de leurs parts."
 	},
 	"ignoreRules": {
 		"title": "Règles d'ignore",

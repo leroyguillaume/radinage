@@ -959,7 +959,7 @@ function SearchPage() {
 										leftSection={<IconListCheck size={18} />}
 										onClick={() => setSelectedIds(new Set())}
 									>
-										{t("search.selection.start")}
+										{t("selection.start")}
 									</Button>
 								)}
 								<SortControl filters={filters} onChange={update} />
