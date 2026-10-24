@@ -72,8 +72,8 @@ pub fn estimates(readings: &[AccountBalance], movements: &[DailyMovement]) -> Ve
 }
 
 /// The balance from `from` to `to`, with a point on each of those days a balance was read or
-/// something moved, plus both ends. Starts no earlier than the first balance or movement,
-/// before which nothing is known; empty without any balance.
+/// something moved, plus both ends. Starts no earlier than the first balance or the eve of
+/// the first movement, before which nothing is known; empty without any balance.
 pub fn timeline(
     readings: &[AccountBalance],
     movements: &[DailyMovement],
@@ -85,7 +85,8 @@ pub fn timeline(
     };
     let known_from = movements
         .first()
-        .map_or(first.date, |m| m.date.min(first.date));
+        .and_then(|m| m.date.pred_opt())
+        .map_or(first.date, |eve| eve.min(first.date));
     let start = from.map_or(known_from, |from| from.max(known_from));
     if start > to {
         return Vec::new();
@@ -211,6 +212,7 @@ mod tests {
         assert_eq!(
             points,
             [
+                point(date(3, 1), dec!(600)),
                 point(date(3, 2), dec!(560)),
                 point(date(3, 10), dec!(500)),
                 BalancePoint {
@@ -218,6 +220,27 @@ mod tests {
                     ..point(date(3, 15), dec!(500))
                 },
                 point(date(3, 20), dec!(525)),
+            ]
+        );
+    }
+
+    #[test]
+    fn the_balance_before_the_first_movement_is_drawn_on_its_eve() {
+        let readings = [reading(dec!(14408.55), date(10, 24))];
+        let movements = [
+            moved(dec!(-2000), date(6, 16)),
+            moved(dec!(-2000), date(8, 1)),
+            moved(dec!(-1000), date(9, 1)),
+            moved(dec!(-4000), date(9, 16)),
+        ];
+
+        let points = timeline(&readings, &movements, Some(date(1, 1)), date(10, 24));
+
+        assert_eq!(
+            points[..2],
+            [
+                point(date(6, 15), dec!(23408.55)),
+                point(date(6, 16), dec!(21408.55)),
             ]
         );
     }

@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import {
 	CartesianGrid,
 	ComposedChart,
+	DefaultTooltipContent,
 	Line,
 	ReferenceLine,
 	ResponsiveContainer,
@@ -82,6 +83,13 @@ export function BalanceHistoryChart({
 						<Tooltip
 							labelFormatter={(time) => formatDay(Number(time))}
 							formatter={(value) => formatAmount(Number(value))}
+							content={({ payload, ...props }) => (
+								// A Scatter puts its x value in the tooltip too: the day, already the label.
+								<DefaultTooltipContent
+									{...props}
+									payload={payload.filter((entry) => entry.dataKey !== "time")}
+								/>
+							)}
 						/>
 						<Line
 							dataKey="known"
