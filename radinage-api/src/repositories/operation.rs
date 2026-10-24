@@ -229,6 +229,15 @@ pub trait OperationRepository: Send + Sync + 'static {
         category_id: Option<Uuid>,
     ) -> impl std::future::Future<Output = AppResult<bool>> + Send;
 
+    /// Move an operation to another account of its owner. Returns `false` if it does not exist
+    /// or belongs to another user.
+    fn set_account(
+        &self,
+        id: Uuid,
+        user_id: Uuid,
+        account_id: Uuid,
+    ) -> impl std::future::Future<Output = AppResult<bool>> + Send;
+
     /// Set an auto budget link without a user-id check (used internally by the matcher).
     /// Split operations are left untouched.
     fn set_auto_link(
@@ -632,6 +641,18 @@ impl OperationRepository for PgOperationRepository {
         let affected =
             sqlx::query("UPDATE operations SET category_id = $1 WHERE id = $2 AND user_id = $3")
                 .bind(category_id)
+                .bind(id)
+                .bind(user_id)
+                .execute(&self.pool)
+                .await?
+                .rows_affected();
+        Ok(affected > 0)
+    }
+
+    async fn set_account(&self, id: Uuid, user_id: Uuid, account_id: Uuid) -> AppResult<bool> {
+        let affected =
+            sqlx::query("UPDATE operations SET account_id = $1 WHERE id = $2 AND user_id = $3")
+                .bind(account_id)
                 .bind(id)
                 .bind(user_id)
                 .execute(&self.pool)
@@ -1892,6 +1913,33 @@ mod integration_tests {
         assert_eq!(
             listed_ids(&repo, user_id, by_budgets(vec![rent, food])).await,
             (vec![split, other, linked], 3)
+        );
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn an_operation_moves_to_another_account_of_its_owner_only(pool: PgPool) {
+        let repo = PgOperationRepository::new(pool.clone());
+        let user_id = setup_user(&pool).await;
+        let other_user = setup_user(&pool).await;
+        let joint = Uuid::new_v4();
+        sqlx::query(
+            "INSERT INTO accounts (id, user_id, name, kind, imported) \
+             VALUES ($1, $2, 'Joint', 'checking', TRUE)",
+        )
+        .bind(joint)
+        .bind(user_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+        let op = insert_op(&repo, user_id, dec!(-1)).await;
+
+        assert!(!repo.set_account(op, other_user, joint).await.unwrap());
+        assert!(repo.set_account(op, user_id, other_user).await.is_err());
+        assert!(repo.set_account(op, user_id, joint).await.unwrap());
+
+        assert_eq!(
+            repo.find_by_id(op, user_id).await.unwrap().account_id,
+            joint
         );
     }
 

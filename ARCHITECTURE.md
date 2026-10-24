@@ -341,7 +341,8 @@ that defines flags, environment variables and defaults together.
   way.
 - **No response exposes `user_id`.**
 - **Only an imported checking account holds operations.** Recording,
-  importing and pointing an import profile at another account is refused, and
+  importing or moving an operation to, and pointing an import profile at,
+  another account is refused, and
   an account holding operations or profiles stays an imported checking account.
 - **A manual budget link is never overwritten by auto-matching**; only an
   explicit `force` on apply replaces it.

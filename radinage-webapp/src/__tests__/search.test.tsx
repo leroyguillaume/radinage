@@ -19,6 +19,7 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { i18n } from "@/i18n";
 import type {
+	AccountResponse,
 	BudgetResponse,
 	CategoryResponse,
 	IgnoreRuleResponse,
@@ -140,6 +141,29 @@ function page(
 	};
 }
 
+function account(
+	id: string,
+	name: string,
+	receivesOperations: boolean,
+): AccountResponse {
+	return {
+		id,
+		name,
+		kind: receivesOperations ? "checking" : "savings",
+		imported: receivesOperations,
+		receivesOperations,
+		balance: null,
+		currentBalance: null,
+		createdAt: "2026-01-01T00:00:00Z",
+	};
+}
+
+const accounts = [
+	account("account-1", "Compte perso", true),
+	account("account-2", "Compte joint", true),
+	account("account-3", "Livret A", false),
+];
+
 const refundRule: IgnoreRuleResponse = {
 	id: "r1",
 	labelPattern: { type: "contains", value: "REMB" },
@@ -154,9 +178,10 @@ function setupMocks(
 	apiFetchMock.mockReset();
 	apiFetchMock.mockImplementation((path: string) => {
 		if (path === "/categories") return Promise.resolve(categories);
+		if (path === "/accounts") return Promise.resolve(accounts);
 		if (path === "/ignore-rules") return Promise.resolve([refundRule]);
 		if (path.startsWith("/budgets")) return Promise.resolve(budgets);
-		if (/^\/operations\/[^/?]+\/category$/.test(path)) {
+		if (/^\/operations\/[^/?]+\/(category|account)$/.test(path)) {
 			return Promise.resolve(salary);
 		}
 		if (path.startsWith("/operations?")) {
@@ -267,6 +292,24 @@ describe("SearchPage", () => {
 		);
 		expect(lastSearch().has("label")).toBe(false);
 		expect(lastSearch().has("uncategorized")).toBe(false);
+	});
+
+	it("moves an operation to another account from its sheet", async () => {
+		await renderSearchPage();
+		fireEvent.click(await screen.findByRole("button", { name: /SALAIRE/ }));
+		const sheet = within(await screen.findByRole("dialog"));
+		expect(sheet.getByRole("combobox", { name: "Compte" })).toHaveValue(
+			"Compte perso",
+		);
+
+		await pickOption("Compte", "Compte joint");
+
+		await waitFor(() => {
+			expect(apiFetchMock).toHaveBeenCalledWith(
+				"/operations/op-salary/account",
+				{ method: "PUT", body: JSON.stringify({ accountId: "account-2" }) },
+			);
+		});
 	});
 
 	it("maps the no-category option to uncategorized", async () => {

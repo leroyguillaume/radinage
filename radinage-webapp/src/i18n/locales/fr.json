@@ -97,6 +97,7 @@
 			"noneYet": "Crée des catégories dans les paramètres pour classer tes opérations."
 		},
 		"sheet": {
+			"account": "Compte",
 			"category": "Catégorie",
 			"categoryPlaceholder": "À choisir",
 			"budget": "Budget",

@@ -10,8 +10,10 @@ import {
 } from "@/components/OperationSheet";
 import { SplitOperationModal } from "@/components/SplitOperationModal";
 import {
+	useAccounts,
 	useIgnoreRules,
 	useLinkBudget,
+	useSetOperationAccount,
 	useSetOperationCategory,
 	useSetOperationIgnored,
 	useUnlinkBudget,
@@ -52,6 +54,8 @@ export function useOperationActions({
 	const setOperationCategory = useSetOperationCategory();
 	const updateEffectiveDate = useUpdateEffectiveDate();
 	const ignoreRules = useIgnoreRules().data ?? [];
+	const accounts = useAccounts().data ?? [];
+	const setOperationAccount = useSetOperationAccount();
 
 	const [sheetId, setSheetId] = useState<string | null>(null);
 	const [splitTarget, setSplitTarget] = useState<OperationResponse | null>(
@@ -78,10 +82,13 @@ export function useOperationActions({
 	}
 
 	const handlers: OperationHandlers = {
+		accounts,
 		budgets,
 		categories,
 		ignoreRules,
 		onOpen: (op) => setSheetId(op.id),
+		onSetAccount: (opId, accountId) =>
+			setOperationAccount.mutate({ opId, accountId }),
 		onSetCategory: (opId, categoryId) =>
 			setOperationCategory.mutate({ opId, categoryId }),
 		onCreateBudget: createBudgetFrom,

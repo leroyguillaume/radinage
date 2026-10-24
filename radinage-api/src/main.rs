@@ -476,6 +476,15 @@ where
             }),
         )
         .api_route(
+            "/operations/{id}/account",
+            put_with(handlers::operations::set_account, |op| {
+                op.tag("Operations")
+                    .summary("Move an operation to another account")
+                    .description("Put the operation on another of the caller's imported checking accounts. Both accounts' balances follow, unless the operation is dated on or before an account's balance, which already includes it. Returns 400 if the account is not one of the caller's imported checking accounts, 404 if the operation does not exist or belongs to another user.")
+                    .id("setOperationAccount")
+            }),
+        )
+        .api_route(
             "/operations/{id}/splits",
             put_with(handlers::operations::replace_splits, |op| {
                 op.tag("Operations")
@@ -1105,6 +1114,10 @@ pub(crate) mod test_util {
                 "/operations/{id}/category",
                 routing::put(handlers::operations::set_category)
                     .delete(handlers::operations::clear_category),
+            )
+            .route(
+                "/operations/{id}/account",
+                routing::put(handlers::operations::set_account),
             )
             .route(
                 "/operations/{id}/splits",

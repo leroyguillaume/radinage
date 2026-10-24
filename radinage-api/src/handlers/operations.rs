@@ -164,6 +164,13 @@ pub struct SetCategoryRequest {
     pub category_id: Uuid,
 }
 
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct SetAccountRequest {
+    /// One of the caller's imported checking accounts.
+    pub account_id: Uuid,
+}
+
 /// Full set of parts to split an operation into, replacing any existing split.
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
@@ -550,6 +557,24 @@ pub async fn set_category<U, O: OperationRepository, B, P, C: CategoryRepository
     .await
 }
 
+pub async fn set_account<U, O: OperationRepository, B, P, C, R, A: AccountRepository>(
+    State(state): State<AppState<U, O, B, P, C, R, A>>,
+    auth_user: AuthUser,
+    Path(id): Path<Uuid>,
+    Json(body): Json<SetAccountRequest>,
+) -> AppResult<Json<OperationResponse>> {
+    account_receiving_operations(&state.account_repo, body.account_id, auth_user.id).await?;
+    if !state
+        .operation_repo
+        .set_account(id, auth_user.id, body.account_id)
+        .await?
+    {
+        return Err(AppError::NotFound);
+    }
+    let op = state.operation_repo.find_by_id(id, auth_user.id).await?;
+    Ok(Json(op.into()))
+}
+
 pub async fn clear_category<U, O: OperationRepository, B, P, C, R, A>(
     State(state): State<AppState<U, O, B, P, C, R, A>>,
     auth_user: AuthUser,
@@ -728,7 +753,7 @@ mod tests {
             MockUserRepository,
         },
         test_util::{
-            auth_header, build_test_router, json_request, make_test_state,
+            auth_header, build_test_router, json_request, main_accounts, make_test_state,
             make_test_state_with_categories, no_categories, response_json,
         },
     };
@@ -1891,6 +1916,104 @@ mod tests {
                 && params.amount_max == Some(Decimal::new(505, 1))
         })
         .await;
+    }
+
+    async fn put_account(
+        op_repo: MockOperationRepository,
+        account_repo: crate::repositories::MockAccountRepository,
+        user_id: Uuid,
+        op_id: Uuid,
+        account_id: Uuid,
+    ) -> axum::response::Response {
+        use crate::test_util::{
+            make_test_state_with_all, no_categories, no_ignore_rules, no_import_profiles,
+        };
+        let app = build_test_router(make_test_state_with_all(
+            MockUserRepository::new(),
+            op_repo,
+            MockBudgetRepository::new(),
+            no_import_profiles(),
+            no_categories(),
+            no_ignore_rules(),
+            account_repo,
+        ));
+        let auth = auth_header(user_id, UserRole::User);
+        let body = serde_json::json!({ "accountId": account_id }).to_string();
+        app.oneshot(json_request(
+            "PUT",
+            &format!("/operations/{op_id}/account"),
+            Some(&body),
+            Some(&auth),
+        ))
+        .await
+        .unwrap()
+    }
+
+    #[tokio::test]
+    async fn set_account_moves_the_operation_and_returns_it() {
+        let user_id = Uuid::new_v4();
+        let op_id = Uuid::new_v4();
+        let joint = Uuid::new_v4();
+        let mut op_repo = MockOperationRepository::new();
+        op_repo
+            .expect_set_account()
+            .withf(move |id, uid, aid| *id == op_id && *uid == user_id && *aid == joint)
+            .once()
+            .returning(|_, _, _| Box::pin(async { Ok(true) }));
+        op_repo.expect_find_by_id().returning(move |_, _| {
+            Box::pin(async move {
+                Ok(Operation {
+                    account_id: joint,
+                    ..make_op(op_id, user_id)
+                })
+            })
+        });
+
+        let resp = put_account(op_repo, main_accounts(), user_id, op_id, joint).await;
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        let json: OperationResponse = response_json(resp).await;
+        assert_eq!(json.account_id, joint);
+    }
+
+    #[tokio::test]
+    async fn set_account_refuses_an_account_not_receiving_operations() {
+        let mut accounts = crate::repositories::MockAccountRepository::new();
+        accounts
+            .expect_find()
+            .returning(|_, _| Box::pin(async { Ok(None) }));
+        let mut op_repo = MockOperationRepository::new();
+        op_repo.expect_set_account().never();
+
+        let resp = put_account(
+            op_repo,
+            accounts,
+            Uuid::new_v4(),
+            Uuid::new_v4(),
+            Uuid::new_v4(),
+        )
+        .await;
+
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn set_account_of_an_unknown_operation_returns_404() {
+        let mut op_repo = MockOperationRepository::new();
+        op_repo
+            .expect_set_account()
+            .returning(|_, _, _| Box::pin(async { Ok(false) }));
+
+        let resp = put_account(
+            op_repo,
+            main_accounts(),
+            Uuid::new_v4(),
+            Uuid::new_v4(),
+            Uuid::new_v4(),
+        )
+        .await;
+
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
     }
 
     #[tokio::test]
