@@ -470,7 +470,7 @@ describe("SummaryPage", () => {
 		expect(within(card).getByText("—")).toBeInTheDocument();
 		expect(
 			within(card).getByRole("link", { name: "Ajouter un solde" }),
-		).toHaveAttribute("href", "/settings");
+		).toHaveAttribute("href", "/accounts");
 		const surplus = screen.getByRole("region", { name: "Excédent 2025" });
 		const text = compact(surplus);
 		expect(text).toMatch(/\+19200,00€Cequireste/);

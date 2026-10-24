@@ -17,7 +17,6 @@ import {
 import { createFileRoute } from "@tanstack/react-router";
 import { type FormEvent, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { AccountsSection } from "@/components/AccountsSection";
 import { IgnoreRulesSection } from "@/components/IgnoreRulesSection";
 import { ImportProfilesSection } from "@/components/ImportProfilesSection";
 import { PageHeader } from "@/components/PageHeader";
@@ -165,8 +164,6 @@ export function SettingsPage() {
 						</Stack>
 					</form>
 				</Paper>
-
-				<AccountsSection />
 
 				<IgnoreRulesSection />
 

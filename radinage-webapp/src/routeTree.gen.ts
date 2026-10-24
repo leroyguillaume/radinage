@@ -10,6 +10,7 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as AccountsRouteImport } from './routes/accounts'
 import { Route as ActivateRouteImport } from './routes/activate'
 import { Route as AdminRouteImport } from './routes/admin'
 import { Route as BudgetsRouteImport } from './routes/budgets'
@@ -20,12 +21,17 @@ import { Route as SearchRouteImport } from './routes/search'
 import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as StatsRouteImport } from './routes/stats'
 import { Route as SummaryRouteImport } from './routes/summary'
-import { Route as AccountsAccountIdRouteImport } from './routes/accounts.$accountId'
+import { Route as AccountsAccountIdRouteImport } from './routes/accounts_.$accountId'
 import { Route as BudgetsBudgetIdRouteImport } from './routes/budgets_.$budgetId'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AccountsRoute = AccountsRouteImport.update({
+  id: '/accounts',
+  path: '/accounts',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ActivateRoute = ActivateRouteImport.update({
@@ -79,7 +85,7 @@ const SummaryRoute = SummaryRouteImport.update({
   getParentRoute: () => rootRouteImport,
 } as any)
 const AccountsAccountIdRoute = AccountsAccountIdRouteImport.update({
-  id: '/accounts/$accountId',
+  id: '/accounts_/$accountId',
   path: '/accounts/$accountId',
   getParentRoute: () => rootRouteImport,
 } as any)
@@ -91,6 +97,7 @@ const BudgetsBudgetIdRoute = BudgetsBudgetIdRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/accounts': typeof AccountsRoute
   '/activate': typeof ActivateRoute
   '/admin': typeof AdminRoute
   '/budgets': typeof BudgetsRoute
@@ -106,6 +113,7 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/accounts': typeof AccountsRoute
   '/activate': typeof ActivateRoute
   '/admin': typeof AdminRoute
   '/budgets': typeof BudgetsRoute
@@ -122,6 +130,7 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/accounts': typeof AccountsRoute
   '/activate': typeof ActivateRoute
   '/admin': typeof AdminRoute
   '/budgets': typeof BudgetsRoute
@@ -132,13 +141,14 @@ export interface FileRoutesById {
   '/settings': typeof SettingsRoute
   '/stats': typeof StatsRoute
   '/summary': typeof SummaryRoute
-  '/accounts/$accountId': typeof AccountsAccountIdRoute
+  '/accounts_/$accountId': typeof AccountsAccountIdRoute
   '/budgets_/$budgetId': typeof BudgetsBudgetIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/accounts'
     | '/activate'
     | '/admin'
     | '/budgets'
@@ -154,6 +164,7 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
+    | '/accounts'
     | '/activate'
     | '/admin'
     | '/budgets'
@@ -169,6 +180,7 @@ export interface FileRouteTypes {
   id:
     | '__root__'
     | '/'
+    | '/accounts'
     | '/activate'
     | '/admin'
     | '/budgets'
@@ -179,12 +191,13 @@ export interface FileRouteTypes {
     | '/settings'
     | '/stats'
     | '/summary'
-    | '/accounts/$accountId'
+    | '/accounts_/$accountId'
     | '/budgets_/$budgetId'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  AccountsRoute: typeof AccountsRoute
   ActivateRoute: typeof ActivateRoute
   AdminRoute: typeof AdminRoute
   BudgetsRoute: typeof BudgetsRoute
@@ -206,6 +219,13 @@ declare module '@tanstack/react-router' {
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof IndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/accounts': {
+      id: '/accounts'
+      path: '/accounts'
+      fullPath: '/accounts'
+      preLoaderRoute: typeof AccountsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/activate': {
@@ -278,8 +298,8 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SummaryRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/accounts/$accountId': {
-      id: '/accounts/$accountId'
+    '/accounts_/$accountId': {
+      id: '/accounts_/$accountId'
       path: '/accounts/$accountId'
       fullPath: '/accounts/$accountId'
       preLoaderRoute: typeof AccountsAccountIdRouteImport
@@ -297,6 +317,7 @@ declare module '@tanstack/react-router' {
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  AccountsRoute: AccountsRoute,
   ActivateRoute: ActivateRoute,
   AdminRoute: AdminRoute,
   BudgetsRoute: BudgetsRoute,

@@ -110,20 +110,20 @@ function writes() {
 }
 
 async function renderPage(accountId = "pea") {
-	const { Route } = await import("@/routes/accounts.$accountId");
+	const { Route } = await import("@/routes/accounts_.$accountId");
 	const rootRoute = createRootRoute({ component: Outlet });
 	const pageRoute = createRoute({
 		getParentRoute: () => rootRoute,
 		path: "/accounts/$accountId",
 		component: Route.options.component,
 	});
-	const settingsRoute = createRoute({
+	const accountsRoute = createRoute({
 		getParentRoute: () => rootRoute,
-		path: "/settings",
+		path: "/accounts",
 		component: () => null,
 	});
 	const router = createRouter({
-		routeTree: rootRoute.addChildren([pageRoute, settingsRoute]),
+		routeTree: rootRoute.addChildren([pageRoute, accountsRoute]),
 		history: createMemoryHistory({
 			initialEntries: [`/accounts/${accountId}`],
 		}),

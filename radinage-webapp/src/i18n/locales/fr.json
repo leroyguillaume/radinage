@@ -585,8 +585,16 @@
 		"settings": "Paramètres",
 		"logout": "Se déconnecter",
 		"menu": "Menu",
-		"account": "Compte",
-		"categories": "Catégories"
+		"categories": "Catégories",
+		"accounts": "Comptes",
+		"tabs": "Navigation rapide",
+		"collapse": "Réduire le menu",
+		"expand": "Déplier le menu",
+		"closeMenu": "Fermer le menu",
+		"groups": {
+			"tracking": "Suivi",
+			"organize": "Organisation"
+		}
 	},
 	"auth": {
 		"features": {
@@ -694,7 +702,7 @@
 		"estimateNote": "Un compte épargne vaut son dernier solde relevé plus les versements de ses budgets d'épargne. Les intérêts et les variations boursières n'y sont pas : relève un solde de temps en temps pour recaler l'estimation.",
 		"open": "Voir le compte {{name}}",
 		"detail": {
-			"back": "Retour aux réglages",
+			"back": "Retour aux comptes",
 			"notFound": "Ce compte n'existe pas.",
 			"readOn": "{{amount}} relevés le {{date}}",
 			"movedSince": "+ {{amount}} versés depuis",
@@ -737,7 +745,13 @@
 			"replaces": "Ce solde remplace l'estimation : les mouvements suivants s'y ajouteront. Les soldes précédents restent dans l'historique.",
 			"dateTaken": "Un solde est déjà relevé à cette date."
 		},
-		"transfersInto": "Des virements arrivent sur ce compte : il doit garder son type."
+		"transfersInto": "Des virements arrivent sur ce compte : il doit garder son type.",
+		"totals": {
+			"all": "Patrimoine total",
+			"count_one": "{{count}} compte",
+			"count_other": "{{count}} comptes",
+			"importedHint": "Point de départ du résumé"
+		}
 	},
 	"activate": {
 		"title": "Activer votre compte",

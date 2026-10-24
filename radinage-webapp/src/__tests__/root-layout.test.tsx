@@ -6,12 +6,13 @@ import {
 	createRouter,
 	RouterProvider,
 } from "@tanstack/react-router";
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, describe, expect, it } from "vitest";
-import "@/i18n";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { i18n } from "@/i18n";
 import { Route as RootRoute } from "@/routes/__root";
 import { useAuthStore } from "@/stores/auth";
+import { useNavStore } from "@/stores/nav";
 import { theme } from "@/theme";
 
 function renderLayout(path: string) {
@@ -22,6 +23,10 @@ function renderLayout(path: string) {
 		"/search",
 		"/stats",
 		"/budgets",
+		"/accounts",
+		"/categories",
+		"/settings",
+		"/admin",
 	].map((p) =>
 		createRoute({
 			getParentRoute: () => rootRoute,
@@ -45,24 +50,35 @@ function signIn(role: string) {
 	useAuthStore.setState({ isAuthenticated: true, role });
 }
 
-async function accountMenuItems(): Promise<string[]> {
-	await userEvent.click(
-		within(screen.getByRole("banner")).getByRole("button", {
-			name: /compte|account/i,
-		}),
-	);
-	// jsdom lays nothing out, so Mantine's floating dropdown hides itself as
-	// detached from its target: the items are only reachable with `hidden`.
-	const items = await screen.findAllByRole("menuitem", { hidden: true });
-	return items.map((item) => item.textContent ?? "");
+/** The side bar's menu: the first navigation, before the mobile tab bar. */
+function sideMenu(): HTMLElement {
+	const [side] = screen.getAllByRole("navigation", { name: "Menu" });
+	if (!side) throw new Error("no side menu");
+	return side;
 }
+
+function tabBar(): HTMLElement {
+	return screen.getByRole("navigation", { name: "Navigation rapide" });
+}
+
+function hrefs(container: HTMLElement): (string | null)[] {
+	return within(container)
+		.getAllByRole("link")
+		.map((link) => link.getAttribute("href"));
+}
+
+beforeEach(async () => {
+	await i18n.changeLanguage("fr");
+});
 
 afterEach(() => {
 	useAuthStore.setState({ isAuthenticated: false, role: null });
+	useNavStore.setState({ collapsed: false });
+	localStorage.clear();
 });
 
 describe("RootLayout", () => {
-	it("marks the current section in both navigations", async () => {
+	it("marks the current section in the side menu and the tab bar", async () => {
 		signIn("user");
 		renderLayout("/operations");
 		await screen.findByText("page /operations");
@@ -73,64 +89,91 @@ describe("RootLayout", () => {
 		}
 	});
 
-	it("puts search between operations and statistics in both navigations", async () => {
+	it("groups the pages to follow apart from the ones to organize", async () => {
 		signIn("user");
 		renderLayout("/search");
 		await screen.findByText("page /search");
-		const navs = screen.getAllByRole("navigation");
-		expect(navs).toHaveLength(2);
-		for (const nav of navs) {
-			const hrefs = within(nav)
-				.getAllByRole("link")
-				.map((link) => link.getAttribute("href"));
-			expect(hrefs.slice(1, 4)).toEqual(["/operations", "/search", "/stats"]);
-			expect(
-				within(nav).getByRole("link", { current: "page" }),
-			).toHaveTextContent(/recherche|search/i);
-		}
+		expect(hrefs(sideMenu())).toEqual([
+			"/",
+			"/operations",
+			"/search",
+			"/stats",
+			"/accounts",
+			"/budgets",
+			"/categories",
+		]);
+		expect(within(sideMenu()).getByText("Suivi")).toBeInTheDocument();
+		expect(within(sideMenu()).getByText("Organisation")).toBeInTheDocument();
 	});
 
-	it("keeps admin out of the navigations and in the account menu", async () => {
+	it("keeps four daily pages in the tab bar and the rest behind its menu", async () => {
+		signIn("user");
+		renderLayout("/accounts");
+		await screen.findByText("page /accounts");
+		expect(hrefs(tabBar())).toEqual([
+			"/",
+			"/operations",
+			"/accounts",
+			"/budgets",
+		]);
+		expect(
+			within(tabBar()).getByRole("link", { current: "page" }),
+		).toHaveTextContent("Comptes");
+
+		const user = userEvent.setup();
+		await user.click(within(tabBar()).getByRole("button", { name: "Menu" }));
+		const drawer = await screen.findByRole("dialog");
+		await user.click(within(drawer).getByRole("link", { name: "Recherche" }));
+
+		expect(await screen.findByText("page /search")).toBeInTheDocument();
+		await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+	});
+
+	it("offers settings and logout, and admin to admins only", async () => {
 		signIn("admin");
 		const { unmount } = renderLayout("/summary");
 		await screen.findByText("page /summary");
+		expect(screen.getByRole("link", { name: "Paramètres" })).toHaveAttribute(
+			"href",
+			"/settings",
+		);
+		expect(screen.getByRole("link", { name: "Admin" })).toBeInTheDocument();
+		expect(
+			screen.getByRole("button", { name: "Se déconnecter" }),
+		).toBeInTheDocument();
 		for (const nav of screen.getAllByRole("navigation")) {
-			expect(within(nav).queryByRole("link", { name: /admin/i })).toBeNull();
+			expect(within(nav).queryByRole("link", { name: "Admin" })).toBeNull();
 		}
-		expect(await accountMenuItems()).toContain("Admin");
 		unmount();
 
 		signIn("user");
 		renderLayout("/summary");
 		await screen.findByText("page /summary");
-		expect(await accountMenuItems()).not.toContain("Admin");
+		expect(screen.queryByRole("link", { name: "Admin" })).toBeNull();
 	});
 
-	it("keeps nav pills named when their label is hidden", async () => {
+	it("collapses the side menu to named icons and remembers it", async () => {
 		signIn("user");
 		renderLayout("/summary");
-		const header = await screen.findByRole("banner");
-		const links = within(within(header).getByRole("navigation")).getAllByRole(
-			"link",
-		);
-		expect(links).toHaveLength(6);
-		for (const link of links) {
-			expect(link).toHaveAttribute("aria-label");
+		await screen.findByText("page /summary");
+		const user = userEvent.setup();
+
+		await user.click(screen.getByRole("button", { name: "Réduire le menu" }));
+
+		expect(
+			screen.getByRole("button", { name: "Déplier le menu" }),
+		).toBeInTheDocument();
+		expect(within(sideMenu()).queryByText("Suivi")).toBeNull();
+		for (const link of within(sideMenu()).getAllByRole("link")) {
+			expect(link).toHaveTextContent("");
+			expect(link).toHaveAccessibleName();
 		}
+		expect(localStorage.getItem("nav_collapsed")).toBe("true");
 	});
 
 	it("hides the navigation when signed out", async () => {
 		renderLayout("/summary");
 		await screen.findByText("page /summary");
 		expect(screen.queryAllByRole("navigation")).toHaveLength(0);
-	});
-
-	it("offers settings and logout from the account menu", async () => {
-		signIn("user");
-		renderLayout("/summary");
-		await screen.findByText("page /summary");
-		const items = await accountMenuItems();
-		expect(items.some((i) => /paramètres|settings/i.test(i))).toBe(true);
-		expect(items.some((i) => /déconnecter|log out/i.test(i))).toBe(true);
 	});
 });

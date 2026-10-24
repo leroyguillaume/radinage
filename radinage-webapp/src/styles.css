@@ -13,13 +13,14 @@
 	font-variant-numeric: tabular-nums;
 }
 
-.nav-pill {
+.side-link {
 	display: flex;
 	align-items: center;
-	gap: 8px;
+	gap: 12px;
+	width: 100%;
 	min-height: 44px;
-	padding: 0 16px;
-	border-radius: 999px;
+	padding: 0 12px;
+	border-radius: 12px;
 	text-decoration: none;
 	color: var(--mantine-color-dimmed);
 	font-weight: 600;
@@ -27,14 +28,34 @@
 	white-space: nowrap;
 }
 
-.nav-pill:hover {
+.side-link[data-collapsed="true"] {
+	justify-content: center;
+	padding: 0;
+}
+
+.side-link:hover {
 	background: var(--mantine-color-forest-0);
 	color: var(--mantine-color-text);
 }
 
-.nav-pill[data-active="true"] {
+.side-link[data-active="true"] {
 	background: var(--mantine-color-leaf-1);
 	color: var(--mantine-color-forest-8);
+}
+
+.side-group {
+	padding: 14px 12px 6px;
+	font-size: 12px;
+	font-weight: 700;
+	letter-spacing: 0.06em;
+	text-transform: uppercase;
+	color: var(--mantine-color-dimmed);
+}
+
+.side-divider {
+	height: 1px;
+	margin: 10px 8px;
+	background: var(--mantine-color-default-border);
 }
 
 .tab-link {

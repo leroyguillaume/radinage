@@ -11,9 +11,9 @@ import {
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { AccountsSection } from "@/components/AccountsSection";
 import { i18n } from "@/i18n";
 import type { AccountResponse, BudgetResponse } from "@/lib/types";
+import { AccountsPage } from "@/routes/accounts";
 import { theme } from "@/theme";
 
 vi.mock("@/lib/api", () => ({
@@ -103,10 +103,10 @@ function renderSection() {
 		defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
 	});
 	const rootRoute = createRootRoute();
-	const settingsRoute = createRoute({
+	const accountsRoute = createRoute({
 		getParentRoute: () => rootRoute,
 		path: "/",
-		component: AccountsSection,
+		component: AccountsPage,
 	});
 	const accountRoute = createRoute({
 		getParentRoute: () => rootRoute,
@@ -114,7 +114,7 @@ function renderSection() {
 		component: () => <p>account page</p>,
 	});
 	const router = createRouter({
-		routeTree: rootRoute.addChildren([settingsRoute, accountRoute]),
+		routeTree: rootRoute.addChildren([accountsRoute, accountRoute]),
 		history: createMemoryHistory({ initialEntries: ["/"] }),
 	});
 	render(
@@ -148,23 +148,34 @@ afterEach(() => {
 	vi.restoreAllMocks();
 });
 
-describe("AccountsSection", () => {
+describe("AccountsPage", () => {
 	it("groups the accounts and shows how each balance is known", async () => {
 		mockApi([perso, pro, livret]);
 		renderSection();
 
-		const imported = (await screen.findByText("Courants importés")).closest(
-			"div.mantine-Stack-root",
-		);
-		if (!(imported instanceof HTMLElement)) throw new Error("no group");
+		const imported = await screen.findByRole("region", {
+			name: "Courants importés",
+		});
 		expect(within(imported).getByText("Compte perso")).toBeInTheDocument();
 		expect(
 			within(imported).getByText("calculé depuis le 03/02/2025"),
 		).toBeInTheDocument();
-		expect(screen.getByText("Épargne")).toBeInTheDocument();
-		expect(screen.getByText("relevé au 21/10/2026")).toBeInTheDocument();
-		expect(screen.getByText("Non importés")).toBeInTheDocument();
-		expect(screen.getByText("sans solde")).toBeInTheDocument();
+		const savings = screen.getByRole("region", { name: "Épargne" });
+		expect(
+			within(savings).getByText("relevé au 21/10/2026"),
+		).toBeInTheDocument();
+		const other = screen.getByRole("region", { name: "Non importés" });
+		expect(within(other).getByText("sans solde")).toBeInTheDocument();
+	});
+
+	it("sums every account, then the imported and savings ones", async () => {
+		mockApi([perso, pro, livret]);
+		renderSection();
+
+		expect(await screen.findByText("Patrimoine total")).toBeInTheDocument();
+		expect(screen.getByText("3 comptes")).toBeInTheDocument();
+		expect(screen.getByText("Point de départ du résumé")).toBeInTheDocument();
+		expect(screen.getByText("1 compte")).toBeInTheDocument();
 	});
 
 	it("shows the savings budgets paying into a savings account", async () => {
@@ -201,7 +212,9 @@ describe("AccountsSection", () => {
 				/Les intérêts et les variations boursières n'y sont pas/,
 			),
 		).toBeInTheDocument();
-		expect(screen.getByText(/≈/)).toBeInTheDocument();
+		expect(
+			within(screen.getByRole("region", { name: "Épargne" })).getByText(/≈/),
+		).toBeInTheDocument();
 	});
 
 	it("says nothing of an estimate without a savings budget", async () => {

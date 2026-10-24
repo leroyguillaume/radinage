@@ -585,8 +585,16 @@
 		"settings": "Settings",
 		"logout": "Log out",
 		"menu": "Menu",
-		"account": "Account",
-		"categories": "Categories"
+		"categories": "Categories",
+		"accounts": "Accounts",
+		"tabs": "Quick navigation",
+		"collapse": "Collapse menu",
+		"expand": "Expand menu",
+		"closeMenu": "Close menu",
+		"groups": {
+			"tracking": "Tracking",
+			"organize": "Organize"
+		}
 	},
 	"auth": {
 		"features": {
@@ -694,7 +702,7 @@
 		"estimateNote": "A savings account is worth its latest balance plus what its savings budgets paid in. Interest and market changes are left out: record a balance now and then to set the estimate right.",
 		"open": "Open the account {{name}}",
 		"detail": {
-			"back": "Back to settings",
+			"back": "Back to accounts",
 			"notFound": "This account does not exist.",
 			"readOn": "{{amount}} read on {{date}}",
 			"movedSince": "+ {{amount}} paid in since",
@@ -737,7 +745,13 @@
 			"replaces": "This balance replaces the estimate: later movements add up from it. Earlier balances stay in the history.",
 			"dateTaken": "A balance is already recorded on that date."
 		},
-		"transfersInto": "Transfers land on this account: it must keep its type."
+		"transfersInto": "Transfers land on this account: it must keep its type.",
+		"totals": {
+			"all": "Total wealth",
+			"count_one": "{{count}} account",
+			"count_other": "{{count}} accounts",
+			"importedHint": "Where the summary starts"
+		}
 	},
 	"activate": {
 		"title": "Activate your account",
