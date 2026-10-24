@@ -83,7 +83,10 @@
 			"unsplitError": "Failed to undo the split",
 			"category": "Category",
 			"budgetCategory": "Budget's category: {{name}}",
-			"noCategory": "No category"
+			"noCategory": "No category",
+			"date": "Date",
+			"countsOn": "Counts on {{date}}",
+			"sameDate": "Same as the operation"
 		},
 		"category": {
 			"filter": "Filter by category",

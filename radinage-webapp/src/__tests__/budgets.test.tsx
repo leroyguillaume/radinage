@@ -86,6 +86,13 @@ let apiCalls: Array<{
 	options?: { method?: string; body?: string };
 }> = [];
 
+/** A day of the current month, the one the budgets page shows. */
+function dayThisMonth(): string {
+	const now = new Date();
+	const month = String(now.getMonth() + 1).padStart(2, "0");
+	return `${now.getFullYear()}-${month}-01`;
+}
+
 function makeLinkedOperation(
 	id: string,
 	budgetId: string,
@@ -94,7 +101,7 @@ function makeLinkedOperation(
 	return {
 		id,
 		amount,
-		date: "2024-01-15",
+		date: dayThisMonth(),
 		effectiveDate: null,
 		label: `OP ${id}`,
 		budgetLink: { type: "auto", budgetId },
@@ -587,7 +594,7 @@ describe("BudgetsPage", () => {
 				{
 					id: "o2",
 					amount: "-100.00",
-					date: "2024-01-20",
+					date: dayThisMonth(),
 					effectiveDate: null,
 					label: "RETRAIT DAB",
 					budgetLink: { type: "unlinked" },
@@ -598,6 +605,7 @@ describe("BudgetsPage", () => {
 						{
 							id: "s1",
 							amount: "-30.00",
+							effectiveDate: null,
 							budgetId: "b1",
 							categoryId: null,
 							effectiveCategoryId: null,
@@ -605,6 +613,7 @@ describe("BudgetsPage", () => {
 						{
 							id: "s2",
 							amount: "-50.00",
+							effectiveDate: null,
 							budgetId: "b2",
 							categoryId: null,
 							effectiveCategoryId: null,
@@ -612,6 +621,7 @@ describe("BudgetsPage", () => {
 						{
 							id: "s3",
 							amount: "-20.00",
+							effectiveDate: null,
 							budgetId: null,
 							categoryId: null,
 							effectiveCategoryId: null,
@@ -632,5 +642,48 @@ describe("BudgetsPage", () => {
 		const loisirs = within(screen.getByRole("article", { name: "Loisirs" }));
 		expect(loisirs.getByText(/50,00\s€ sur 200,00\s€/)).toBeInTheDocument();
 		expect(loisirs.getByText("25 %")).toBeInTheDocument();
+	});
+
+	it("leaves out the parts counting in another month", async () => {
+		setupBudgetsMock(
+			[
+				makeBudget("b1", "Courses", "monthly", "-100.00"),
+				makeBudget("b2", "Loisirs", "monthly", "-200.00"),
+			],
+			[
+				{
+					...makeLinkedOperation("o1", "b1", "-100.00"),
+					budgetLink: { type: "unlinked" },
+					splits: [
+						{
+							id: "s1",
+							amount: "-40.00",
+							effectiveDate: null,
+							budgetId: "b1",
+							categoryId: null,
+							effectiveCategoryId: null,
+						},
+						{
+							id: "s2",
+							amount: "-60.00",
+							effectiveDate: "1999-01-01",
+							budgetId: "b2",
+							categoryId: null,
+							effectiveCategoryId: null,
+						},
+					],
+				},
+			],
+		);
+		await renderBudgetsPage();
+
+		const courses = within(
+			await screen.findByRole("article", { name: "Courses" }),
+		);
+		expect(
+			await courses.findByText(/40,00\s€ sur 100,00\s€/),
+		).toBeInTheDocument();
+		const loisirs = within(screen.getByRole("article", { name: "Loisirs" }));
+		expect(loisirs.getByText(/^0,00\s€ sur 200,00\s€/)).toBeInTheDocument();
 	});
 });

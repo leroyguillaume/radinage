@@ -51,7 +51,7 @@ import {
 	useForecast,
 	useMonthlyOperations,
 } from "@/lib/hooks";
-import { type OperationEntry, operationEntries } from "@/lib/operation-parts";
+import { entriesInMonth, type OperationEntry } from "@/lib/operation-parts";
 import {
 	balanceTextColor,
 	budgetTypeTones,
@@ -286,8 +286,9 @@ function groupOperationsByBudget(
 	const groups = new Map<string | null, OperationEntry[]>();
 
 	const entries = operations
-		.flatMap(operationEntries)
-		.filter((entry) => matchesCategory(entry, categoryFilter));
+		.flatMap((op) => entriesInMonth(op, year, month))
+		.filter((entry) => matchesCategory(entry, categoryFilter))
+		.sort((a, b) => b.date.localeCompare(a.date));
 	for (const entry of entries) {
 		const existing = groups.get(entry.budgetId);
 		if (existing) {
@@ -611,6 +612,8 @@ function MonthlyOperationsPage() {
 				{showIgnored && (
 					<IgnoredOperationsCard
 						operations={ignoredOperations}
+						year={year}
+						month={month}
 						loading={operationsQuery.isPlaceholderData}
 						handlers={handlers}
 					/>
@@ -988,6 +991,7 @@ function OperationList({
 						key={entry.key}
 						op={entry.operation}
 						amount={entry.amount}
+						date={entry.date}
 						category={
 							category && (
 								<CategoryBadge
@@ -1026,10 +1030,14 @@ function OperationList({
 
 function IgnoredOperationsCard({
 	operations,
+	year,
+	month,
 	loading,
 	handlers,
 }: {
 	operations: OperationResponse[];
+	year: number;
+	month: number;
 	loading: boolean;
 	handlers: OperationHandlers;
 }) {
@@ -1064,7 +1072,7 @@ function IgnoredOperationsCard({
 				</Text>
 			) : (
 				<OperationList
-					entries={operations.flatMap(operationEntries)}
+					entries={operations.flatMap((op) => entriesInMonth(op, year, month))}
 					handlers={handlers}
 				/>
 			)}

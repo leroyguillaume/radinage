@@ -42,12 +42,14 @@ impl Operation {
     }
 }
 
-/// One part of a split operation, sharing the operation's dates and ignored flag.
+/// One part of a split operation, sharing the operation's ignored flag.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OperationSplit {
     pub id: Uuid,
     pub amount: Decimal,
+    /// Optional override date attributing the part to another month than its operation's.
+    pub effective_date: Option<NaiveDate>,
     pub budget_id: Option<Uuid>,
     /// Category the user put the part in, if any.
     pub category_id: Option<Uuid>,
@@ -66,6 +68,7 @@ impl OperationSplit {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NewOperationSplit {
     pub amount: Decimal,
+    pub effective_date: Option<NaiveDate>,
     pub budget_id: Option<Uuid>,
     pub category_id: Option<Uuid>,
 }
@@ -152,6 +155,7 @@ mod tests {
             .iter()
             .map(|&amount| NewOperationSplit {
                 amount,
+                effective_date: None,
                 budget_id: None,
                 category_id: None,
             })
@@ -256,6 +260,7 @@ mod tests {
         op.splits.push(OperationSplit {
             id: Uuid::nil(),
             amount: dec!(-10),
+            effective_date: None,
             budget_id: None,
             category_id: None,
             budget_category_id: None,
@@ -270,6 +275,7 @@ mod tests {
         let split = |category_id, budget_category_id| OperationSplit {
             id: Uuid::nil(),
             amount: dec!(-10),
+            effective_date: None,
             budget_id: None,
             category_id,
             budget_category_id,

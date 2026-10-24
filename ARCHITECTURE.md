@@ -165,7 +165,8 @@ operations and budgets; budgets own their periods and matching rules; deleting
 a user or a budget cascades through foreign keys. An operation's budget link is
 two columns (link type and budget id) that encode `BudgetLink`: unlinked,
 manual, or auto. An operation can instead be split: `operation_splits` holds
-its ordered parts, each with an amount and an optional budget that becomes
+its ordered parts, each with an amount, an optional date that attributes it
+to another month than its operation's, and an optional budget that becomes
 null when that budget is deleted. A split operation's own link stays unlinked,
 and every aggregation counts its parts instead of its amount. Users also own
 categories, which own their ordered label rules; an operation, each split part and each budget has an optional
@@ -204,6 +205,9 @@ duplicate detection on re-import and removing a split loses nothing. The cost
 is that every aggregation expands split operations into their parts:
 `list_for_summary` in SQL (which feeds both `/summary` and `/forecast`), and
 [operation-parts.ts](radinage-webapp/src/lib/operation-parts.ts) in the web app.
+A part dated on its own counts in its own month: a date filter matches a split
+operation through any of its parts, and the web app keeps only the parts of
+the month it shows.
 
 **A budget's category is resolved on read.** Categories are a second axis,
 independent of budgets: they say what money went on, budgets how much was

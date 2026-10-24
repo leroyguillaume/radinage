@@ -12,6 +12,7 @@ import {
 	TextInput,
 	Tooltip,
 } from "@mantine/core";
+import { DatePickerInput } from "@mantine/dates";
 import {
 	IconAlertCircle,
 	IconArrowsSplit2,
@@ -36,7 +37,7 @@ import {
 	useSplitOperation,
 	useUnsplitOperation,
 } from "@/lib/hooks";
-import { isSplit } from "@/lib/operation-parts";
+import { accountingDate, isSplit } from "@/lib/operation-parts";
 import { budgetTypeTones } from "@/lib/tones";
 import type {
 	BudgetResponse,
@@ -53,34 +54,40 @@ let partIdCounter = 0;
 interface PartForm {
 	id: number;
 	display: string;
+	/** Null when the part counts on its operation's date. */
+	effectiveDate: string | null;
 	budgetId: string | null;
 	categoryId: string | null;
 }
 
-function createPart(
-	display = "",
-	budgetId: string | null = null,
-	categoryId: string | null = null,
-): PartForm {
-	return { id: ++partIdCounter, display, budgetId, categoryId };
+function createPart(fields: Partial<Omit<PartForm, "id">> = {}): PartForm {
+	return {
+		id: ++partIdCounter,
+		display: "",
+		effectiveDate: null,
+		budgetId: null,
+		categoryId: null,
+		...fields,
+	};
 }
 
 function initialParts(op: OperationResponse, locale: string): PartForm[] {
 	if (isSplit(op)) {
 		return op.splits.map((split) =>
-			createPart(
-				toDisplayAmount(
+			createPart({
+				display: toDisplayAmount(
 					centsToDecimal(Math.abs(decimalToCents(split.amount))),
 					locale,
 				),
-				split.budgetId,
-				split.categoryId,
-			),
+				effectiveDate: split.effectiveDate,
+				budgetId: split.budgetId,
+				categoryId: split.categoryId,
+			}),
 		);
 	}
-	const currentBudget =
+	const budgetId =
 		op.budgetLink.type === "unlinked" ? null : op.budgetLink.budgetId;
-	return [createPart("", currentBudget, op.categoryId), createPart()];
+	return [createPart({ budgetId, categoryId: op.categoryId }), createPart()];
 }
 
 /** Budgets whose type fits the operation's sign come first, then the rest. */
@@ -172,6 +179,7 @@ function SplitForm({
 	const canFillRemainder = remainder !== 0 && lastCents + remainder > 0;
 
 	const options = budgetOptions(budgets, sign);
+	const operationDate = accountingDate(operation);
 	const tone = balanced ? budgetTypeTones.income : budgetTypeTones.expense;
 
 	function updatePart(index: number, patch: Partial<PartForm>) {
@@ -190,6 +198,7 @@ function SplitForm({
 		setError(null);
 		const splits: OperationSplitRequest[] = parts.map((p, i) => ({
 			amount: centsToDecimal(sign * (partCents[i] ?? 0)),
+			effectiveDate: p.effectiveDate,
 			budgetId: p.budgetId,
 			categoryId: p.categoryId,
 		}));
@@ -220,10 +229,7 @@ function SplitForm({
 							{operation.label}
 						</Text>
 						<Text size="sm" c="dimmed">
-							{formatOperationDate(
-								operation.effectiveDate ?? operation.date,
-								locale,
-							)}
+							{formatOperationDate(operationDate, locale)}
 						</Text>
 					</Stack>
 					<Stack gap={4} align="flex-end">
@@ -320,11 +326,24 @@ function SplitForm({
 									nothingFoundMessage={t("common.noResults")}
 									comboboxProps={{ withinPortal: true }}
 								/>
+								<DatePickerInput
+									label={t("operations.split.date")}
+									aria-label={`${t("operations.split.date")} (${partLabel})`}
+									placeholder={t("operations.split.sameDate")}
+									value={part.effectiveDate}
+									defaultDate={operationDate}
+									onChange={(value) =>
+										updatePart(index, { effectiveDate: value })
+									}
+									locale={locale}
+									valueFormat="DD/MM/YYYY"
+									clearable
+									popoverProps={{ withinPortal: true }}
+								/>
 								{categories.length > 0 && (
 									<CategorySelect
 										label={t("operations.split.category")}
 										aria-label={`${t("operations.split.category")} (${partLabel})`}
-										className="sm:col-span-2"
 										categories={categories}
 										placeholder={
 											budgetCategory

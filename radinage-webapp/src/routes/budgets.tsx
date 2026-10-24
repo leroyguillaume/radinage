@@ -127,9 +127,9 @@ function BudgetsPage() {
 	const linkedTotals = useMemo(
 		() =>
 			operationsQuery.data
-				? sumOperationsByBudget(operationsQuery.data.operations)
+				? sumOperationsByBudget(operationsQuery.data.operations, year, month)
 				: null,
-		[operationsQuery.data],
+		[operationsQuery.data, year, month],
 	);
 
 	const budgets = useMemo(() => {
