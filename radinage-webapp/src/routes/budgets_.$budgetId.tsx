@@ -35,7 +35,7 @@ import {
 	formatMonthYear,
 	formatSignedAmount,
 } from "@/lib/format";
-import { useBudgetSummary, useBudgets } from "@/lib/hooks";
+import { useAccounts, useBudgetSummary, useBudgets } from "@/lib/hooks";
 import { budgetTypeTones } from "@/lib/tones";
 import type { BudgetResponse } from "@/lib/types";
 import { headingFont, palette } from "@/theme";
@@ -171,6 +171,7 @@ function BudgetHeading({ budget }: { budget: BudgetResponse }) {
 		budget.kind.type === "occasional"
 			? `${t("budgets.kinds.occasional")} — ${budget.kind.month}/${budget.kind.year}`
 			: t(`budgets.recurrences.${budget.kind.recurrence}`);
+	const account = useAccounts().data?.find((a) => a.id === budget.accountId);
 	return (
 		<Stack gap="xs">
 			<Group gap={6}>
@@ -180,6 +181,11 @@ function BudgetHeading({ budget }: { budget: BudgetResponse }) {
 				<Badge color="gray" size="md">
 					{kind}
 				</Badge>
+				{account && (
+					<Badge color="gray" variant="outline" size="md">
+						{t("budgets.detail.account", { name: account.name })}
+					</Badge>
+				)}
 			</Group>
 			<Title order={1} fz={{ base: 30, sm: 40 }} lts="-0.02em" lh={1.1}>
 				{budget.label}

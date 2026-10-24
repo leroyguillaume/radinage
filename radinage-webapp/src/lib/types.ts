@@ -238,6 +238,8 @@ export interface BudgetResponse {
 	rules: Rule[];
 	/** Default category of the operations linked to the budget. */
 	categoryId: string | null;
+	/** Savings account a savings budget's money goes to; always null on other budgets. */
+	accountId: string | null;
 	createdAt: string;
 }
 
@@ -301,7 +303,10 @@ export interface AccountResponse {
 	receivesOperations: boolean;
 	/** Most recent balance read, null when none. */
 	balance: BalanceEntry | null;
-	/** Balance today: `balance`, plus the operations dated after it on an account receiving them. */
+	/**
+	 * Balance today: `balance`, plus the operations dated after it on an account receiving
+	 * them, or what its savings budgets saved after it on a savings account.
+	 */
 	currentBalance: string | null;
 	createdAt: string;
 }

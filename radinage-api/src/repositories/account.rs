@@ -6,13 +6,25 @@ use sqlx::{PgPool, Row, postgres::PgRow};
 use uuid::Uuid;
 
 /// An account `a` with its latest balance `b` and its current balance, filtered by the
-/// `WHERE` clause appended to it.
+/// `WHERE` clause appended to it. The amounts linked to a savings budget leave the account
+/// they are on to land on the budget's account, hence the minus sign.
 const ACCOUNT_SELECT: &str = "SELECT a.id, a.user_id, a.name, a.kind, a.imported, a.created_at,
             b.id AS balance_id, b.amount AS balance_amount, b.date AS balance_date,
             b.amount + CASE WHEN a.kind = 'checking' AND a.imported
                 THEN COALESCE((SELECT SUM(o.amount) FROM operations o
                                WHERE o.account_id = a.id AND o.date > b.date), 0)
-                ELSE 0 END AS current_balance
+                ELSE -COALESCE((SELECT SUM(saved.amount) FROM (
+                         SELECT o.amount FROM operations o
+                         JOIN budgets sb ON sb.id = o.budget_link_id
+                         WHERE sb.account_id = a.id AND o.date > b.date AND NOT o.ignored
+                           AND NOT EXISTS (SELECT 1 FROM operation_splits s
+                                           WHERE s.operation_id = o.id)
+                         UNION ALL
+                         SELECT s.amount FROM operation_splits s
+                         JOIN operations o ON o.id = s.operation_id
+                         JOIN budgets sb ON sb.id = s.budget_id
+                         WHERE sb.account_id = a.id AND o.date > b.date AND NOT o.ignored
+                     ) saved), 0) END AS current_balance
      FROM accounts a
      LEFT JOIN LATERAL (SELECT id, amount, date FROM account_balances
                         WHERE account_id = a.id ORDER BY date DESC LIMIT 1) b ON TRUE";
@@ -59,7 +71,14 @@ pub trait AccountRepository: Send + Sync + 'static {
         user_id: Uuid,
     ) -> impl std::future::Future<Output = AppResult<bool>> + Send;
 
-    /// Delete an account and its balances. Returns `false` if it does not exist or belongs to
+    /// Whether savings budgets send their money to the account.
+    fn has_savings_budgets(
+        &self,
+        id: Uuid,
+        user_id: Uuid,
+    ) -> impl std::future::Future<Output = AppResult<bool>> + Send;
+
+    /// Delete an account and its balances, unlinking its savings budgets. Returns `false` if it does not exist or belongs to
     /// another user, `AppError::Conflict` while operations or import profiles point at it.
     fn delete(
         &self,
@@ -259,6 +278,17 @@ impl AccountRepository for PgAccountRepository {
         Ok(row.try_get("used")?)
     }
 
+    async fn has_savings_budgets(&self, id: Uuid, user_id: Uuid) -> AppResult<bool> {
+        let row = sqlx::query(
+            "SELECT EXISTS (SELECT 1 FROM budgets WHERE account_id = $1 AND user_id = $2) AS used",
+        )
+        .bind(id)
+        .bind(user_id)
+        .fetch_one(&self.pool)
+        .await?;
+        Ok(row.try_get("used")?)
+    }
+
     async fn delete(&self, id: Uuid, user_id: Uuid) -> AppResult<bool> {
         let result = sqlx::query("DELETE FROM accounts WHERE id = $1 AND user_id = $2")
             .bind(id)
@@ -399,17 +429,44 @@ mod tests {
         amount: rust_decimal::Decimal,
         on: NaiveDate,
         ignored: bool,
-    ) {
+    ) -> Uuid {
+        let id = Uuid::new_v4();
         sqlx::query(
             "INSERT INTO operations (id, user_id, account_id, amount, date, label, ignored)
              VALUES ($1, $2, $3, $4, $5, 'op', $6)",
         )
-        .bind(Uuid::new_v4())
+        .bind(id)
         .bind(user_id)
         .bind(account_id)
         .bind(amount)
         .bind(on)
         .bind(ignored)
+        .execute(pool)
+        .await
+        .unwrap();
+        id
+    }
+
+    async fn insert_savings_budget(pool: &PgPool, user_id: Uuid, account_id: Uuid) -> Uuid {
+        sqlx::query(
+            "INSERT INTO budgets (user_id, label, budget_type, kind_type, account_id)
+             VALUES ($1, $2, 'savings', 'occasional', $3) RETURNING id",
+        )
+        .bind(user_id)
+        .bind(Uuid::new_v4().to_string())
+        .bind(account_id)
+        .fetch_one(pool)
+        .await
+        .unwrap()
+        .get("id")
+    }
+
+    async fn link(pool: &PgPool, operation_id: Uuid, budget_id: Uuid) {
+        sqlx::query(
+            "UPDATE operations SET budget_link_type = 'manual', budget_link_id = $2 WHERE id = $1",
+        )
+        .bind(operation_id)
+        .bind(budget_id)
         .execute(pool)
         .await
         .unwrap();
@@ -517,6 +574,80 @@ mod tests {
         let livret = repo.find(livret.id, user_id).await.unwrap().unwrap();
 
         assert_eq!(livret.current_balance, Some(dec!(9760)));
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn a_savings_account_adds_what_its_budgets_saved_after_the_latest_balance(pool: PgPool) {
+        let user_id = make_user(&pool, "alice").await;
+        let repo = PgAccountRepository::new(pool.clone());
+        let perso = repo.create(user_id, &checking("Perso")).await.unwrap();
+        let livret = repo.create(user_id, &savings("Livret A")).await.unwrap();
+        let pel = repo.create(user_id, &savings("PEL")).await.unwrap();
+        repo.add_balance(livret.id, user_id, balance(dec!(1000), date(2026, 2, 28)))
+            .await
+            .unwrap();
+        let to_livret = insert_savings_budget(&pool, user_id, livret.id).await;
+        let to_pel = insert_savings_budget(&pool, user_id, pel.id).await;
+        let saved = |amount, on, ignored| {
+            let pool = pool.clone();
+            async move {
+                let id = insert_operation(&pool, user_id, perso.id, amount, on, ignored).await;
+                link(&pool, id, to_livret).await;
+                id
+            }
+        };
+
+        // Included in the balance read that day.
+        saved(dec!(-50), date(2026, 2, 28), false).await;
+        saved(dec!(-200), date(2026, 3, 5), false).await;
+        // Withdrawn back to the checking account.
+        saved(dec!(30), date(2026, 3, 10), false).await;
+        saved(dec!(-999), date(2026, 3, 12), true).await;
+        let split = insert_operation(
+            &pool,
+            user_id,
+            perso.id,
+            dec!(-80),
+            date(2026, 3, 15),
+            false,
+        )
+        .await;
+        // Linked as a whole, but split: only its parts count.
+        link(&pool, split, to_livret).await;
+        sqlx::query(
+            "INSERT INTO operation_splits (operation_id, position, amount, budget_id)
+             VALUES ($1, 0, -60, $2), ($1, 1, -20, NULL)",
+        )
+        .bind(split)
+        .bind(to_livret)
+        .execute(&pool)
+        .await
+        .unwrap();
+        let elsewhere = insert_operation(
+            &pool,
+            user_id,
+            perso.id,
+            dec!(-70),
+            date(2026, 3, 20),
+            false,
+        )
+        .await;
+        link(&pool, elsewhere, to_pel).await;
+
+        let livret = repo.find(livret.id, user_id).await.unwrap().unwrap();
+        let pel = repo.find(pel.id, user_id).await.unwrap().unwrap();
+        let perso = repo.find(perso.id, user_id).await.unwrap().unwrap();
+
+        assert_eq!(livret.current_balance, Some(dec!(1230)));
+        assert_eq!(pel.current_balance, None);
+        assert!(repo.has_savings_budgets(livret.id, user_id).await.unwrap());
+        assert!(!repo.has_savings_budgets(perso.id, user_id).await.unwrap());
+        assert!(
+            !repo
+                .has_savings_budgets(livret.id, Uuid::new_v4())
+                .await
+                .unwrap()
+        );
     }
 
     #[sqlx::test(migrations = "./migrations")]

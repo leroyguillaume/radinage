@@ -164,37 +164,42 @@ export function useBudgets() {
 	});
 }
 
-export function useCreateBudget() {
+const accountsKey = ["accounts"];
+
+/** A savings budget's linked amounts count towards its account's balance. */
+function useInvalidateBudgets() {
 	const queryClient = useQueryClient();
+	return () => {
+		queryClient.invalidateQueries({ queryKey: ["budgets"] });
+		queryClient.invalidateQueries({ queryKey: accountsKey });
+	};
+}
+
+export function useCreateBudget() {
+	const invalidate = useInvalidateBudgets();
 	return useMutation({
 		mutationFn: (body: unknown) =>
 			apiFetch<BudgetResponse>("/budgets", {
 				method: "POST",
 				body: JSON.stringify(body),
 			}),
-		onSuccess: () => {
-			queryClient.invalidateQueries({ queryKey: ["budgets"] });
-		},
+		onSuccess: invalidate,
 	});
 }
 
 export function useUpdateBudget() {
-	const queryClient = useQueryClient();
+	const invalidate = useInvalidateBudgets();
 	return useMutation({
 		mutationFn: ({ id, body }: { id: string; body: unknown }) =>
 			apiFetch<BudgetResponse>(`/budgets/${id}`, {
 				method: "PUT",
 				body: JSON.stringify(body),
 			}),
-		onSuccess: () => {
-			queryClient.invalidateQueries({ queryKey: ["budgets"] });
-		},
+		onSuccess: invalidate,
 	});
 }
 
 /** Everything computed from operations, to refetch once one of them changes. */
-const accountsKey = ["accounts"];
-
 const operationDataKeys = [
 	accountsKey,
 	["monthly-operations"],
@@ -529,13 +534,11 @@ export function useImportData() {
 }
 
 export function useDeleteBudget() {
-	const queryClient = useQueryClient();
+	const invalidate = useInvalidateBudgets();
 	return useMutation({
 		mutationFn: (id: string) =>
 			apiFetch<void>(`/budgets/${id}`, { method: "DELETE" }),
-		onSuccess: () => {
-			queryClient.invalidateQueries({ queryKey: ["budgets"] });
-		},
+		onSuccess: invalidate,
 	});
 }
 

@@ -56,6 +56,8 @@ pub struct Account {
     pub balance: Option<BalanceEntry>,
     /// Balance today: `balance`, plus every operation of the account dated after it when the
     /// account receives operations, ignored ones included since they still moved the money.
+    /// On a savings account, the non-ignored amounts dated after it that are linked to its
+    /// savings budgets, sign flipped: they left the account they are on to land here.
     /// `None` without a balance.
     pub current_balance: Option<Decimal>,
     pub created_at: DateTime<Utc>,

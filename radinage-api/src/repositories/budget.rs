@@ -115,7 +115,7 @@ impl PgBudgetRepository {
     async fn fetch_full(&self, id: Uuid, user_id: Uuid) -> AppResult<Budget> {
         let row = sqlx::query(
             r#"SELECT id, user_id, label, budget_type, kind_type, recurrence,
-                      kind_month, kind_year, kind_amount, category_id, created_at
+                      kind_month, kind_year, kind_amount, category_id, account_id, created_at
                FROM budgets WHERE id = $1 AND user_id = $2"#,
         )
         .bind(id)
@@ -231,6 +231,7 @@ impl PgBudgetRepository {
             kind,
             rules,
             category_id: row.try_get("category_id")?,
+            account_id: row.try_get("account_id")?,
             created_at,
         })
     }
@@ -382,8 +383,8 @@ impl BudgetRepository for PgBudgetRepository {
         sqlx::query(
             r#"INSERT INTO budgets
                (id, user_id, label, budget_type, kind_type, recurrence, kind_month, kind_year,
-                kind_amount, category_id)
-               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)"#,
+                kind_amount, category_id, account_id)
+               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)"#,
         )
         .bind(id)
         .bind(user_id)
@@ -395,6 +396,7 @@ impl BudgetRepository for PgBudgetRepository {
         .bind(kind_year)
         .bind(kind_amount)
         .bind(fields.category_id)
+        .bind(fields.account_id)
         .execute(&self.pool)
         .await?;
 
@@ -425,7 +427,7 @@ impl BudgetRepository for PgBudgetRepository {
         let affected = sqlx::query(
             r#"UPDATE budgets SET label = $1, budget_type = $2, kind_type = $3,
                recurrence = $4, kind_month = $5, kind_year = $6, kind_amount = $7,
-               category_id = $10
+               category_id = $10, account_id = $11
                WHERE id = $8 AND user_id = $9"#,
         )
         .bind(&fields.label)
@@ -438,6 +440,7 @@ impl BudgetRepository for PgBudgetRepository {
         .bind(id)
         .bind(user_id)
         .bind(fields.category_id)
+        .bind(fields.account_id)
         .execute(&self.pool)
         .await?
         .rows_affected();
@@ -527,6 +530,7 @@ mod tests {
             kind,
             rules: rules.to_vec(),
             category_id: None,
+            account_id: None,
         }
     }
 
@@ -680,6 +684,53 @@ mod tests {
                 .category_id,
             None
         );
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn savings_account_is_stored_and_cleared_when_deleted(pool: PgPool) {
+        use crate::domain::account::{AccountFields, AccountKind};
+        use crate::repositories::{AccountRepository, PgAccountRepository};
+        let repo = PgBudgetRepository::new(pool.clone());
+        let accounts = PgAccountRepository::new(pool.clone());
+        let user_id = setup_user(&pool).await;
+        let other_user = setup_user(&pool).await;
+        let savings = |name: &str| AccountFields {
+            name: name.to_string(),
+            kind: AccountKind::Savings,
+            imported: false,
+        };
+        let livret = accounts
+            .create(user_id, &savings("Livret A"))
+            .await
+            .unwrap();
+        let foreign = accounts
+            .create(other_user, &savings("Livret"))
+            .await
+            .unwrap();
+        let saved_into = |budget_type, id| BudgetFields {
+            account_id: Some(id),
+            ..fields("B", budget_type, occasional_kind(), &[])
+        };
+
+        let budget = repo
+            .create(user_id, &saved_into(BudgetType::Savings, livret.id))
+            .await
+            .unwrap();
+        assert_eq!(budget.account_id, Some(livret.id));
+        assert!(
+            repo.create(user_id, &saved_into(BudgetType::Expense, livret.id))
+                .await
+                .is_err()
+        );
+        assert!(
+            repo.create(user_id, &saved_into(BudgetType::Savings, foreign.id))
+                .await
+                .is_err()
+        );
+
+        accounts.delete(livret.id, user_id).await.unwrap();
+        let budget = repo.find_by_id(budget.id, user_id).await.unwrap();
+        assert_eq!((budget.account_id, budget.user_id), (None, user_id));
     }
 
     #[sqlx::test(migrations = "./migrations")]

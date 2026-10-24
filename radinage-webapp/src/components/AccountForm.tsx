@@ -59,6 +59,17 @@ export function AccountForm({ account, onSaved, onCancel }: AccountFormProps) {
 
 	const receivesOperations = kind === "checking" && imported;
 
+	/** What a 409 on save means, judged from what the form changes on the account. */
+	function conflictKey(): string {
+		if (account?.receivesOperations && !receivesOperations) {
+			return "accounts.inUse";
+		}
+		if (account?.kind === "savings" && kind !== "savings") {
+			return "accounts.savedInto";
+		}
+		return "accounts.nameTaken";
+	}
+
 	async function handleSubmit(e: FormEvent) {
 		e.preventDefault();
 		setError(null);
@@ -80,11 +91,7 @@ export function AccountForm({ account, onSaved, onCancel }: AccountFormProps) {
 		} catch (err) {
 			setError(
 				err instanceof ApiError && err.status === 409
-					? t(
-							account && !receivesOperations && account.receivesOperations
-								? "accounts.inUse"
-								: "accounts.nameTaken",
-						)
+					? t(conflictKey())
 					: t("accounts.saveError"),
 			);
 			return;
@@ -164,7 +171,9 @@ export function AccountForm({ account, onSaved, onCancel }: AccountFormProps) {
 					{t(
 						receivesOperations
 							? "accounts.importedHint"
-							: "accounts.notImportedHint",
+							: kind === "savings"
+								? "accounts.savingsHint"
+								: "accounts.notImportedHint",
 					)}
 				</Text>
 				<Group grow align="flex-start" wrap="wrap">

@@ -39,6 +39,7 @@ function makeBudget(
 		kind: { type: "occasional", month: 4, year: 2026, amount: "-100.00" },
 		rules: [],
 		categoryId: null,
+		accountId: null,
 		createdAt: "2026-01-01T00:00:00Z",
 	};
 }

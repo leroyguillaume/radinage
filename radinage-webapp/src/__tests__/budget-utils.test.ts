@@ -22,6 +22,7 @@ function makeRecurring(
 		},
 		rules: [],
 		categoryId: null,
+		accountId: null,
 		createdAt: "2024-01-01T00:00:00Z",
 	};
 }
@@ -38,6 +39,7 @@ function makeOccasional(
 		kind: { type: "occasional", month, year, amount },
 		rules: [],
 		categoryId: null,
+		accountId: null,
 		createdAt: "2024-01-01T00:00:00Z",
 	};
 }
@@ -234,6 +236,7 @@ describe("getBudgetedAmountForMonth", () => {
 				},
 				rules: [],
 				categoryId: null,
+				accountId: null,
 				createdAt: "2024-01-01T00:00:00Z",
 			};
 			expect(getBudgetedAmountForMonth(budget, 2023, 6)).toBe(-700);
@@ -263,6 +266,7 @@ describe("getBudgetedAmountForMonth", () => {
 				},
 				rules: [],
 				categoryId: null,
+				accountId: null,
 				createdAt: "2024-01-01T00:00:00Z",
 			};
 			// Closed period starts Feb 2023

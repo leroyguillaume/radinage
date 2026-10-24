@@ -218,7 +218,12 @@
 			"categoryHint": "Given to the operations linked to this budget that have no category.",
 			"categoryEmpty": "You have no categories.",
 			"categoryCreate": "Create categories",
-			"noCategory": "No category"
+			"noCategory": "No category",
+			"account": "Savings account",
+			"accountHint": "What is linked to this budget adds to this account's balance since its last balance read.",
+			"accountEmpty": "You have no savings account.",
+			"accountCreate": "Add an account",
+			"noAccount": "No account"
 		},
 		"addRule": "Add rule",
 		"addPeriod": "Add period",
@@ -298,6 +303,7 @@
 			}
 		},
 		"detail": {
+			"account": "Into {{name}}",
 			"back": "Back to budgets",
 			"notFound": "This budget does not exist.",
 			"realTitle": {
@@ -660,6 +666,9 @@
 		"imported": "I import this account's statements",
 		"importedHint": "Its balance follows from the imported operations, and is where the summary starts from.",
 		"notImportedHint": "It is worth the last balance you read on it, and stays out of the summary.",
+		"savingsHint": "It is worth the last balance you read on it, plus what the savings budgets paying into it saved since, and stays out of the summary.",
+		"savedBy": "Fed by {{budgets}}",
+		"savedInto": "Savings budgets pay into this account: it must stay a savings account.",
 		"startingBalance": "Starting point",
 		"balance": "Balance",
 		"balanceDate": "On",

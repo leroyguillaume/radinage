@@ -6,7 +6,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AccountsSection } from "@/components/AccountsSection";
 import { i18n } from "@/i18n";
-import type { AccountResponse } from "@/lib/types";
+import type { AccountResponse, BudgetResponse } from "@/lib/types";
 import { theme } from "@/theme";
 
 vi.mock("@/lib/api", () => ({
@@ -66,7 +66,7 @@ function writtenId(path: string): string {
 	);
 }
 
-/** Serve `accounts` on GET /accounts and answer writes with `onWrite`. */
+/** Serve `accounts` on GET /accounts, `budgets` on GET /budgets, and answer writes with `onWrite`. */
 function mockApi(
 	accounts: AccountResponse[],
 	onWrite: (path: string, init: RequestInit) => Promise<unknown> = (
@@ -78,10 +78,12 @@ function mockApi(
 				? { id: writtenId(path), ...JSON.parse(init.body) }
 				: undefined,
 		),
+	budgets: BudgetResponse[] = [],
 ) {
 	apiFetchMock.mockImplementation((path: string, init?: RequestInit) => {
 		if (init?.method) return onWrite(path, init);
 		if (path === "/accounts") return Promise.resolve(accounts);
+		if (path.startsWith("/budgets")) return Promise.resolve(budgets);
 		return Promise.reject(new Error(`Unexpected path: ${path}`));
 	});
 }
@@ -137,6 +139,55 @@ describe("AccountsSection", () => {
 		expect(screen.getByText("relevé au 21/10/2026")).toBeInTheDocument();
 		expect(screen.getByText("Non importés")).toBeInTheDocument();
 		expect(screen.getByText("sans solde")).toBeInTheDocument();
+	});
+
+	it("shows the savings budgets paying into a savings account", async () => {
+		const savingsBudget = (
+			id: string,
+			label: string,
+			accountId: string | null,
+		) =>
+			({
+				id,
+				label,
+				budgetType: "savings",
+				kind: { type: "occasional", month: 1, year: 2026, amount: "-100" },
+				rules: [],
+				categoryId: null,
+				accountId,
+				createdAt: "2026-01-01T10:00:00Z",
+			}) satisfies BudgetResponse;
+		mockApi([perso, livret], undefined, [
+			savingsBudget("b1", "Épargne mensuelle", "livret"),
+			savingsBudget("b2", "Coup de pouce", "livret"),
+			savingsBudget("b3", "Tirelire", null),
+		]);
+		renderSection();
+
+		expect(
+			await screen.findByText("Alimenté par Épargne mensuelle, Coup de pouce"),
+		).toBeInTheDocument();
+		expect(
+			screen.getByText("calculé depuis le 21/10/2026"),
+		).toBeInTheDocument();
+	});
+
+	it("explains why a savings account paid into must stay one", async () => {
+		mockApi([livret], () => Promise.reject(new ApiError(409, "Conflict")));
+		renderSection();
+		const user = userEvent.setup();
+
+		await user.click(
+			await screen.findByRole("button", { name: "Modifier Livret A" }),
+		);
+		await user.click(screen.getByText("Courant"));
+		await user.click(screen.getByRole("button", { name: "Enregistrer" }));
+
+		expect(
+			await screen.findByText(
+				"Des budgets d'épargne versent sur ce compte : il doit rester un compte épargne.",
+			),
+		).toBeInTheDocument();
 	});
 
 	it("creates an imported checking account with its starting point", async () => {

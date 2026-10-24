@@ -6,10 +6,10 @@ use crate::{
         Recurrence, Rule, YearMonth,
     },
     error::{AppError, AppResult},
-    handlers::categories::ensure_category_is_users,
+    handlers::{accounts::ensure_savings_account, categories::ensure_category_is_users},
     repositories::{
-        BudgetRepository, BudgetSortField, CategoryRepository, ListBudgetsParams,
-        OperationRepository, SortOrder,
+        AccountRepository, BudgetRepository, BudgetSortField, CategoryRepository,
+        ListBudgetsParams, OperationRepository, SortOrder,
     },
     services::matcher::{MatcherService, MatcherServiceImpl},
 };
@@ -43,6 +43,8 @@ pub struct BudgetResponse {
     /// Default category of the operations and split parts linked to this budget, `null` when
     /// none.
     pub category_id: Option<Uuid>,
+    /// Savings account a savings budget's money goes to, `null` when none.
+    pub account_id: Option<Uuid>,
     /// Timestamp when the budget was created.
     pub created_at: DateTime<Utc>,
 }
@@ -56,6 +58,7 @@ impl From<Budget> for BudgetResponse {
             kind: b.kind,
             rules: b.rules,
             category_id: b.category_id,
+            account_id: b.account_id,
             created_at: b.created_at,
         }
     }
@@ -76,6 +79,11 @@ pub struct CreateBudgetRequest {
     /// budget that have none of their own; `null` (the default) for none.
     #[serde(default)]
     pub category_id: Option<Uuid>,
+    /// One of the caller's savings accounts, which a savings budget's linked amounts land on:
+    /// they add up to its current balance. Only a savings budget takes one; `null` (the
+    /// default) for none.
+    #[serde(default)]
+    pub account_id: Option<Uuid>,
 }
 
 /// Defines the budget scheduling type. Discriminated by the `type` field.
@@ -214,7 +222,15 @@ pub async fn get_budget<U, O, B: BudgetRepository, P, C, R, A>(
     Ok(Json(BudgetResponse::from(budget)))
 }
 
-pub async fn create_budget<U, O, B: BudgetRepository, P, C: CategoryRepository, R, A>(
+pub async fn create_budget<
+    U,
+    O,
+    B: BudgetRepository,
+    P,
+    C: CategoryRepository,
+    R,
+    A: AccountRepository,
+>(
     State(state): State<AppState<U, O, B, P, C, R, A>>,
     auth_user: AuthUser,
     Json(body): Json<CreateBudgetRequest>,
@@ -225,27 +241,27 @@ pub async fn create_budget<U, O, B: BudgetRepository, P, C: CategoryRepository, 
         return Err(AppError::Conflict(format!("budget limit reached ({max})")));
     }
     let fields = request_to_fields(body);
-    fields
-        .kind
-        .validate_no_overlap()
-        .map_err(AppError::BadRequest)?;
-    ensure_category_is_users(&state.category_repo, fields.category_id, auth_user.id).await?;
+    validate_fields(&state, &fields, auth_user.id).await?;
     let budget = state.budget_repo.create(auth_user.id, &fields).await?;
     Ok((StatusCode::CREATED, Json(BudgetResponse::from(budget))))
 }
 
-pub async fn update_budget<U, O, B: BudgetRepository, P, C: CategoryRepository, R, A>(
+pub async fn update_budget<
+    U,
+    O,
+    B: BudgetRepository,
+    P,
+    C: CategoryRepository,
+    R,
+    A: AccountRepository,
+>(
     State(state): State<AppState<U, O, B, P, C, R, A>>,
     auth_user: AuthUser,
     Path(id): Path<Uuid>,
     Json(body): Json<CreateBudgetRequest>,
 ) -> AppResult<Json<BudgetResponse>> {
     let fields = request_to_fields(body);
-    fields
-        .kind
-        .validate_no_overlap()
-        .map_err(AppError::BadRequest)?;
-    ensure_category_is_users(&state.category_repo, fields.category_id, auth_user.id).await?;
+    validate_fields(&state, &fields, auth_user.id).await?;
     let budget = state
         .budget_repo
         .update(id, auth_user.id, &fields)
@@ -298,6 +314,26 @@ pub async fn apply_budget<U, O: OperationRepository, B: BudgetRepository, P, C, 
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
+
+/// Check what a create or update writes: periods that do not overlap, and a category and an
+/// account of the user's, the account only on a savings budget.
+async fn validate_fields<U, O, B, P, C: CategoryRepository, R, A: AccountRepository>(
+    state: &AppState<U, O, B, P, C, R, A>,
+    fields: &BudgetFields,
+    user_id: Uuid,
+) -> AppResult<()> {
+    fields
+        .kind
+        .validate_no_overlap()
+        .map_err(AppError::BadRequest)?;
+    if fields.account_id.is_some() && fields.budget_type != BudgetType::Savings {
+        return Err(AppError::BadRequest(
+            "only a savings budget can send its money to an account".to_string(),
+        ));
+    }
+    ensure_category_is_users(&state.category_repo, fields.category_id, user_id).await?;
+    ensure_savings_account(&state.account_repo, fields.account_id, user_id).await
+}
 
 /// Convert a request DTO to the domain fields it writes.
 fn request_to_fields(body: CreateBudgetRequest) -> BudgetFields {
@@ -352,6 +388,7 @@ fn request_to_fields(body: CreateBudgetRequest) -> BudgetFields {
         kind,
         rules,
         category_id: body.category_id,
+        account_id: body.account_id,
     }
 }
 
@@ -360,18 +397,20 @@ mod tests {
     use super::*;
     use crate::{
         domain::{
+            account::{Account, AccountFields, AccountKind},
             budget::BudgetKind,
             operation::{BudgetLink, Operation, OperationSplit},
             user::UserRole,
         },
         error::AppError,
         repositories::{
-            MockBudgetRepository, MockCategoryRepository, MockOperationRepository,
-            MockUserRepository,
+            MockAccountRepository, MockBudgetRepository, MockCategoryRepository,
+            MockOperationRepository, MockUserRepository,
         },
         test_util::{
-            auth_header, build_test_router, json_request, make_test_state,
-            make_test_state_with_categories, response_json,
+            auth_header, build_test_router, json_request, main_account, make_test_state,
+            make_test_state_with_all, make_test_state_with_categories, no_categories,
+            no_ignore_rules, no_import_profiles, response_json,
         },
     };
     use axum::http::StatusCode;
@@ -397,6 +436,7 @@ mod tests {
             },
             rules: vec![],
             category_id: None,
+            account_id: None,
             created_at: Utc::now(),
         }
     }
@@ -434,6 +474,7 @@ mod tests {
             },
             rules: vec![],
             category_id: None,
+            account_id: None,
         })
         .unwrap()
     }
@@ -801,6 +842,7 @@ mod tests {
             },
             rules: vec![],
             category_id: None,
+            account_id: None,
             created_at: Utc::now(),
         };
         let resp = BudgetResponse::from(budget);
@@ -880,6 +922,7 @@ mod tests {
                     kind: fields.kind.clone(),
                     rules: fields.rules.clone(),
                     category_id: fields.category_id,
+                    account_id: None,
                     created_at: Utc::now(),
                 };
                 Box::pin(async { Ok(budget) })
@@ -930,6 +973,104 @@ mod tests {
                 .unwrap();
 
             assert_eq!(resp.status(), StatusCode::BAD_REQUEST, "{method}");
+        }
+    }
+
+    fn savings_json(budget_type: &str, account_id: Uuid) -> String {
+        let mut body: serde_json::Value = serde_json::from_str(&create_budget_json()).unwrap();
+        body["budgetType"] = serde_json::json!(budget_type);
+        body["accountId"] = serde_json::json!(account_id);
+        body.to_string()
+    }
+
+    fn accounts_of_kind(kind: AccountKind) -> MockAccountRepository {
+        let mut repo = MockAccountRepository::new();
+        repo.expect_find().returning(move |id, user_id| {
+            let account = Account {
+                fields: AccountFields {
+                    name: "Livret A".to_string(),
+                    kind,
+                    imported: false,
+                },
+                ..main_account(id, user_id)
+            };
+            Box::pin(async move { Ok(Some(account)) })
+        });
+        repo
+    }
+
+    async fn post_savings(
+        budget_repo: MockBudgetRepository,
+        account_repo: MockAccountRepository,
+        body: String,
+    ) -> axum::response::Response {
+        let app = build_test_router(make_test_state_with_all(
+            MockUserRepository::new(),
+            MockOperationRepository::new(),
+            budget_repo,
+            no_import_profiles(),
+            no_categories(),
+            no_ignore_rules(),
+            account_repo,
+        ));
+        let auth = auth_header(Uuid::new_v4(), UserRole::User);
+        app.oneshot(json_request("POST", "/budgets", Some(&body), Some(&auth)))
+            .await
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn create_savings_budget_stores_its_savings_account() {
+        let account_id = Uuid::new_v4();
+        let mut budget_repo = MockBudgetRepository::new();
+        budget_repo
+            .expect_count()
+            .returning(|_| Box::pin(async { Ok(0) }));
+        budget_repo
+            .expect_create()
+            .withf(move |_, fields| fields.account_id == Some(account_id))
+            .once()
+            .returning(|user_id, fields| {
+                let budget = Budget {
+                    budget_type: fields.budget_type,
+                    account_id: fields.account_id,
+                    ..make_budget(Uuid::new_v4(), user_id)
+                };
+                Box::pin(async { Ok(budget) })
+            });
+
+        let resp = post_savings(
+            budget_repo,
+            accounts_of_kind(AccountKind::Savings),
+            savings_json("savings", account_id),
+        )
+        .await;
+
+        assert_eq!(resp.status(), StatusCode::CREATED);
+        let json: serde_json::Value = response_json(resp).await;
+        assert_eq!(json["accountId"], account_id.to_string());
+    }
+
+    #[tokio::test]
+    async fn only_a_savings_budget_goes_to_a_savings_account() {
+        for (budget_type, kind) in [
+            ("expense", AccountKind::Savings),
+            ("savings", AccountKind::Checking),
+        ] {
+            let mut budget_repo = MockBudgetRepository::new();
+            budget_repo
+                .expect_count()
+                .returning(|_| Box::pin(async { Ok(0) }));
+            budget_repo.expect_create().never();
+
+            let resp = post_savings(
+                budget_repo,
+                accounts_of_kind(kind),
+                savings_json(budget_type, Uuid::new_v4()),
+            )
+            .await;
+
+            assert_eq!(resp.status(), StatusCode::BAD_REQUEST, "{budget_type}");
         }
     }
 }

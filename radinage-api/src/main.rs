@@ -215,7 +215,7 @@ where
             },
             Tag {
                 name: "Accounts".to_string(),
-                description: Some("Manage the bank accounts a user follows and the balances read on them. A checking account whose statements are imported holds the operations: its balance is its most recent balance plus the operations dated after it, and the forecast starts from the sum of these accounts. Any other account, savings ones included, is worth its most recent balance.".to_string()),
+                description: Some("Manage the bank accounts a user follows and the balances read on them. A checking account whose statements are imported holds the operations: its balance is its most recent balance plus the operations dated after it, and the forecast starts from the sum of these accounts. A savings account is worth its most recent balance plus what the savings budgets sending their money to it saved after it, each amount linked to them, negative on the account it is on, adding its opposite. Any other account is worth its most recent balance.".to_string()),
                 ..Tag::default()
             },
             Tag {
@@ -349,13 +349,13 @@ where
             put_with(handlers::accounts::update_account, |op| {
                 op.tag("Accounts")
                     .summary("Update an account")
-                    .description("Replace the name, kind and `imported` flag of an account, with the same rules as creation. An account holding operations or import profiles must stay an imported checking account (409 otherwise). Returns 404 if the account does not exist or belongs to another user.")
+                    .description("Replace the name, kind and `imported` flag of an account, with the same rules as creation. An account holding operations or import profiles must stay an imported checking account, one savings budgets send their money to a savings account (409 otherwise). Returns 404 if the account does not exist or belongs to another user.")
                     .id("updateAccount")
             })
             .delete_with(handlers::accounts::delete_account, |op| {
                 op.tag("Accounts")
                     .summary("Delete an account")
-                    .description("Permanently delete an account and its balances. Returns 409 while operations or import profiles point at it, 404 if it does not exist or belongs to another user.")
+                    .description("Permanently delete an account and its balances; the savings budgets sending their money to it no longer do. Returns 409 while operations or import profiles point at it, 404 if it does not exist or belongs to another user.")
                     .id("deleteAccount")
             }),
         )
@@ -544,7 +544,7 @@ where
             .post_with(handlers::budgets::create_budget, |op| {
                 op.tag("Budgets")
                     .summary("Create a budget")
-                    .description("Create a new budget category. A budget can include matcher rules (keywords or patterns) that are used to automatically link operations when applying budget rules, and a default category for the operations linked to it that have none of their own. Returns 400 when `categoryId` is not one of the caller's categories.")
+                    .description("Create a new budget category. A budget can include matcher rules (keywords or patterns) that are used to automatically link operations when applying budget rules, a default category for the operations linked to it that have none of their own, and, for a savings budget, the savings account its money goes to. Returns 400 when `categoryId` is not one of the caller's categories, or `accountId` is set on a budget that is not a savings one or does not name one of the caller's savings accounts.")
                     .id("createBudget")
             }),
         )
@@ -559,7 +559,7 @@ where
             .put_with(handlers::budgets::update_budget, |op| {
                 op.tag("Budgets")
                     .summary("Update a budget")
-                    .description("Update the name, amount, matcher rules or default category of an existing budget category. Every field in the request body replaces the current value, an absent `categoryId` clearing the default category. Returns 400 when `categoryId` is not one of the caller's categories.")
+                    .description("Update the name, amount, matcher rules, default category or savings account of an existing budget category. Every field in the request body replaces the current value, an absent `categoryId` clearing the default category and an absent `accountId` the savings account. Returns 400 when `categoryId` is not one of the caller's categories, or `accountId` is set on a budget that is not a savings one or does not name one of the caller's savings accounts.")
                     .id("updateBudget")
             })
             .delete_with(handlers::budgets::delete_budget, |op| {
@@ -764,7 +764,7 @@ where
             post_with(handlers::data::import_data, |op| {
                 op.tag("Data")
                     .summary("Import budgets and operations from a prior export")
-                    .description("Merge budgets and operations from a JSON payload previously obtained via /data/export into the authenticated user's account. Categories are deduplicated by name, budgets by label, ignore rules by pattern and amount, accounts by name, operations by (account, date, amount, label). Category, budget and ignore rule references are remapped to existing or newly-created ones. Returns 409, importing nothing, when the new categories would exceed MAX_CATEGORIES_PER_USER or the new ignore rules MAX_IGNORE_RULES_PER_USER. Accounts the user lacks are created with their balances, those matched by name keep theirs. The operations and profiles of an export made before accounts existed go to the user's first imported checking account, or to a new one, which also gets that export's balance when it has none. Returns 400, importing nothing, when an operation or profile would land on an account that does not receive operations, 409 when the new accounts would exceed MAX_ACCOUNTS_PER_USER.")
+                    .description("Merge budgets and operations from a JSON payload previously obtained via /data/export into the authenticated user's account. Categories are deduplicated by name, budgets by label, ignore rules by pattern and amount, accounts by name, operations by (account, date, amount, label). Category, budget and ignore rule references are remapped to existing or newly-created ones. Returns 409, importing nothing, when the new categories would exceed MAX_CATEGORIES_PER_USER or the new ignore rules MAX_IGNORE_RULES_PER_USER. Accounts the user lacks are created with their balances, those matched by name keep theirs. A savings budget created keeps its account when that maps to a savings account of the user's, and goes without one otherwise. The operations and profiles of an export made before accounts existed go to the user's first imported checking account, or to a new one, which also gets that export's balance when it has none. Returns 400, importing nothing, when an operation or profile would land on an account that does not receive operations, 409 when the new accounts would exceed MAX_ACCOUNTS_PER_USER.")
                     .id("importData")
             }),
         )
