@@ -27,6 +27,7 @@ import { AccountTransfersCard } from "@/components/AccountTransfersCard";
 import { AnchorLink } from "@/components/AnchorLink";
 import { BalanceHistoryChart } from "@/components/BalanceHistoryChart";
 import { BalanceModal } from "@/components/BalanceModal";
+import { ImportProfilesSection } from "@/components/ImportProfilesSection";
 import { TransferRulesCard } from "@/components/TransferRulesCard";
 import {
 	type HistoryPeriod,
@@ -359,6 +360,7 @@ function AccountPage() {
 					account={account}
 					accounts={accountsQuery.data ?? []}
 				/>
+				<ImportProfilesSection account={account} />
 
 				<Button
 					size="md"

@@ -30,7 +30,7 @@ import {
 	useDeleteImportProfile,
 	useImportProfiles,
 } from "@/lib/hooks";
-import type { ImportProfileResponse } from "@/lib/types";
+import type { AccountResponse, ImportProfileResponse } from "@/lib/types";
 import { palette } from "@/theme";
 
 function Chip({ children, color }: { children: string; color?: string }) {
@@ -166,13 +166,25 @@ interface Editing {
 	profile: ImportProfileResponse | null;
 }
 
-export function ImportProfilesSection() {
+/**
+ * The import profiles that import on an account. A new profile starts on it. Renders nothing
+ * for an account not receiving operations and without profiles.
+ */
+export function ImportProfilesSection({
+	account,
+}: {
+	account: AccountResponse;
+}) {
 	const { t } = useTranslation();
 	const profilesQuery = useImportProfiles();
 	const isMobile = useBelowBreakpoint("xs");
 	const [editing, setEditing] = useState<Editing | null>(null);
-	const profiles = profilesQuery.data ?? [];
+	const profiles = (profilesQuery.data ?? []).filter(
+		(p) => p.accountId === account.id,
+	);
 	const stopEditing = () => setEditing(null);
+
+	if (!account.receivesOperations && profiles.length === 0) return null;
 
 	return (
 		<Paper>
@@ -193,12 +205,13 @@ export function ImportProfilesSection() {
 						onSaved={stopEditing}
 						onCancel={stopEditing}
 						onDeleted={stopEditing}
+						defaultAccountId={account.id}
 					/>
 				)}
 			</Modal>
 
 			<Stack>
-				<Title order={3} fz={20}>
+				<Title order={2} fz="md" fw={700}>
 					{t("importProfiles.title")}
 				</Title>
 				<Text size="sm" c="dimmed">
@@ -233,14 +246,16 @@ export function ImportProfilesSection() {
 								))}
 							</Box>
 						)}
-						<Button
-							variant="light"
-							leftSection={<IconPlus size={18} />}
-							onClick={() => setEditing({ profile: null })}
-							className="self-start"
-						>
-							{t("importProfiles.add")}
-						</Button>
+						{account.receivesOperations && (
+							<Button
+								variant="light"
+								leftSection={<IconPlus size={18} />}
+								onClick={() => setEditing({ profile: null })}
+								className="self-start"
+							>
+								{t("importProfiles.add")}
+							</Button>
+						)}
 					</>
 				)}
 			</Stack>
