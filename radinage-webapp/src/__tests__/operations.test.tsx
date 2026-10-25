@@ -1810,8 +1810,28 @@ describe("transfers", () => {
 
 		expect(statText("Dépenses")).toMatch(/-20,00/);
 		expect(statText("Revenus")).toMatch(/0,00/);
-		expect(statText("Épargne")).toMatch(/-300,00/);
+		expect(statText("Épargne")).toMatch(/}}300,00/);
 		expect(statText("Virements internes")).toMatch(/\+450,00/);
+	});
+
+	it("deducts money taken back from savings from net savings", async () => {
+		setupMocks({
+			budgets: [],
+			operations: {
+				operations: [
+					op("t1", "VIR INTERNE VERS LIVRET A", "-300.00", toLivret),
+					op("t3", "VIR RECU DE LIVRET A", "1000.00", toLivret),
+				],
+			},
+		});
+		await renderOperationsPage();
+
+		await screen.findByRole("region", { name: "Virements" });
+		expect(statText("Épargne nette")).toMatch(
+			/-700,00.*300,00€versés,1000,00€repris/,
+		);
+		expect(statText("Revenus")).toMatch(/0,00/);
+		expect(statText("Balance")).toMatch(/\+700,00/);
 	});
 
 	it("warns about a transfer whose other side was not found", async () => {

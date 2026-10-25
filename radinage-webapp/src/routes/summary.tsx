@@ -38,6 +38,7 @@ import {
 	neutralTone,
 	type Tone,
 } from "@/lib/tones";
+import { netSavings, netSavingsTone } from "@/lib/transfers";
 import type {
 	ForecastMonth,
 	ForecastMonthStatus,
@@ -96,19 +97,6 @@ function toMonthForecast(m: ForecastMonth): MonthForecast {
 		unbudgetedForecast: Number(m.unbudgetedForecast),
 		cumulative: Number(m.cumulative),
 	};
-}
-
-/**
- * What savings gained over the period: `savings` is negative and `withdrawals`
- * positive as seen from the current account, so the sum is flipped.
- */
-function netSavings(savings: number, withdrawals: number): number {
-	return -(savings + withdrawals);
-}
-
-/** Savings gold, orange once more was taken back from savings than was put in. */
-function netSavingsTone(net: number): Tone {
-	return net < 0 ? budgetTypeTones.expense : budgetTypeTones.savings;
 }
 
 function daysInMonth({ year, month }: YearMonth): number {

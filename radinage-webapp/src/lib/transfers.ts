@@ -116,6 +116,19 @@ export function transferTone(flow: TransferFlow): Tone {
 }
 
 /**
+ * What savings gained over the period: `savings` is negative and `withdrawals`
+ * positive as seen from the current account, so the sum is flipped.
+ */
+export function netSavings(savings: number, withdrawals: number): number {
+	return -(savings + withdrawals);
+}
+
+/** Savings gold, orange once more was taken back from savings than was put in. */
+export function netSavingsTone(net: number): Tone {
+	return net < 0 ? budgetTypeTones.expense : budgetTypeTones.savings;
+}
+
+/**
  * The budgets a transfer with `account` can count towards: savings budgets sending their
  * money to it, or to no account in particular, when it puts money aside; none otherwise.
  */

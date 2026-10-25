@@ -63,7 +63,12 @@ import {
 	type Tone,
 } from "@/lib/tones";
 import { pairTransfers, type TransferPair } from "@/lib/transfer-pairs";
-import { transferFlow, transferTone } from "@/lib/transfers";
+import {
+	netSavings,
+	netSavingsTone,
+	transferFlow,
+	transferTone,
+} from "@/lib/transfers";
 import type {
 	AccountResponse,
 	BudgetResponse,
@@ -186,29 +191,37 @@ function SummaryStats({
 		}
 	}
 
-	// Money put on or taken back from savings accounts counts as net savings; the other
-	// transfers are neither income nor expenses, but still move the balance.
-	let transferredSavings = 0;
+	// Money taken back from savings is deducted from net savings, not counted as income; the
+	// other transfers are neither income nor expenses, but still move the balance.
+	let toSavings = 0;
+	let withdrawals = 0;
 	let internal = 0;
 	let unknown = 0;
 	for (const group of byType.get("transfers")?.groups ?? []) {
 		for (const entry of group.entries) {
-			const flow = transferFlow(entry.operation, accounts);
-			if (flow === "internal") {
-				internal += entry.amount;
-			} else if (flow === null) {
-				unknown += entry.amount;
-			} else {
-				transferredSavings += entry.amount;
+			switch (transferFlow(entry.operation, accounts)) {
+				case "toSavings":
+					toSavings += entry.amount;
+					break;
+				case "fromSavings":
+					withdrawals += entry.amount;
+					break;
+				case "internal":
+					internal += entry.amount;
+					break;
+				case null:
+					unknown += entry.amount;
 			}
 		}
 	}
 
 	const incomeReal = (byType.get("income")?.totalReal ?? 0) + monthlyIncome;
 	const expenseReal = (byType.get("expense")?.totalReal ?? 0) + monthlyExpense;
-	const savingsReal =
-		(byType.get("savings")?.totalReal ?? 0) + transferredSavings;
-	const balance = incomeReal + expenseReal + savingsReal + internal + unknown;
+	const savingsReal = (byType.get("savings")?.totalReal ?? 0) + toSavings;
+	const netSavingsReal = netSavings(savingsReal, withdrawals);
+	const savingsTone = netSavingsTone(netSavingsReal);
+	const balance =
+		incomeReal + expenseReal + savingsReal + withdrawals + internal + unknown;
 	const hasInternal = byType
 		.get("transfers")
 		?.groups.some((g) =>
@@ -221,11 +234,6 @@ function SummaryStats({
 			type: "expense",
 			label: t("operations.stats.expenses"),
 			value: expenseReal,
-		},
-		{
-			type: "savings",
-			label: t("operations.stats.savings"),
-			value: savingsReal,
 		},
 	];
 
@@ -240,6 +248,23 @@ function SummaryStats({
 					valueColor={budgetTypeTones[tile.type].text}
 				/>
 			))}
+			<StatTile
+				label={
+					withdrawals === 0
+						? t("operations.stats.savings")
+						: t("forecast.netSavings")
+				}
+				value={formatAmount(netSavingsReal)}
+				dotColor={savingsTone.fill}
+				valueColor={savingsTone.text}
+				hint={
+					withdrawals !== 0 &&
+					t("forecast.savingsDetail", {
+						saved: formatAmount(-savingsReal),
+						withdrawn: formatAmount(withdrawals),
+					})
+				}
+			/>
 			{hasInternal && (
 				<StatTile
 					label={t("transfers.internalStat")}
