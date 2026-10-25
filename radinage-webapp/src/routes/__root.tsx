@@ -64,6 +64,7 @@ const operationsNav: NavItem = {
 	to: "/operations",
 	activePrefix: "/operations",
 	labelKey: "nav.operations",
+	shortLabelKey: "nav.operationsShort",
 	icon: IconListDetails,
 };
 const searchNav: NavItem = {

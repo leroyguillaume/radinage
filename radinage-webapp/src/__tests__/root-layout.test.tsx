@@ -85,10 +85,10 @@ describe("RootLayout", () => {
 		renderLayout("/operations");
 		await screen.findByText("page /operations");
 		const current = screen.getAllByRole("link", { current: "page" });
-		expect(current).toHaveLength(2);
-		for (const link of current) {
-			expect(link).toHaveTextContent(/opérations|operations/i);
-		}
+		expect(current.map((link) => link.textContent)).toEqual([
+			"Suivi mensuel",
+			"Mois",
+		]);
 	});
 
 	it("groups the pages to follow apart from the ones to organize", async () => {

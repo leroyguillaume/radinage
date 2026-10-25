@@ -22,6 +22,7 @@ import { i18n } from "@/i18n";
 import type {
 	AccountResponse,
 	CategoryResponse,
+	CategorySummaryResponse,
 	ForecastResponse,
 	IgnoreRuleResponse,
 	ImportProfileResponse,
@@ -236,12 +237,14 @@ function setupMocks(
 		budgets: typeof mockBudgetsResponse;
 		operations: typeof mockMonthlyResponse;
 		categories: CategoryResponse[];
+		categorySummary: CategorySummaryResponse;
 		ignoreRules: IgnoreRuleResponse[];
 	}>,
 ) {
 	const budgets = overrides?.budgets ?? mockBudgetsResponse;
 	const operations = overrides?.operations ?? mockMonthlyResponse;
 	const categories = overrides?.categories ?? [];
+	const categorySummary = overrides?.categorySummary ?? { categories: [] };
 	const ignoreRules = overrides?.ignoreRules ?? [];
 
 	apiCalls = [];
@@ -302,6 +305,9 @@ function setupMocks(
 		}
 		if (path === "/categories") {
 			return Promise.resolve(categories);
+		}
+		if (path.startsWith("/summary/categories")) {
+			return Promise.resolve(categorySummary);
 		}
 		if (path === "/ignore-rules") {
 			return Promise.resolve(ignoreRules);
@@ -433,7 +439,7 @@ describe("MonthlyOperationsPage", () => {
 		expect(forecastCalls.map((c) => c.path)).toEqual([
 			"/forecast?fromYear=2026&fromMonth=4&months=1",
 		]);
-		expect(apiCalls.some((c) => c.path.startsWith("/summary"))).toBe(false);
+		expect(apiCalls.some((c) => c.path.startsWith("/summary?"))).toBe(false);
 	});
 
 	it("scales the forecast to the number of days of the month shown", async () => {
@@ -1443,12 +1449,48 @@ describe("MonthlyOperationsPage", () => {
 			expect(screen.getByText("Food")).toBeInTheDocument();
 		});
 
-		it("hides the filter while there are no categories", async () => {
+		it("breaks the month's income and expenses down by category", async () => {
+			setupMocks({
+				operations,
+				categories,
+				categorySummary: {
+					categories: [
+						{ categoryId: "c1", income: "0", expense: "-120.00" },
+						{ categoryId: null, income: "3000.00", expense: "-40.00" },
+					],
+				},
+			});
+			await renderOperationsPage();
+
+			const expenses = await screen.findByRole("region", {
+				name: "Dépenses par catégorie",
+			});
+			expect(
+				within(expenses)
+					.getAllByRole("progressbar")
+					.map((row) => row.getAttribute("aria-label")),
+			).toEqual([
+				expect.stringMatching(/^Courses : 120,00/),
+				expect.stringMatching(/^Sans catégorie : 40,00/),
+			]);
+			const income = screen.getByRole("region", {
+				name: "Revenus par catégorie",
+			});
+			expect(within(income).getAllByRole("progressbar")).toHaveLength(1);
+			expect(apiCalls.map((c) => c.path)).toContain(
+				"/summary/categories?fromYear=2026&fromMonth=4&toYear=2026&toMonth=4",
+			);
+		});
+
+		it("hides the filter and the breakdown while there are no categories", async () => {
 			await renderOperationsPage();
 
 			expect(await screen.findByText("Food")).toBeInTheDocument();
 			expect(
 				screen.queryByRole("combobox", { name: "Filtrer par catégorie" }),
+			).not.toBeInTheDocument();
+			expect(
+				screen.queryByRole("region", { name: "Dépenses par catégorie" }),
 			).not.toBeInTheDocument();
 		});
 	});
