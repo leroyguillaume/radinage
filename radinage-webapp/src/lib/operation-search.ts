@@ -1,9 +1,23 @@
+import dayjs from "dayjs";
+
 export const OPERATION_DIRECTIONS = ["expense", "income"] as const;
 export type OperationDirection = (typeof OPERATION_DIRECTIONS)[number];
 
 /** Choices besides the default, which leaves the ignored operations out. */
 export const IGNORED_FILTERS = ["only", "included"] as const;
 export type IgnoredFilter = (typeof IGNORED_FILTERS)[number];
+
+/** Choices besides the default, which leaves the transfers between accounts out. */
+export const TRANSFER_FILTERS = ["included", "only"] as const;
+export type TransferFilter = (typeof TRANSFER_FILTERS)[number];
+
+export const DATE_PRESETS = [
+	"thisMonth",
+	"lastMonth",
+	"thisYear",
+	"last12Months",
+] as const;
+export type DatePreset = (typeof DATE_PRESETS)[number];
 
 export const OPERATION_SORTS = ["date", "amount", "label"] as const;
 export type OperationSort = (typeof OPERATION_SORTS)[number];
@@ -28,6 +42,8 @@ export interface OperationFilters {
 	dateTo?: string;
 	/** The ignored operations alone, or along with the others; left out when absent. */
 	ignored?: IgnoredFilter;
+	/** The transfers alone, or along with the others; left out when absent. */
+	transfers?: TransferFilter;
 	sort?: OperationSort;
 	order?: SortOrder;
 }
@@ -106,6 +122,7 @@ export function parseOperationFilters(
 		dateFrom: asMatching(search.dateFrom, DATE_PATTERN),
 		dateTo: asMatching(search.dateTo, DATE_PATTERN),
 		ignored: asOneOf(search.ignored, IGNORED_FILTERS),
+		transfers: asOneOf(search.transfers, TRANSFER_FILTERS),
 		sort: asOneOf(search.sort, OPERATION_SORTS),
 		order: asOneOf(search.order, SORT_ORDERS),
 	});
@@ -130,6 +147,8 @@ export function operationSearchQuery(
 	if (filters.dateFrom) params.set("dateFrom", filters.dateFrom);
 	if (filters.dateTo) params.set("dateTo", filters.dateTo);
 	if (filters.ignored) params.set("ignored", filters.ignored);
+	// The API keeps the transfers unless told otherwise, the search leaves them out.
+	params.set("transfers", filters.transfers ?? "excluded");
 	if (filters.sort) params.set("sort", filters.sort);
 	if (filters.order) params.set("order", filters.order);
 	params.set("page", String(page));
@@ -147,10 +166,50 @@ export function activeFilterCount(filters: OperationFilters): number {
 		filters.amountMin || filters.amountMax ? 1 : 0,
 		filters.dateFrom || filters.dateTo ? 1 : 0,
 		filters.ignored ? 1 : 0,
+		filters.transfers ? 1 : 0,
 	].reduce((sum, n) => sum + n, 0);
 }
 
 /** Default direction when switching to `sort`: A to Z, newest or largest first. */
 export function defaultOrder(sort: OperationSort): SortOrder {
 	return sort === "label" ? "asc" : "desc";
+}
+
+const ISO_DATE = "YYYY-MM-DD";
+
+/** Bounds of `preset` around `today`, both inclusive. */
+export function datePresetRange(
+	preset: DatePreset,
+	today: Date,
+): Required<Pick<OperationFilters, "dateFrom" | "dateTo">> {
+	const day = dayjs(today);
+	const range = (from: dayjs.Dayjs, to: dayjs.Dayjs) => ({
+		dateFrom: from.format(ISO_DATE),
+		dateTo: to.format(ISO_DATE),
+	});
+	switch (preset) {
+		case "thisMonth":
+			return range(day.startOf("month"), day.endOf("month"));
+		case "lastMonth": {
+			const month = day.subtract(1, "month");
+			return range(month.startOf("month"), month.endOf("month"));
+		}
+		case "thisYear":
+			return range(day.startOf("year"), day.endOf("year"));
+		case "last12Months":
+			return range(day.subtract(12, "month").add(1, "day"), day);
+	}
+}
+
+/** The preset whose bounds are exactly the filtered dates, if any. */
+export function matchingDatePreset(
+	filters: OperationFilters,
+	today: Date,
+): DatePreset | undefined {
+	return DATE_PRESETS.find((preset) => {
+		const range = datePresetRange(preset, today);
+		return (
+			range.dateFrom === filters.dateFrom && range.dateTo === filters.dateTo
+		);
+	});
 }

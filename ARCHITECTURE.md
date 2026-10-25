@@ -285,7 +285,11 @@ page, computed by the same query as the count. A split operation matches a
 category or budget filter through any of its parts, but it is listed — and
 summed in `totals` — for its whole amount: the search answers "which bank
 operations", the category breakdowns of the statistics and monthly tracking
-pages "how much went where".
+pages "how much went where". The endpoint keeps the transfers unless
+`transfers` says otherwise, since the account page and the pairing of a
+transfer's two sides list them through it; the search page asks for them to be
+left out by default, a transfer being neither income nor expense and only
+inflating both totals.
 
 **The forecast is computed by the API.** `GET /forecast` returns, for each
 month of a horizon of up to 24 months, income, expenses, savings, balance and

@@ -16,7 +16,7 @@ use crate::{
     repositories::{
         AccountRepository, BudgetRepository, CategoryFilter, CategoryRepository,
         IgnoreRuleRepository, IgnoredFilter, ListOperationsParams, OperationDirection,
-        OperationRepository, OperationSortField, OperationTotals, SortOrder,
+        OperationRepository, OperationSortField, OperationTotals, SortOrder, TransferFilter,
     },
     services::matcher::{MatcherService, MatcherServiceImpl},
 };
@@ -328,6 +328,9 @@ pub struct ListOperationsQuery {
     /// Keep the operations that are not ignored (`excluded`, default), the ignored ones alone
     /// (`only`) or both (`included`).
     pub ignored: Option<IgnoredFilter>,
+    /// Keep every operation (`included`, default), those that are not transfers between the
+    /// caller's accounts (`excluded`) or the transfers alone (`only`).
+    pub transfers: Option<TransferFilter>,
     /// Include only operations counting towards one of these categories: an unsplit
     /// operation through its effective category, a split one through any of its parts.
     /// Repeat the parameter for several categories.
@@ -440,6 +443,7 @@ pub async fn list_operations<U, O: OperationRepository, B, P, C, R, A>(
         limit: page_size as i64,
         offset: ((page - 1) * page_size) as i64,
         ignored: q.ignored.unwrap_or_default(),
+        transfers: q.transfers.unwrap_or_default(),
         category: CategoryFilter {
             category_ids: q.category_id,
             uncategorized: q.uncategorized,
@@ -2715,6 +2719,18 @@ mod tests {
             ("ignored=included", IgnoredFilter::Included),
         ] {
             expect_list_params(query, move |params| params.ignored == expected).await;
+        }
+    }
+
+    #[tokio::test]
+    async fn list_operations_passes_the_transfer_filter() {
+        for (query, expected) in [
+            ("", TransferFilter::Included),
+            ("transfers=included", TransferFilter::Included),
+            ("transfers=excluded", TransferFilter::Excluded),
+            ("transfers=only", TransferFilter::Only),
+        ] {
+            expect_list_params(query, move |params| params.transfers == expected).await;
         }
     }
 

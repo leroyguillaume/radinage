@@ -538,3 +538,34 @@ async fn deleting_a_transfer_rule_undoes_its_transfers(pool: PgPool) {
             .unwrap()
     );
 }
+
+#[sqlx::test(migrations = "./migrations")]
+async fn list_filters_by_transfer(pool: PgPool) {
+    let repo = PgOperationRepository::new(pool.clone());
+    let a = setup(&pool).await;
+    let to_livret = insert(&repo, a.user_id, a.main, dec!(-50), day(2)).await;
+    repo.set_transfer(to_livret, a.user_id, a.livret, None)
+        .await
+        .unwrap();
+    let groceries = insert(&repo, a.user_id, a.main, dec!(-20), day(3)).await;
+
+    for (transfers, expected) in [
+        (TransferFilter::Included, vec![groceries, to_livret]),
+        (TransferFilter::Excluded, vec![groceries]),
+        (TransferFilter::Only, vec![to_livret]),
+    ] {
+        let (ops, totals) = repo
+            .list(
+                a.user_id,
+                &ListOperationsParams {
+                    transfers,
+                    limit: 10,
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+        assert_eq!(ops.iter().map(|op| op.id).collect::<Vec<_>>(), expected);
+        assert_eq!(totals.count, expected.len() as i64);
+    }
+}

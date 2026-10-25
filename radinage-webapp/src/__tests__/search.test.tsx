@@ -498,6 +498,49 @@ describe("SearchPage", () => {
 		await waitFor(() => expect(lastSearch().has("ignored")).toBe(false));
 	});
 
+	it("leaves the transfers out by default, or keeps them on demand", async () => {
+		await renderSearchPage();
+		await screen.findByText("LOYER FEVRIER");
+		expect(lastSearch().get("transfers")).toBe("excluded");
+
+		fireEvent.click(screen.getByRole("radio", { name: "Seuls" }));
+		await waitFor(() => expect(lastSearch().get("transfers")).toBe("only"));
+
+		fireEvent.click(screen.getByRole("radio", { name: "Inclus" }));
+		await waitFor(() => expect(lastSearch().get("transfers")).toBe("included"));
+
+		fireEvent.click(screen.getByRole("radio", { name: "Exclus" }));
+		await waitFor(() => expect(lastSearch().get("transfers")).toBe("excluded"));
+	});
+
+	it("fills both dates from a preset", async () => {
+		vi.useFakeTimers({ toFake: ["Date"], now: new Date(2026, 9, 25) });
+		await renderSearchPage();
+		await screen.findByText("LOYER FEVRIER");
+
+		fireEvent.click(screen.getByRole("button", { name: "Mois dernier" }));
+
+		await waitFor(() => {
+			expect(lastSearch().get("dateFrom")).toBe("2026-09-01");
+			expect(lastSearch().get("dateTo")).toBe("2026-09-30");
+		});
+		expect(
+			screen.getByRole("button", { name: "Mois dernier", pressed: true }),
+		).toBeInTheDocument();
+		vi.useRealTimers();
+	});
+
+	it("searches from a single date bound and names it in its chip", async () => {
+		await renderSearchPage("/search?dateFrom=2026-03-01&transfers=only");
+		await screen.findByText("LOYER FEVRIER");
+
+		expect(lastSearch().get("dateFrom")).toBe("2026-03-01");
+		expect(lastSearch().has("dateTo")).toBe(false);
+		const chips = screen.getByRole("list", { name: "Filtres actifs" });
+		expect(within(chips).getByText("Depuis le 01/03/2026")).toBeInTheDocument();
+		expect(within(chips).getByText("Virements seulement")).toBeInTheDocument();
+	});
+
 	it("does not send an invalid amount", async () => {
 		await renderSearchPage();
 		await screen.findByText("LOYER FEVRIER");
