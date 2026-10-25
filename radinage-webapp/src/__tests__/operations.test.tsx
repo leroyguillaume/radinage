@@ -30,6 +30,7 @@ import type {
 	OperationResponse,
 } from "@/lib/types";
 import { useLastSearchStore } from "@/stores/last-search";
+import { useOperationSectionsStore } from "@/stores/operation-sections";
 import { theme } from "@/theme";
 import { selectMantineOption } from "./mantine";
 import { resetViewport, setViewportWidth } from "./viewport";
@@ -385,10 +386,14 @@ async function renderOperationsPage(year = "2026", month = "4") {
 const DESKTOP_WIDTH = 1280;
 const PHONE_WIDTH = 390;
 
+const ALL_SECTIONS = ["income", "expense", "savings", "monthly", "transfers"];
+
 beforeEach(async () => {
 	await i18n.changeLanguage("fr");
 	setViewportWidth(DESKTOP_WIDTH);
 	setupMocks();
+	// Most tests look inside the sections, which start folded.
+	useOperationSectionsStore.setState({ open: ALL_SECTIONS });
 });
 
 afterEach(() => {
@@ -1638,6 +1643,80 @@ describe("MonthlyOperationsPage", () => {
 function findApiCall(path: string, method: string) {
 	return apiCalls.find((c) => c.path === path && c.options?.method === method);
 }
+
+describe("folding sections", () => {
+	beforeEach(() => {
+		localStorage.clear();
+		useOperationSectionsStore.setState({ open: [] });
+	});
+
+	function sectionToggle(name: string) {
+		return screen.findByRole("button", { name, expanded: false });
+	}
+
+	it("folds every section at first, keeping its total and status", async () => {
+		await renderOperationsPage();
+
+		for (const name of ["Revenus", "Dépenses", "Opérations quotidiennes"]) {
+			expect(await sectionToggle(name)).toBeInTheDocument();
+		}
+		expect(screen.queryByText("Food")).not.toBeInTheDocument();
+		expect(screen.queryByRole("button", { name: "Sélectionner" })).toBeNull();
+		const expenses = await screen.findByRole("region", { name: "Dépenses" });
+		expect(within(expenses).getByRole("progressbar")).toBeInTheDocument();
+	});
+
+	it("unfolds a section on click and remembers it across visits", async () => {
+		await renderOperationsPage();
+		const user = userEvent.setup();
+
+		await user.click(await sectionToggle("Dépenses"));
+
+		expect(await screen.findByText("Food")).toBeInTheDocument();
+		expect(
+			screen.getByRole("button", { name: "Dépenses", expanded: true }),
+		).toBeInTheDocument();
+		expect(
+			JSON.parse(localStorage.getItem("operations_open_sections") ?? "null"),
+		).toEqual(["expense"]);
+	});
+
+	it("folds an unfolded section back", async () => {
+		useOperationSectionsStore.setState({ open: ["expense"] });
+		await renderOperationsPage();
+		const user = userEvent.setup();
+
+		await screen.findByText("Food");
+		await user.click(
+			screen.getByRole("button", { name: "Dépenses", expanded: true }),
+		);
+
+		expect(screen.queryByText("Food")).not.toBeInTheDocument();
+		expect(useOperationSectionsStore.getState().open).toEqual([]);
+	});
+
+	it("counts the overrun budgets of folded expenses", async () => {
+		setupMocks({
+			budgets: mockBudgetsResponse.map((b) =>
+				b.id === "b1"
+					? {
+							...b,
+							kind: {
+								...b.kind,
+								currentPeriod: { ...b.kind.currentPeriod, amount: "-10.00" },
+							},
+						}
+					: b,
+			),
+		});
+		await renderOperationsPage();
+
+		const expenses = await screen.findByRole("region", { name: "Dépenses" });
+		expect(
+			await within(expenses).findByText("1 budget dépassé"),
+		).toBeInTheDocument();
+	});
+});
 
 describe("operation sheet", () => {
 	const categories: CategoryResponse[] = [

@@ -42,6 +42,8 @@
 		"forecastHint": "prévision sur 3 mois",
 		"ofBudgeted": "sur {{amount}} budgétés",
 		"ofForecast": "sur {{amount}} prévus",
+		"overBudgets_one": "{{count}} budget dépassé",
+		"overBudgets_other": "{{count}} budgets dépassés",
 		"sortBy": "Trier par",
 		"sortAscending": "Ordre croissant",
 		"sortDescending": "Ordre décroissant",

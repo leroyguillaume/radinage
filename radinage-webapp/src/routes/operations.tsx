@@ -79,6 +79,7 @@ import type {
 	OperationResponse,
 } from "@/lib/types";
 import { useRememberSearch } from "@/stores/last-search";
+import { useOperationSectionsStore } from "@/stores/operation-sections";
 import { palette } from "@/theme";
 
 interface OperationsSearch {
@@ -827,10 +828,17 @@ function SectionCard({
 }) {
 	const { t } = useTranslation();
 	const titleId = useId();
+	const bodyId = useId();
 	const [sort, setSort] = useState<SortState>({
 		column: "budget",
 		direction: "asc",
 	});
+	const unfolded = useOperationSectionsStore((s) =>
+		s.open.includes(section.type),
+	);
+	const toggle = useOperationSectionsStore((s) => s.toggle);
+	// Selecting needs the rows on screen.
+	const opened = unfolded || selection !== null;
 
 	const isMonthly = section.type === "monthly";
 	const tone = sectionTone(section.type);
@@ -841,6 +849,12 @@ function SectionCard({
 			);
 	const sortedGroups = sortGroups(section.groups, sort);
 	const sortable = section.groups.filter((g) => g.budgetId !== null).length > 1;
+	const progress = groupProgress(
+		section.type,
+		section.totalReal,
+		section.totalBudgeted,
+		t,
+	);
 
 	return (
 		<Paper
@@ -849,80 +863,128 @@ function SectionCard({
 			style={{ overflow: "hidden" }}
 			aria-labelledby={titleId}
 		>
-			<Group
-				justify="space-between"
-				align="center"
-				gap="sm"
-				wrap="wrap"
+			<Stack
+				gap="xs"
+				pos="relative"
 				px={{ base: "md", sm: 20 }}
 				py="md"
+				className="hover:bg-(--row-hover)"
+				style={{ "--row-hover": palette.surfaceMuted }}
 			>
-				<Stack gap={2} miw={0}>
-					<Group gap={10} wrap="nowrap">
-						<Box
-							w={12}
-							h={12}
-							bg={tone.fill}
-							style={{ borderRadius: 4, flexShrink: 0 }}
-						/>
-						<Title
-							id={titleId}
-							order={2}
-							fz={{ base: 19, sm: 22 }}
-							fw={700}
-							lh={1.2}
-						>
-							{title}
-						</Title>
-					</Group>
-					<Text size="sm" c="dimmed" className="tabular-nums">
-						<Text span fw={700} fz="md" c="var(--mantine-color-text)">
-							{formatAmount(normalize(section.type, section.totalReal))}
+				<Group justify="space-between" align="center" gap="sm" wrap="wrap">
+					<Stack gap={2} miw={0}>
+						<Group gap={10} wrap="nowrap">
+							<IconChevronRight
+								size={18}
+								color={palette.dimmed}
+								aria-hidden
+								style={{
+									flexShrink: 0,
+									transform: opened ? "rotate(90deg)" : undefined,
+									transition: "transform 150ms ease",
+								}}
+							/>
+							<Box
+								w={12}
+								h={12}
+								bg={tone.fill}
+								style={{ borderRadius: 4, flexShrink: 0 }}
+							/>
+							<Title
+								id={titleId}
+								order={2}
+								fz={{ base: 19, sm: 22 }}
+								fw={700}
+								lh={1.2}
+							>
+								{/* Stretched over the whole header, so a tap anywhere on it folds the section. */}
+								<UnstyledButton
+									aria-expanded={opened}
+									aria-controls={opened ? bodyId : undefined}
+									onClick={() => toggle(section.type)}
+									className="after:absolute after:inset-0 after:content-['']"
+									style={{ font: "inherit" }}
+								>
+									{title}
+								</UnstyledButton>
+							</Title>
+						</Group>
+						<Text size="sm" c="dimmed" className="tabular-nums">
+							<Text span fw={700} fz="md" c="var(--mantine-color-text)">
+								{formatAmount(progress.real)}
+							</Text>
+							{progress.budgeted !== null &&
+								` ${t(
+									isMonthly ? "operations.ofForecast" : "operations.ofBudgeted",
+									{ amount: formatAmount(progress.budgeted) },
+								)}`}
 						</Text>
-						{section.totalBudgeted !== null &&
-							` ${t(
-								isMonthly ? "operations.ofForecast" : "operations.ofBudgeted",
-								{
-									amount: formatAmount(
-										normalize(section.type, section.totalBudgeted),
-									),
-								},
-							)}`}
-					</Text>
-				</Stack>
-				{onSelect && (
-					<Button
-						variant="default"
-						h={44}
-						leftSection={<IconListCheck size={18} />}
-						onClick={onSelect}
-					>
-						{t("selection.start")}
-					</Button>
+					</Stack>
+					{opened ? (
+						(onSelect || sortable) && (
+							<Group gap="sm" wrap="wrap" pos="relative">
+								{onSelect && (
+									<Button
+										variant="default"
+										h={44}
+										leftSection={<IconListCheck size={18} />}
+										onClick={onSelect}
+									>
+										{t("selection.start")}
+									</Button>
+								)}
+								{sortable && (
+									<SortControl
+										sort={sort}
+										onChange={setSort}
+										budgetedLabel={
+											isMonthly
+												? t("operations.columns.forecastAmount")
+												: t("operations.columns.budgetedAmount")
+										}
+									/>
+								)}
+							</Group>
+						)
+					) : (
+						<StatusBadge status={foldedStatus(section, progress, t)} />
+					)}
+				</Group>
+				{!opened && progress.ratio !== null && (
+					<Group gap="sm" wrap="nowrap" className="tabular-nums">
+						<Progress
+							flex={1}
+							value={Math.min(100, progress.ratio * 100)}
+							color={progress.isOver ? "tangerine.6" : tone.fill}
+							bg={palette.track}
+							size="md"
+							aria-label={title}
+						/>
+						<Text size="sm" c="dimmed">
+							{`${Math.round(progress.ratio * 100)} %`}
+						</Text>
+					</Group>
 				)}
-				{sortable && (
-					<SortControl
-						sort={sort}
-						onChange={setSort}
-						budgetedLabel={
-							isMonthly
-								? t("operations.columns.forecastAmount")
-								: t("operations.columns.budgetedAmount")
-						}
-					/>
-				)}
-			</Group>
-			<Box component="ul" m={0} p={0} style={{ listStyle: "none" }}>
-				{sortedGroups.map((group) => (
-					<BudgetGroupRow
-						key={group.budgetId ?? "__unlinked"}
-						group={group}
-						tone={tone}
-						handlers={handlers}
-						selection={group.budgetId === null ? selection : null}
-					/>
-				))}
-			</Box>
+			</Stack>
+			{opened && (
+				<Box
+					id={bodyId}
+					component="ul"
+					m={0}
+					p={0}
+					style={{ listStyle: "none" }}
+				>
+					{sortedGroups.map((group) => (
+						<BudgetGroupRow
+							key={group.budgetId ?? "__unlinked"}
+							group={group}
+							tone={tone}
+							handlers={handlers}
+							selection={group.budgetId === null ? selection : null}
+						/>
+					))}
+				</Box>
+			)}
 		</Paper>
 	);
 }
@@ -961,6 +1023,80 @@ function groupStatus(
 				}),
 				color: "leaf",
 			};
+}
+
+interface GroupProgress {
+	real: number;
+	budgeted: number | null;
+	ratio: number | null;
+	isOver: boolean;
+	status: GroupStatus | null;
+}
+
+function groupProgress(
+	type: SectionType,
+	realAmount: number,
+	budgetedAmount: number | null,
+	t: TFunction,
+): GroupProgress {
+	const real = normalize(type, realAmount);
+	const budgeted =
+		budgetedAmount !== null ? normalize(type, budgetedAmount) : null;
+	const ratio =
+		budgeted !== null && budgeted > 0 ? Math.max(0, real / budgeted) : null;
+	return {
+		real,
+		budgeted,
+		ratio,
+		isOver:
+			type !== "income" && type !== "savings" && ratio !== null && ratio > 1,
+		status: budgeted !== null ? groupStatus(type, real, budgeted, t) : null,
+	};
+}
+
+function StatusBadge({ status }: { status: GroupStatus }) {
+	return (
+		<Badge
+			size="lg"
+			tt="none"
+			bg={`${status.color}.1`}
+			c={`${status.color}.8`}
+			className="tabular-nums"
+			styles={{ root: { whiteSpace: "nowrap" } }}
+		>
+			{status.label}
+		</Badge>
+	);
+}
+
+/** What a folded section tells of itself: its overrun budgets, else how far along it is. */
+function foldedStatus(
+	section: BudgetSection,
+	progress: GroupProgress,
+	t: TFunction,
+): GroupStatus {
+	const overBudgets =
+		section.type === "expense"
+			? section.groups.filter(
+					(g) =>
+						groupProgress(g.budgetType, g.realAmount, g.budgetedAmount, t)
+							.isOver,
+				).length
+			: 0;
+	if (overBudgets > 0) {
+		return {
+			label: t("operations.overBudgets", { count: overBudgets }),
+			color: "tangerine",
+		};
+	}
+	return (
+		progress.status ?? {
+			label: t("operations.operationsCount", {
+				count: section.groups.reduce((n, g) => n + g.entries.length, 0),
+			}),
+			color: "forest",
+		}
+	);
 }
 
 const GROUP_ROW_CLASS =
@@ -1002,20 +1138,12 @@ function BudgetGroupRow({
 	const label =
 		group.budgetId === null ? t(group.budgetLabel) : group.budgetLabel;
 	const hasOps = group.entries.length > 0;
-	const real = normalize(group.budgetType, group.realAmount);
-	const budgeted =
-		group.budgetedAmount !== null
-			? normalize(group.budgetType, group.budgetedAmount)
-			: null;
-	const status =
-		budgeted !== null ? groupStatus(group.budgetType, real, budgeted, t) : null;
-	const ratio =
-		budgeted !== null && budgeted > 0 ? Math.max(0, real / budgeted) : null;
-	const isOver =
-		group.budgetType !== "income" &&
-		group.budgetType !== "savings" &&
-		ratio !== null &&
-		ratio > 1;
+	const { real, budgeted, ratio, isOver, status } = groupProgress(
+		group.budgetType,
+		group.realAmount,
+		group.budgetedAmount,
+		t,
+	);
 
 	const cells: ReactNode = (
 		<>
@@ -1071,18 +1199,7 @@ function BudgetGroupRow({
 				)}
 			</Stack>
 			<Box className="justify-self-end">
-				{status && (
-					<Badge
-						size="lg"
-						tt="none"
-						bg={`${status.color}.1`}
-						c={`${status.color}.8`}
-						className="tabular-nums"
-						styles={{ root: { whiteSpace: "nowrap" } }}
-					>
-						{status.label}
-					</Badge>
-				)}
+				{status && <StatusBadge status={status} />}
 			</Box>
 		</>
 	);

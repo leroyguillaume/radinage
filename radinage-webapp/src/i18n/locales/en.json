@@ -42,6 +42,8 @@
 		"forecastHint": "3-month forecast",
 		"ofBudgeted": "of {{amount}} budgeted",
 		"ofForecast": "of {{amount}} forecast",
+		"overBudgets_one": "{{count}} budget over",
+		"overBudgets_other": "{{count}} budgets over",
 		"sortBy": "Sort by",
 		"sortAscending": "Ascending order",
 		"sortDescending": "Descending order",
