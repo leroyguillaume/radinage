@@ -941,7 +941,6 @@
 		"byRule": "Fait par la règle {{rule}}",
 		"seeRules": "Voir les règles du compte",
 		"section": "Virements",
-		"internalStat": "Virements internes",
 		"fedBy": "{{accounts}} (virements)",
 		"rules": {
 			"title": "Règles de virement",

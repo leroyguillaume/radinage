@@ -225,11 +225,6 @@ function SummaryStats({
 	const savingsTone = netSavingsTone(netSavingsReal);
 	const balance =
 		incomeReal + expenseReal + savingsReal + withdrawals + internal + unknown;
-	const hasInternal = byType
-		.get("transfers")
-		?.groups.some((g) =>
-			g.entries.some((e) => transferFlow(e.operation, accounts) === "internal"),
-		);
 
 	const typedTiles: { type: BudgetType; label: string; value: number }[] = [
 		{ type: "income", label: t("operations.stats.income"), value: incomeReal },
@@ -241,14 +236,7 @@ function SummaryStats({
 	];
 
 	return (
-		<ContainerGrid
-			cols={
-				hasInternal
-					? { base: 2, "36rem": 3, "60rem": 5 }
-					: { base: 2, "40rem": 4 }
-			}
-			spacing="sm"
-		>
+		<ContainerGrid cols={{ base: 2, "40rem": 4 }} spacing="sm">
 			{typedTiles.map((tile) => (
 				<StatTile
 					key={tile.type}
@@ -275,14 +263,6 @@ function SummaryStats({
 					})
 				}
 			/>
-			{hasInternal && (
-				<StatTile
-					label={t("transfers.internalStat")}
-					value={formatSignedAmount(internal)}
-					dotColor={transferTone("internal").fill}
-					valueColor={transferTone("internal").text}
-				/>
-			)}
 			<StatTile
 				label={t("operations.stats.balance")}
 				value={formatSignedAmount(balance)}
