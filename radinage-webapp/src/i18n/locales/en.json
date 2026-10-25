@@ -941,7 +941,6 @@
 		"byRule": "Made by the rule {{rule}}",
 		"seeRules": "See the account's rules",
 		"section": "Transfers",
-		"internalStat": "Internal transfers",
 		"fedBy": "{{accounts}} (transfers)",
 		"rules": {
 			"title": "Transfer rules",
