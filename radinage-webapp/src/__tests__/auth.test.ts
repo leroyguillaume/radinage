@@ -17,6 +17,7 @@ const apiFetchMock = vi.mocked(apiFetch);
 
 // Use the store directly since zustand creates a singleton
 const { useAuthStore } = await import("@/stores/auth");
+const { useLastSearchStore } = await import("@/stores/last-search");
 
 describe("useAuthStore", () => {
 	beforeEach(() => {
@@ -82,6 +83,14 @@ describe("useAuthStore", () => {
 		expect(state.isAuthenticated).toBe(false);
 		expect(state.token).toBeNull();
 		expect(state.role).toBeNull();
+	});
+
+	it("logout forgets the searches of the menu", () => {
+		useLastSearchStore.getState().remember("/search", { label: "loyer" });
+
+		useAuthStore.getState().logout();
+
+		expect(useLastSearchStore.getState().searches).toEqual({});
 	});
 
 	it("logout is idempotent", () => {

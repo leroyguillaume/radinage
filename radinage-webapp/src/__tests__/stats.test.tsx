@@ -13,6 +13,7 @@ import { render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { i18n } from "@/i18n";
 import type { CategoryResponse, CategorySummaryResponse } from "@/lib/types";
+import { useLastSearchStore } from "@/stores/last-search";
 import { theme } from "@/theme";
 
 vi.mock("@/lib/api", () => ({
@@ -151,6 +152,17 @@ afterEach(() => {
 });
 
 describe("StatsPage", () => {
+	it("remembers the period shown for the menu", async () => {
+		await renderStatsPage();
+		await screen.findByText("Statistiques");
+
+		const now = new Date();
+		expect(useLastSearchStore.getState().searches["/stats"]).toMatchObject({
+			toYear: now.getFullYear(),
+			toMonth: now.getMonth() + 1,
+		});
+	});
+
 	it("renders the page title and period pickers", async () => {
 		await renderStatsPage();
 

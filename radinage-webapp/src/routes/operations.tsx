@@ -76,6 +76,7 @@ import type {
 	ImportResult,
 	OperationResponse,
 } from "@/lib/types";
+import { useRememberSearch } from "@/stores/last-search";
 import { headingFont, palette } from "@/theme";
 
 interface OperationsSearch {
@@ -452,6 +453,7 @@ function MonthlyOperationsPage() {
 	const { year, month } = Route.useSearch();
 	const navigate = useNavigate();
 	const { t, i18n } = useTranslation();
+	useRememberSearch("/operations", { year, month });
 
 	const [importOpened, setImportOpened] = useState(false);
 	const [importResult, setImportResult] = useState<ImportResult | null>(null);

@@ -26,6 +26,7 @@ import type {
 	OperationResponse,
 	OperationSearchResponse,
 } from "@/lib/types";
+import { useLastSearchStore } from "@/stores/last-search";
 import { theme } from "@/theme";
 
 vi.mock("@/lib/api", () => ({
@@ -268,6 +269,17 @@ afterEach(() => {
 });
 
 describe("SearchPage", () => {
+	it("remembers the filters for the menu", async () => {
+		await renderSearchPage("/search?label=loyer&direction=expense");
+
+		await waitFor(() =>
+			expect(useLastSearchStore.getState().searches["/search"]).toEqual({
+				label: "loyer",
+				direction: "expense",
+			}),
+		);
+	});
+
 	it("lists every operation when nothing is typed", async () => {
 		await renderSearchPage();
 

@@ -80,6 +80,7 @@ import type {
 	OperationResponse,
 	OperationSearchTotals,
 } from "@/lib/types";
+import { useRememberSearch } from "@/stores/last-search";
 import { palette } from "@/theme";
 
 export const Route = createFileRoute("/search")({
@@ -777,6 +778,7 @@ function SearchPage() {
 	const { t } = useTranslation();
 	const filters = Route.useSearch();
 	const navigate = useNavigate({ from: Route.fullPath });
+	useRememberSearch("/search", filters);
 	const [drawerOpened, drawer] = useDisclosure(false);
 	const categories = useCategories().data ?? [];
 	const budgets = useBudgets().data ?? [];

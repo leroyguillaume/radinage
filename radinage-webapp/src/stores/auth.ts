@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { ApiError, apiFetch } from "@/lib/api";
+import { useLastSearchStore } from "@/stores/last-search";
 
 interface LoginResponse {
 	token: string;
@@ -49,6 +50,7 @@ export const useAuthStore = create<AuthState>((set) => ({
 		} catch {
 			// localStorage may not be available
 		}
+		useLastSearchStore.getState().clear();
 		set({ token: null, role: null, isAuthenticated: false });
 	},
 }));
