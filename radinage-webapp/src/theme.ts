@@ -70,6 +70,11 @@ export const palette = {
 	track: "#edf2eb",
 } as const;
 
+/** Caps a font size so a formatted amount (about 7 em) fits its `@container`. */
+export function fitToCard(px: number): string {
+	return `min(${px}px, 14cqi)`;
+}
+
 export const headingFont =
 	"'Bricolage Grotesque Variable', 'Plus Jakarta Sans Variable', sans-serif";
 
