@@ -37,7 +37,7 @@ import type { TFunction } from "i18next";
 import { type ReactNode, useId, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { CategoryBadge, CategorySelect } from "@/components/CategoryBadge";
-import { CategoryBreakdowns } from "@/components/CategoryBreakdown";
+import { CategoryOverview } from "@/components/CategoryBreakdown";
 import { ContainerGrid } from "@/components/ContainerGrid";
 import { ImportModal } from "@/components/ImportModal";
 import { useOperationActions } from "@/components/OperationActions";
@@ -732,6 +732,12 @@ function MonthlyOperationsPage() {
 				) : (
 					<>
 						<SummaryStats sections={sections} accounts={handlers.accounts} />
+						<CategoryOverview
+							totals={categorySummaryQuery.data?.categories}
+							categories={categories}
+							year={year}
+							month={month}
+						/>
 						{sections.map((section) => (
 							<SectionCard
 								key={section.type}
@@ -745,10 +751,6 @@ function MonthlyOperationsPage() {
 								}
 							/>
 						))}
-						<CategoryBreakdowns
-							totals={categorySummaryQuery.data?.categories}
-							categories={categories}
-						/>
 					</>
 				)}
 
