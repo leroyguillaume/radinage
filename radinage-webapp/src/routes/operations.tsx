@@ -16,7 +16,6 @@ import {
 	Tooltip,
 	UnstyledButton,
 } from "@mantine/core";
-import { MonthPickerInput } from "@mantine/dates";
 import {
 	IconAlertCircle,
 	IconAlertTriangle,
@@ -40,6 +39,7 @@ import { CategoryBadge, CategorySelect } from "@/components/CategoryBadge";
 import { CategoryOverview } from "@/components/CategoryBreakdown";
 import { ContainerGrid } from "@/components/ContainerGrid";
 import { ImportModal } from "@/components/ImportModal";
+import { MonthTitlePicker } from "@/components/MonthTitlePicker";
 import { useOperationActions } from "@/components/OperationActions";
 import { OperationRow } from "@/components/OperationRow";
 import { OperationSelectionBar } from "@/components/OperationSelectionBar";
@@ -79,7 +79,7 @@ import type {
 	OperationResponse,
 } from "@/lib/types";
 import { useRememberSearch } from "@/stores/last-search";
-import { headingFont, palette } from "@/theme";
+import { palette } from "@/theme";
 
 interface OperationsSearch {
 	year: number;
@@ -605,31 +605,10 @@ function MonthlyOperationsPage() {
 						>
 							<IconChevronLeft size={20} />
 						</ActionIcon>
-						<MonthPickerInput
+						<MonthTitlePicker
 							value={currentDate}
-							onChange={(date) => {
-								if (date) navigateToDate(new Date(date));
-							}}
 							locale={i18n.language}
-							variant="unstyled"
-							miw={0}
-							rightSection={
-								<IconChevronDown size={20} color={palette.dimmed} />
-							}
-							rightSectionPointerEvents="none"
-							styles={{
-								input: {
-									fontFamily: headingFont,
-									fontSize: "clamp(1.5rem, 5vw, 2.5rem)",
-									fontWeight: 800,
-									letterSpacing: "-0.02em",
-									height: "auto",
-									minHeight: 44,
-									lineHeight: 1.15,
-									textTransform: "capitalize",
-									cursor: "pointer",
-								},
-							}}
+							onChange={navigateToDate}
 						/>
 						<ActionIcon
 							variant="default"
