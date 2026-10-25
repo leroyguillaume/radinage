@@ -120,7 +120,9 @@ export function transferTone(flow: TransferFlow): Tone {
  * positive as seen from the current account, so the sum is flipped.
  */
 export function netSavings(savings: number, withdrawals: number): number {
-	return -(savings + withdrawals);
+	// Subtracting from 0 rather than negating keeps nothing saved at +0, which
+	// `Intl.NumberFormat` would otherwise render as "-0,00 €".
+	return 0 - (savings + withdrawals);
 }
 
 /** Savings gold, orange once more was taken back from savings than was put in. */

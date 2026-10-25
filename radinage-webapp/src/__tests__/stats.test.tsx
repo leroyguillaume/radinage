@@ -269,6 +269,34 @@ describe("StatsPage", () => {
 		expect(document.body.textContent).toContain("-3\u202f750,00");
 	});
 
+	it("labels the savings tile as net and details it once money was taken back", async () => {
+		const [january, ...rest] = mockSummaryResponse.months;
+		if (!january) throw new Error("fixture without months");
+		setupMocks({
+			months: [
+				{
+					...january,
+					transfers: {
+						toSavings: "-200.00",
+						fromSavings: "50.00",
+						internal: "0",
+					},
+				},
+				...rest,
+			],
+		});
+		await renderStatsPage();
+
+		const tile = (await screen.findByText("\u00c9pargne nette")).closest(
+			".mantine-Paper-root",
+		);
+		// 300 + 200 + 400 + 350 put in, 50 taken back.
+		expect(tile?.textContent?.replace(/\s/g, "")).toContain(
+			"1250,00\u20acvers\u00e9s,50,00\u20acrepris",
+		);
+		expect(screen.queryByText("\u00c9pargne")).not.toBeInTheDocument();
+	});
+
 	it("renders bar charts", async () => {
 		await renderStatsPage();
 

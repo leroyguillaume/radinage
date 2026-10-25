@@ -79,31 +79,37 @@ function StatsPage() {
 
 	const months = summaryQuery.data?.months ?? [];
 
-	const perMonth = months.map((m) => ({
-		label: new Date(m.year, m.month - 1).toLocaleDateString(i18n.language, {
-			month: "short",
-			year: "2-digit",
-		}),
-		expenses: Number(m.budgeted.expense) + Number(m.unbudgeted.expense),
-		income: Number(m.budgeted.income) + Number(m.unbudgeted.income),
-		// Money taken back from savings is deducted, not counted as income.
-		savings: netSavings(
-			Number(m.budgeted.savings) + Number(m.transfers.toSavings),
-			Number(m.transfers.fromSavings),
-		),
-		internal: Number(m.transfers.internal),
-	}));
+	const perMonth = months.map((m) => {
+		const saved = Number(m.budgeted.savings) + Number(m.transfers.toSavings);
+		const withdrawn = Number(m.transfers.fromSavings);
+		return {
+			label: new Date(m.year, m.month - 1).toLocaleDateString(i18n.language, {
+				month: "short",
+				year: "2-digit",
+			}),
+			expenses: Number(m.budgeted.expense) + Number(m.unbudgeted.expense),
+			income: Number(m.budgeted.income) + Number(m.unbudgeted.income),
+			saved,
+			withdrawn,
+			// Money taken back from savings is deducted, not counted as income.
+			savings: netSavings(saved, withdrawn),
+			internal: Number(m.transfers.internal),
+		};
+	});
 
 	let totalExpenses = 0;
 	let totalIncome = 0;
-	let totalSavings = 0;
+	let totalSaved = 0;
+	let totalWithdrawn = 0;
 	let totalInternal = 0;
 	for (const m of perMonth) {
 		totalExpenses += m.expenses;
 		totalIncome += m.income;
-		totalSavings += m.savings;
+		totalSaved += m.saved;
+		totalWithdrawn += m.withdrawn;
 		totalInternal += m.internal;
 	}
+	const totalSavings = netSavings(totalSaved, totalWithdrawn);
 	const balance = totalIncome + totalExpenses - totalSavings + totalInternal;
 
 	const barData = perMonth.map((m) => ({
@@ -133,10 +139,17 @@ function StatsPage() {
 			valueColor: budgetTypeTones.expense.text,
 		},
 		{
-			label: t("stats.savings"),
+			label:
+				totalWithdrawn === 0 ? t("stats.savings") : t("forecast.netSavings"),
 			value: totalSavings,
 			dotColor: budgetTypeTones.savings.fill,
 			valueColor: netSavingsTone(totalSavings).text,
+			hint:
+				totalWithdrawn !== 0 &&
+				t("forecast.savingsDetail", {
+					saved: formatAmount(-totalSaved),
+					withdrawn: formatAmount(totalWithdrawn),
+				}),
 		},
 		{
 			label: t("stats.balance"),
@@ -238,6 +251,7 @@ function StatsPage() {
 									value={formatAmount(tile.value)}
 									dotColor={tile.dotColor}
 									valueColor={tile.valueColor}
+									hint={tile.hint}
 								/>
 							))}
 						</ContainerGrid>
