@@ -134,7 +134,7 @@ kubectl create secret generic radinage-db --from-literal=url='postgresql://USER:
 ```
 
 ```bash
-helm install radinage oci://ghcr.io/leroyguillaume/charts/radinage --version 1.6.0 --set global.domain=radinage.example.com
+helm install radinage oci://ghcr.io/leroyguillaume/charts/radinage --version 1.7.0 --set global.domain=radinage.example.com
 ```
 
 Every chart value is documented in [helm/radinage/README.md](helm/radinage/README.md).
