@@ -44,7 +44,7 @@ import type {
 	ForecastMonthStatus,
 	YearMonth,
 } from "@/lib/types";
-import { headingFont, palette } from "@/theme";
+import { fitToCard, headingFont, palette } from "@/theme";
 
 interface ForecastSearch {
 	year: number;
@@ -182,11 +182,6 @@ interface BigAmountProps {
 	value: string;
 	color?: string;
 	fz?: number;
-}
-
-// A formatted amount is about 7 em wide; 14cqi keeps it inside its card.
-function fitToCard(px: number): string {
-	return `min(${px}px, 14cqi)`;
 }
 
 function BigAmount({ value, color, fz }: BigAmountProps) {

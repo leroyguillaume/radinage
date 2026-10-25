@@ -1,10 +1,11 @@
 import { AreaChart, BarChart } from "@mantine/charts";
-import { Alert, Loader, Paper, SimpleGrid, Stack, Text } from "@mantine/core";
+import { Alert, Loader, Paper, Stack, Text } from "@mantine/core";
 import { MonthPickerInput } from "@mantine/dates";
 import { IconAlertCircle } from "@tabler/icons-react";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useTranslation } from "react-i18next";
 import { CategoryBreakdowns } from "@/components/CategoryBreakdown";
+import { ContainerGrid } from "@/components/ContainerGrid";
 import { PageHeader } from "@/components/PageHeader";
 import { StatTile } from "@/components/StatTile";
 import { WealthEvolution } from "@/components/WealthEvolution";
@@ -228,7 +229,7 @@ function StatsPage() {
 
 				{!isLoading && !isError && (
 					<>
-						<SimpleGrid cols={{ base: 2, sm: 4 }} spacing="md">
+						<ContainerGrid cols={{ base: 2, "40rem": 4 }} spacing="md">
 							{tiles.map((tile) => (
 								<StatTile
 									key={tile.label}
@@ -238,7 +239,7 @@ function StatsPage() {
 									valueColor={tile.valueColor}
 								/>
 							))}
-						</SimpleGrid>
+						</ContainerGrid>
 
 						{barData.length > 0 && (
 							<>

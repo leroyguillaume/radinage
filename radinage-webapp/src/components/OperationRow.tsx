@@ -10,18 +10,19 @@ import type { OperationResponse } from "@/lib/types";
 import { palette } from "@/theme";
 
 const ROW_CLASS =
-	"grid min-h-[44px] w-full items-center gap-x-3 py-2 text-left sm:gap-x-4 sm:py-1";
+	"grid min-h-[44px] w-full items-center gap-x-3 py-2 text-left @4xl:gap-x-4 @4xl:py-1";
 
 /**
- * Fixed column tracks from `sm` up, so every row of a list lines its
- * columns up whatever their content.
+ * Fixed column tracks once the row itself is wide enough (`@4xl`), so every
+ * row of a list lines its columns up whatever their content: below that the
+ * fixed tracks leave the label no room.
  */
 const ROW_TRACKS =
-	"[grid-template-areas:'label_amount'_'meta_meta'] grid-cols-[minmax(0,1fr)_auto] sm:[grid-template-areas:'date_label_category_budget_amount'] sm:grid-cols-[96px_minmax(0,1fr)_180px_160px_136px]";
+	"[grid-template-areas:'label_amount'_'meta_meta'] grid-cols-[minmax(0,1fr)_auto] @4xl:[grid-template-areas:'date_label_category_budget_amount'] @4xl:grid-cols-[96px_minmax(0,1fr)_180px_160px_136px]";
 
 /** `ROW_TRACKS` behind a leading checkbox column. */
 const SELECTABLE_ROW_TRACKS =
-	"[grid-template-areas:'check_label_amount'_'check_meta_meta'] grid-cols-[auto_minmax(0,1fr)_auto] sm:[grid-template-areas:'check_date_label_category_budget_amount'] sm:grid-cols-[auto_96px_minmax(0,1fr)_180px_160px_136px]";
+	"[grid-template-areas:'check_label_amount'_'check_meta_meta'] grid-cols-[auto_minmax(0,1fr)_auto] @4xl:[grid-template-areas:'check_date_label_category_budget_amount'] @4xl:grid-cols-[auto_96px_minmax(0,1fr)_180px_160px_136px]";
 
 interface OperationRowProps {
 	op: OperationResponse;
@@ -38,7 +39,7 @@ interface OperationRowProps {
 	selection?: { selected: boolean; onToggle: (op: OperationResponse) => void };
 }
 
-/** A list row opening the operation sheet, its columns lined up from `sm` up. */
+/** A list row opening the operation sheet, its columns lined up when wide enough. */
 export function OperationRow({
 	op,
 	amount,
@@ -57,6 +58,7 @@ export function OperationRow({
 	return (
 		<Box
 			component="li"
+			className="@container"
 			style={{ borderBottom: `1px dashed ${palette.border}` }}
 		>
 			<UnstyledButton
@@ -79,7 +81,7 @@ export function OperationRow({
 						fw={500}
 						c={op.ignored ? "dimmed" : undefined}
 						td={op.ignored ? "line-through" : undefined}
-						className="line-clamp-2 [overflow-wrap:anywhere] sm:line-clamp-1"
+						className="line-clamp-2 [overflow-wrap:anywhere] @4xl:line-clamp-1"
 						title={op.label}
 					>
 						{op.label}
@@ -96,26 +98,31 @@ export function OperationRow({
 				</Box>
 				<Text
 					fw={700}
-					className="tabular-nums [grid-area:amount] sm:text-right"
+					className="tabular-nums [grid-area:amount] @4xl:text-right"
 					c={op.ignored ? "dimmed" : amountColor}
 					td={op.ignored ? "line-through" : undefined}
 					style={{ whiteSpace: "nowrap" }}
 				>
 					{formatSignedAmount(amount)}
 				</Text>
-				<Box className="flex min-w-0 flex-wrap items-center gap-x-3 [grid-area:meta] sm:contents">
+				<Box className="flex min-w-0 flex-wrap items-center gap-x-3 [grid-area:meta] @4xl:contents">
 					<Text
 						span
 						size="sm"
 						c="dimmed"
-						className="tabular-nums sm:[grid-area:date]"
+						className="tabular-nums @4xl:[grid-area:date]"
 					>
 						{formatIsoDate(date, i18n.language)}
 					</Text>
-					<Box miw={0} className="overflow-hidden sm:[grid-area:category]">
+					<Box miw={0} className="overflow-hidden @4xl:[grid-area:category]">
 						{category}
 					</Box>
-					<Text size="sm" c="dimmed" truncate className="sm:[grid-area:budget]">
+					<Text
+						size="sm"
+						c="dimmed"
+						truncate
+						className="@4xl:[grid-area:budget]"
+					>
 						{budget}
 					</Text>
 				</Box>

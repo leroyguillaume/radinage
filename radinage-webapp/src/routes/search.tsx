@@ -38,6 +38,7 @@ import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useId, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { CategoryBadge, CategoryDot } from "@/components/CategoryBadge";
+import { ContainerGrid } from "@/components/ContainerGrid";
 import { useOperationActions } from "@/components/OperationActions";
 import { OperationRow } from "@/components/OperationRow";
 import { OperationSelectionBar } from "@/components/OperationSelectionBar";
@@ -286,7 +287,7 @@ function FilterControls({
 	const categoryById = new Map(categories.map((c) => [c.id, c]));
 
 	return (
-		<SimpleGrid cols={{ base: 1, sm: 2, lg: 3 }} spacing="md">
+		<ContainerGrid cols={{ base: 1, "40rem": 2, "64rem": 3 }} spacing="md">
 			<Group gap="sm" grow wrap="nowrap" align="flex-start">
 				<AmountInput
 					label={t("search.amountMin")}
@@ -419,7 +420,7 @@ function FilterControls({
 					{ value: "only", label: t("search.transferFilter.only") },
 				]}
 			/>
-		</SimpleGrid>
+		</ContainerGrid>
 	);
 }
 

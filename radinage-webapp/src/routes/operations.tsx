@@ -9,7 +9,6 @@ import {
 	Paper,
 	Progress,
 	Select,
-	SimpleGrid,
 	Stack,
 	Switch,
 	Text,
@@ -39,6 +38,7 @@ import { type ReactNode, useId, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { CategoryBadge, CategorySelect } from "@/components/CategoryBadge";
 import { CategoryBreakdowns } from "@/components/CategoryBreakdown";
+import { ContainerGrid } from "@/components/ContainerGrid";
 import { ImportModal } from "@/components/ImportModal";
 import { useOperationActions } from "@/components/OperationActions";
 import { OperationRow } from "@/components/OperationRow";
@@ -241,7 +241,14 @@ function SummaryStats({
 	];
 
 	return (
-		<SimpleGrid cols={{ base: 2, sm: hasInternal ? 5 : 4 }} spacing="sm">
+		<ContainerGrid
+			cols={
+				hasInternal
+					? { base: 2, "36rem": 3, "60rem": 5 }
+					: { base: 2, "40rem": 4 }
+			}
+			spacing="sm"
+		>
 			{typedTiles.map((tile) => (
 				<StatTile
 					key={tile.type}
@@ -282,7 +289,7 @@ function SummaryStats({
 				dotColor={neutralTone.fill}
 				valueColor={balanceTextColor(balance)}
 			/>
-		</SimpleGrid>
+		</ContainerGrid>
 	);
 }
 

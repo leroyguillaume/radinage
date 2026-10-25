@@ -1,6 +1,6 @@
 import { Box, Group, Paper, Stack, Text } from "@mantine/core";
 import type { ReactNode } from "react";
-import { headingFont } from "@/theme";
+import { fitToCard, headingFont } from "@/theme";
 
 interface StatTileProps {
 	label: ReactNode;
@@ -21,7 +21,7 @@ export function StatTile({
 	hint,
 }: StatTileProps) {
 	return (
-		<Paper radius="lg" p="md">
+		<Paper radius="lg" p="md" className="@container">
 			<Stack gap={6}>
 				<Group gap={8} wrap="nowrap">
 					<Box w={10} h={10} bg={dotColor} style={{ borderRadius: 3 }} />
@@ -32,7 +32,7 @@ export function StatTile({
 				<Text
 					className="tabular-nums"
 					ff={headingFont}
-					fz={{ base: 22, sm: 28 }}
+					fz={fitToCard(28)}
 					fw={700}
 					c={valueColor}
 				>
