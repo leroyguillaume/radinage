@@ -30,7 +30,9 @@ vi.mock("@/lib/api", () => ({
 
 // Mock chart components to avoid Recharts SVG rendering in jsdom
 vi.mock("@mantine/charts", () => ({
-	BarChart: () => <div data-testid="bar-chart" />,
+	BarChart: ({ data }: { data: Record<string, string | number>[] }) => (
+		<div data-testid="bar-chart" data-bars={JSON.stringify(data)} />
+	),
 	AreaChart: () => <div data-testid="area-chart" />,
 	PieChart: ({ data }: { data: { name: string; value: number }[] }) => (
 		<ul data-testid="pie-chart">
@@ -185,10 +187,10 @@ describe("StatsPage", () => {
 		// Expenses total: (-100 + -500) + (-150 + -600) + (-200 + -700) = -2250
 		expect(screen.getByText("Dépenses")).toBeInTheDocument();
 
-		// Savings total: -300 + -400 + -350 = -1050
+		// Net savings: 300 + 400 + 350 = 1050
 		expect(screen.getByText("Épargne")).toBeInTheDocument();
 
-		// Balance: income + expenses + savings = 6700 + (-2250) + (-1050) = 3400
+		// Balance: income + expenses - savings = 6700 + (-2250) - 1050 = 3400
 		expect(screen.getByText("Balance")).toBeInTheDocument();
 	});
 
@@ -201,8 +203,8 @@ describe("StatsPage", () => {
 
 		// Income: 2000 + 2200 + 2500 = 6700
 		// Expenses: (-100-500) + (-150-600) + (-200-700) = -2250
-		// Savings: -300 + -400 + -350 = -1050
-		// Balance: 6700 + (-2250) + (-1050) = 3400
+		// Net savings: 300 + 400 + 350 = 1050
+		// Balance: 6700 + (-2250) - 1050 = 3400
 		const pageText = document.body.textContent ?? "";
 		expect(pageText).toContain("6\u202f700");
 		expect(pageText).toContain("2\u202f250");
@@ -232,11 +234,39 @@ describe("StatsPage", () => {
 			expect(screen.getByText("Revenus")).toBeInTheDocument();
 		});
 
-		// Savings: -1050 - 200 + 50 = -1200; balance: 3400 - 150 - 25 = 3225.
+		// Net savings: 1050 + 200 - 50 = 1200; balance: 3400 - 150 - 25 = 3225.
 		const pageText = document.body.textContent ?? "";
 		expect(pageText).toContain("1 200");
 		expect(pageText).toContain("3 225");
 		expect(pageText).toContain("6 700");
+	});
+
+	it("charts a month that took more back from savings than it put in as negative", async () => {
+		const [january, ...rest] = mockSummaryResponse.months;
+		if (!january) throw new Error("fixture without months");
+		setupMocks({
+			months: [
+				{
+					...january,
+					transfers: {
+						toSavings: "-200.00",
+						fromSavings: "5000.00",
+						internal: "0",
+					},
+				},
+				...rest,
+			],
+		});
+		await renderStatsPage();
+
+		const bars = JSON.parse(
+			(await screen.findByTestId("bar-chart")).dataset.bars ?? "[]",
+		);
+		// 300 budgeted + 200 transferred - 5000 taken back.
+		expect(bars[0]["Épargne"]).toBe(-4500);
+		expect(bars[1]["Épargne"]).toBe(400);
+		// The tile nets the period: -4500 + 400 + 350.
+		expect(document.body.textContent).toContain("-3\u202f750,00");
 	});
 
 	it("renders bar charts", async () => {
