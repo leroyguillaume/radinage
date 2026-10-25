@@ -3,6 +3,7 @@ import {
 	budgetsForTransfer,
 	feederNames,
 	feedersOf,
+	netSavings,
 	transferFlowOf,
 } from "@/lib/transfers";
 import type {
@@ -55,6 +56,17 @@ describe("transferFlowOf", () => {
 		expect(transferFlowOf("savings", 500)).toBe("fromSavings");
 		expect(transferFlowOf("checking", -450)).toBe("internal");
 		expect(transferFlowOf("checking", 450)).toBe("internal");
+	});
+});
+
+describe("netSavings", () => {
+	it("flips what was put in and taken back", () => {
+		expect(netSavings(-300, 50)).toBe(250);
+		expect(netSavings(-100, 400)).toBe(-300);
+	});
+
+	it("stays a positive zero when nothing moved", () => {
+		expect(Object.is(netSavings(0, 0), 0)).toBe(true);
 	});
 });
 
