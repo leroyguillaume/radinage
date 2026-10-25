@@ -12,6 +12,7 @@ import { WealthEvolution } from "@/components/WealthEvolution";
 import { formatAmount, formatCompactAmount } from "@/lib/format";
 import { useCategories, useCategorySummary, useSummary } from "@/lib/hooks";
 import { balanceTextColor, budgetTypeTones } from "@/lib/tones";
+import { netSavings, netSavingsTone } from "@/lib/transfers";
 import { useRememberSearch } from "@/stores/last-search";
 import { headingFont } from "@/theme";
 
@@ -85,11 +86,11 @@ function StatsPage() {
 		}),
 		expenses: Number(m.budgeted.expense) + Number(m.unbudgeted.expense),
 		income: Number(m.budgeted.income) + Number(m.unbudgeted.income),
-		// Net savings: money taken back from savings is deducted, not counted as income.
-		savings:
-			Number(m.budgeted.savings) +
-			Number(m.transfers.toSavings) +
+		// Money taken back from savings is deducted, not counted as income.
+		savings: netSavings(
+			Number(m.budgeted.savings) + Number(m.transfers.toSavings),
 			Number(m.transfers.fromSavings),
+		),
 		internal: Number(m.transfers.internal),
 	}));
 
@@ -103,18 +104,18 @@ function StatsPage() {
 		totalSavings += m.savings;
 		totalInternal += m.internal;
 	}
-	const balance = totalIncome + totalExpenses + totalSavings + totalInternal;
+	const balance = totalIncome + totalExpenses - totalSavings + totalInternal;
 
 	const barData = perMonth.map((m) => ({
 		month: m.label,
 		[t("stats.expenses")]: Math.abs(m.expenses),
 		[t("stats.income")]: m.income,
-		[t("stats.savings")]: Math.abs(m.savings),
+		[t("stats.savings")]: m.savings,
 	}));
 
 	let running = 0;
 	const balanceData = perMonth.map((m) => {
-		running += m.income + m.expenses + m.savings + m.internal;
+		running += m.income + m.expenses - m.savings + m.internal;
 		return { month: m.label, [t("stats.balance")]: running };
 	});
 
@@ -135,7 +136,7 @@ function StatsPage() {
 			label: t("stats.savings"),
 			value: totalSavings,
 			dotColor: budgetTypeTones.savings.fill,
-			valueColor: budgetTypeTones.savings.text,
+			valueColor: netSavingsTone(totalSavings).text,
 		},
 		{
 			label: t("stats.balance"),
