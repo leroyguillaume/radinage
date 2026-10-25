@@ -34,6 +34,7 @@ import { type ComponentType, Fragment, type ReactNode, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { BrandLogo } from "@/components/BrandLogo";
 import { useAuthStore } from "@/stores/auth";
+import { useLastSearchStore } from "@/stores/last-search";
 import { useNavStore } from "@/stores/nav";
 import { palette } from "@/theme";
 
@@ -151,6 +152,11 @@ function SideEntry({ icon: Icon, label, collapsed, children }: SideEntryProps) {
 	);
 }
 
+/** The search the page behind `to` was last shown with, so the menu brings it back. */
+function useLastSearch(to: string): Record<string, unknown> | undefined {
+	return useLastSearchStore((s) => s.searches[to]);
+}
+
 function SideLink({
 	item,
 	collapsed,
@@ -163,11 +169,13 @@ function SideLink({
 	const { t } = useTranslation();
 	const active = useIsActive(item.activePrefix);
 	const label = t(item.labelKey);
+	const search = useLastSearch(item.to);
 	return (
 		<SideEntry icon={item.icon} label={label} collapsed={collapsed}>
 			{(content) => (
 				<Link
 					to={item.to}
+					search={search}
 					className="side-link"
 					data-active={active}
 					data-collapsed={collapsed}
@@ -303,9 +311,11 @@ function TabLink({ item }: { item: NavItem }) {
 	const { t } = useTranslation();
 	const active = useIsActive(item.activePrefix);
 	const Icon = item.icon;
+	const search = useLastSearch(item.to);
 	return (
 		<Link
 			to={item.to}
+			search={search}
 			className="tab-link"
 			data-active={active}
 			aria-current={active ? "page" : undefined}

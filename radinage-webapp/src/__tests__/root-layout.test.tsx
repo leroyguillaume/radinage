@@ -12,6 +12,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { i18n } from "@/i18n";
 import { Route as RootRoute } from "@/routes/__root";
 import { useAuthStore } from "@/stores/auth";
+import { useLastSearchStore } from "@/stores/last-search";
 import { useNavStore } from "@/stores/nav";
 import { theme } from "@/theme";
 
@@ -74,6 +75,7 @@ beforeEach(async () => {
 afterEach(() => {
 	useAuthStore.setState({ isAuthenticated: false, role: null });
 	useNavStore.setState({ collapsed: false });
+	useLastSearchStore.setState({ searches: {} });
 	localStorage.clear();
 });
 
@@ -127,6 +129,30 @@ describe("RootLayout", () => {
 
 		expect(await screen.findByText("page /search")).toBeInTheDocument();
 		await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+	});
+
+	it("brings each page back as it was last shown", async () => {
+		useLastSearchStore.setState({
+			searches: {
+				"/operations": { year: 2025, month: 3 },
+				"/search": { label: "loyer" },
+				"/stats": { fromYear: 2025, fromMonth: 1, toYear: 2025, toMonth: 6 },
+			},
+		});
+		signIn("user");
+		renderLayout("/summary");
+		await screen.findByText("page /summary");
+
+		expect(hrefs(sideMenu())).toEqual([
+			"/",
+			"/operations?year=2025&month=3",
+			"/search?label=loyer",
+			"/stats?fromYear=2025&fromMonth=1&toYear=2025&toMonth=6",
+			"/accounts",
+			"/budgets",
+			"/categories",
+		]);
+		expect(hrefs(tabBar())).toContain("/operations?year=2025&month=3");
 	});
 
 	it("offers settings and logout, and admin to admins only", async () => {

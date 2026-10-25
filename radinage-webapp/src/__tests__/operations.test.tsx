@@ -28,6 +28,7 @@ import type {
 	MonthlyOperationsResponse,
 	OperationResponse,
 } from "@/lib/types";
+import { useLastSearchStore } from "@/stores/last-search";
 import { theme } from "@/theme";
 import { selectMantineOption } from "./mantine";
 import { resetViewport, setViewportWidth } from "./viewport";
@@ -390,6 +391,16 @@ afterEach(() => {
 });
 
 describe("MonthlyOperationsPage", () => {
+	it("remembers the month shown for the menu", async () => {
+		await renderOperationsPage("2026", "4");
+		await screen.findByText("Opérations quotidiennes");
+
+		expect(useLastSearchStore.getState().searches["/operations"]).toEqual({
+			year: 2026,
+			month: 4,
+		});
+	});
+
 	it("renders operations grouped by budget", async () => {
 		await renderOperationsPage();
 

@@ -31,6 +31,7 @@ import { formatAmount, formatCompactAmount } from "@/lib/format";
 import { useCategories, useCategorySummary, useSummary } from "@/lib/hooks";
 import { balanceTextColor, budgetTypeTones } from "@/lib/tones";
 import type { CategoryResponse, CategoryTotal } from "@/lib/types";
+import { useRememberSearch } from "@/stores/last-search";
 import { headingFont, palette } from "@/theme";
 
 interface StatsSearch {
@@ -240,7 +241,9 @@ function CategoryBreakdown({
 function StatsPage() {
 	const { t, i18n } = useTranslation();
 	const navigate = useNavigate();
-	const { fromYear, fromMonth, toYear, toMonth } = Route.useSearch();
+	const search = Route.useSearch();
+	const { fromYear, fromMonth, toYear, toMonth } = search;
+	useRememberSearch("/stats", search);
 
 	const from = new Date(fromYear, fromMonth - 1);
 	const to = new Date(toYear, toMonth - 1);
