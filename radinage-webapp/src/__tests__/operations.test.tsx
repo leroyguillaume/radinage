@@ -1462,23 +1462,54 @@ describe("MonthlyOperationsPage", () => {
 			});
 			await renderOperationsPage();
 
-			const expenses = await screen.findByRole("region", {
-				name: "Dépenses par catégorie",
+			const user = userEvent.setup();
+			const breakdown = await screen.findByRole("region", {
+				name: "Par catégorie",
 			});
-			expect(
-				within(expenses)
-					.getAllByRole("progressbar")
-					.map((row) => row.getAttribute("aria-label")),
-			).toEqual([
-				expect.stringMatching(/^Courses : 120,00/),
-				expect.stringMatching(/^Sans catégorie : 40,00/),
-			]);
-			const income = screen.getByRole("region", {
-				name: "Revenus par catégorie",
-			});
-			expect(within(income).getAllByRole("progressbar")).toHaveLength(1);
+			const rows = () =>
+				within(breakdown)
+					.getAllByRole("listitem")
+					.map((row) => row.textContent);
+			expect(rows()).toEqual(["Courses75 %", "Sans catégorie25 %"]);
+			expect(within(breakdown).queryByRole("link")).not.toBeInTheDocument();
+
+			await user.click(
+				within(breakdown).getByRole("radio", { name: "Revenus" }),
+			);
+			expect(rows()).toEqual(["Sans catégorie100 %"]);
 			expect(apiCalls.map((c) => c.path)).toContain(
 				"/summary/categories?fromYear=2026&fromMonth=4&toYear=2026&toMonth=4",
+			);
+		});
+
+		it("links to the statistics past the largest categories", async () => {
+			const many = ["c1", "c2", "c3", "c4", "c5"].map((id, i) => ({
+				...categories[0],
+				id,
+				name: `Cat ${i + 1}`,
+			}));
+			setupMocks({
+				operations,
+				categories: many,
+				categorySummary: {
+					categories: many.map((c, i) => ({
+						categoryId: c.id,
+						income: "0",
+						expense: `-${(i + 1) * 10}.00`,
+					})),
+				},
+			});
+			await renderOperationsPage();
+
+			const breakdown = await screen.findByRole("region", {
+				name: "Par catégorie",
+			});
+			expect(within(breakdown).getAllByRole("listitem")).toHaveLength(4);
+			expect(
+				within(breakdown).getByRole("link", { name: "Voir les 5 catégories" }),
+			).toHaveAttribute(
+				"href",
+				"/stats?fromYear=2026&fromMonth=4&toYear=2026&toMonth=4",
 			);
 		});
 
@@ -1490,7 +1521,7 @@ describe("MonthlyOperationsPage", () => {
 				screen.queryByRole("combobox", { name: "Filtrer par catégorie" }),
 			).not.toBeInTheDocument();
 			expect(
-				screen.queryByRole("region", { name: "Dépenses par catégorie" }),
+				screen.queryByRole("region", { name: "Par catégorie" }),
 			).not.toBeInTheDocument();
 		});
 	});

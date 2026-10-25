@@ -5,12 +5,14 @@ import {
 	Group,
 	Paper,
 	Progress,
+	SegmentedControl,
 	SimpleGrid,
 	Stack,
 	Text,
 } from "@mantine/core";
-import { useId } from "react";
+import { useId, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { AnchorLink } from "@/components/AnchorLink";
 import { CATEGORY_MARK_SIZE, CategoryDot } from "@/components/CategoryBadge";
 import {
 	type CategoryRow,
@@ -18,6 +20,7 @@ import {
 	type CategorySlice,
 	categoryRows,
 	categorySlices,
+	isCategorySide,
 } from "@/lib/category-totals";
 import { formatAmount } from "@/lib/format";
 import { budgetTypeTones } from "@/lib/tones";
@@ -50,7 +53,34 @@ function NoCategoryDot({ fill }: { fill?: string }) {
 	);
 }
 
-function CategoryPie({ rows, label }: { rows: CategoryRow[]; label: string }) {
+function CategoryLabel({ row }: { row: CategoryRow }) {
+	const { t } = useTranslation();
+	return (
+		<Group gap={8} wrap="nowrap" miw={0}>
+			{row.category ? (
+				<CategoryDot category={row.category} />
+			) : (
+				<NoCategoryDot fill={UNCATEGORIZED_FILL} />
+			)}
+			<Text size="sm" fw={600} truncate>
+				{row.category?.name ?? t("stats.uncategorized")}
+			</Text>
+		</Group>
+	);
+}
+
+function CategoryPie({
+	rows,
+	label,
+	size = 200,
+	withOthers = true,
+}: {
+	rows: CategoryRow[];
+	label: string;
+	size?: number;
+	/** Names the folded slice under the pie. */
+	withOthers?: boolean;
+}) {
 	const { t } = useTranslation();
 	const slices = categorySlices(rows);
 	const fill = (slice: CategorySlice) =>
@@ -69,7 +99,7 @@ function CategoryPie({ rows, label }: { rows: CategoryRow[]; label: string }) {
 	return (
 		<Stack gap="xs" align="center">
 			<PieChart
-				size={200}
+				size={size}
 				data={slices.map((slice) => ({
 					key: slice.key,
 					name: name(slice),
@@ -83,7 +113,7 @@ function CategoryPie({ rows, label }: { rows: CategoryRow[]; label: string }) {
 				valueFormatter={(value) => formatAmount(value)}
 				aria-label={label}
 			/>
-			{others && (
+			{withOthers && others && (
 				<Group gap={6} wrap="nowrap">
 					<NoCategoryDot fill={OTHERS_FILL} />
 					<Text size="sm" c="dimmed">
@@ -96,8 +126,16 @@ function CategoryPie({ rows, label }: { rows: CategoryRow[]; label: string }) {
 }
 
 const categoryBreakdownKeys = {
-	income: { title: "stats.incomeByCategory", empty: "stats.noIncome" },
-	expense: { title: "stats.expensesByCategory", empty: "stats.noExpenses" },
+	income: {
+		label: "stats.income",
+		title: "stats.incomeByCategory",
+		empty: "stats.noIncome",
+	},
+	expense: {
+		label: "stats.expenses",
+		title: "stats.expensesByCategory",
+		empty: "stats.noExpenses",
+	},
 } as const;
 
 /** What each category earned or spent over the range, largest first, with its share. */
@@ -148,16 +186,7 @@ function CategoryBreakdown({
 										style={{ borderTop: `1px solid ${palette.divider}` }}
 									>
 										<Group justify="space-between" wrap="nowrap" gap="sm">
-											<Group gap={8} wrap="nowrap" miw={0}>
-												{row.category ? (
-													<CategoryDot category={row.category} />
-												) : (
-													<NoCategoryDot fill={UNCATEGORIZED_FILL} />
-												)}
-												<Text size="sm" fw={600} truncate>
-													{name}
-												</Text>
-											</Group>
+											<CategoryLabel row={row} />
 											<Text size="sm" className="tabular-nums" c="dimmed">
 												<Text
 													span
@@ -209,5 +238,125 @@ export function CategoryBreakdowns({
 				/>
 			))}
 		</SimpleGrid>
+	);
+}
+
+/** Past this many rows the overview hands over to the statistics page. */
+const OVERVIEW_ROWS = 4;
+
+/**
+ * One month's breakdown at a glance, one side at a time: the pie, the largest
+ * categories and a link to the full breakdown. Nothing until the user has categories.
+ */
+export function CategoryOverview({
+	totals,
+	categories,
+	year,
+	month,
+}: {
+	totals: CategoryTotal[] | undefined;
+	categories: CategoryResponse[] | undefined;
+	year: number;
+	month: number;
+}) {
+	const { t } = useTranslation();
+	const titleId = useId();
+	const [side, setSide] = useState<CategorySide>("expense");
+	if (!totals || !categories?.length) return null;
+
+	const keys = categoryBreakdownKeys[side];
+	const rows = categoryRows(totals, categories, side);
+	const total = rows.reduce((sum, row) => sum + row.amount, 0);
+
+	return (
+		<Paper component="section" aria-labelledby={titleId}>
+			<Stack gap="md">
+				<Group justify="space-between" align="baseline" wrap="nowrap">
+					<Text
+						id={titleId}
+						component="h2"
+						ff={headingFont}
+						fz={{ base: 19, sm: 22 }}
+						fw={700}
+					>
+						{t("operations.byCategory")}
+					</Text>
+					<Text
+						fw={700}
+						className="tabular-nums"
+						c={budgetTypeTones[side].text}
+					>
+						{formatAmount(total)}
+					</Text>
+				</Group>
+				<SegmentedControl
+					fullWidth
+					value={side}
+					onChange={(value) => {
+						if (isCategorySide(value)) setSide(value);
+					}}
+					data={(["expense", "income"] as const).map((s) => ({
+						value: s,
+						label: t(categoryBreakdownKeys[s].label),
+					}))}
+					styles={{
+						label: { minHeight: 36, display: "grid", alignContent: "center" },
+					}}
+				/>
+				{rows.length === 0 ? (
+					<Text size="sm" c="dimmed">
+						{t(keys.empty)}
+					</Text>
+				) : (
+					<Group gap="lg" wrap="nowrap">
+						<CategoryPie
+							rows={rows}
+							label={t(keys.title)}
+							size={112}
+							withOthers={false}
+						/>
+						<Box
+							component="ul"
+							m={0}
+							p={0}
+							maw={420}
+							className="flex min-w-0 flex-1 list-none flex-col gap-2"
+						>
+							{rows.slice(0, OVERVIEW_ROWS).map((row) => (
+								<Group
+									component="li"
+									key={row.key}
+									justify="space-between"
+									wrap="nowrap"
+									gap="sm"
+								>
+									<CategoryLabel row={row} />
+									<Text size="sm" className="tabular-nums" c="dimmed">
+										{`${Math.round((row.amount / total) * 100)} %`}
+									</Text>
+								</Group>
+							))}
+						</Box>
+					</Group>
+				)}
+				{rows.length > OVERVIEW_ROWS && (
+					<AnchorLink
+						to="/stats"
+						search={{
+							fromYear: year,
+							fromMonth: month,
+							toYear: year,
+							toMonth: month,
+						}}
+						size="sm"
+						fw={600}
+						mih={44}
+						className="grid place-content-center"
+					>
+						{t("operations.allCategories", { count: rows.length })}
+					</AnchorLink>
+				)}
+			</Stack>
+		</Paper>
 	);
 }

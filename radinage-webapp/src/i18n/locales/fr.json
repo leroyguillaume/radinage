@@ -27,6 +27,8 @@
 		"ignoreOperation": "Ignorer",
 		"unignoreOperation": "Ne plus ignorer",
 		"showIgnored": "Afficher les ignorées",
+		"byCategory": "Par catégorie",
+		"allCategories": "Voir les {{count}} catégories",
 		"ignored": {
 			"title": "Opérations ignorées",
 			"hint": "Exclues des totaux, des budgets et des prévisions",

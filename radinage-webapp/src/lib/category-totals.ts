@@ -3,6 +3,10 @@ import type { CategoryResponse, CategoryTotal } from "@/lib/types";
 /** Which flow of the category totals a breakdown is about. */
 export type CategorySide = "income" | "expense";
 
+export function isCategorySide(value: string): value is CategorySide {
+	return value === "income" || value === "expense";
+}
+
 /** What one category, or the operations without one, earned or spent over a range. */
 export interface CategoryRow {
 	key: string;
