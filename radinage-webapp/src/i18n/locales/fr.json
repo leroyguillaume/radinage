@@ -804,8 +804,18 @@
 		"allBudgets": "Tous les budgets",
 		"accounts": "Comptes",
 		"allAccounts": "Tous les comptes",
-		"dates": "Dates",
-		"allDates": "Toutes les dates",
+		"dateFrom": "Du",
+		"dateFromPlaceholder": "Début",
+		"dateTo": "Au",
+		"dateToPlaceholder": "Aujourd'hui",
+		"dateSince": "Depuis le {{from}}",
+		"dateUntil": "Jusqu'au {{to}}",
+		"datePresets": {
+			"thisMonth": "Ce mois-ci",
+			"lastMonth": "Mois dernier",
+			"thisYear": "Cette année",
+			"last12Months": "12 derniers mois"
+		},
 		"ignoredFilter": {
 			"label": "Opérations ignorées",
 			"excluded": "Non ignorées",
@@ -813,6 +823,14 @@
 			"included": "Toutes",
 			"onlyChip": "Ignorées seulement",
 			"includedChip": "Avec les ignorées"
+		},
+		"transferFilter": {
+			"label": "Virements",
+			"excluded": "Exclus",
+			"included": "Inclus",
+			"only": "Seuls",
+			"includedChip": "Avec les virements",
+			"onlyChip": "Virements seulement"
 		},
 		"ignored": "Ignorée",
 		"reset": "Réinitialiser",

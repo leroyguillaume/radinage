@@ -59,6 +59,7 @@ pub struct ListOperationsParams {
     pub limit: i64,
     pub offset: i64,
     pub ignored: IgnoredFilter,
+    pub transfers: TransferFilter,
     pub category: CategoryFilter,
     /// When not empty, keeps the operations linked to one of these budgets, a split operation
     /// through any of its parts.
@@ -80,6 +81,20 @@ pub enum IgnoredFilter {
     /// Every operation, ignored or not.
     Included,
     /// The ignored operations alone.
+    Only,
+}
+
+/// Which operations a listing keeps by whether they are transfers between the user's accounts.
+#[derive(Debug, Deserialize, Clone, Copy, Default, PartialEq, Eq, JsonSchema)]
+#[schemars(transform = crate::schema::flatten_string_enum)]
+#[serde(rename_all = "camelCase")]
+pub enum TransferFilter {
+    /// Every operation, transfer or not.
+    #[default]
+    Included,
+    /// The operations that are not transfers.
+    Excluded,
+    /// The transfers alone.
     Only,
 }
 
@@ -473,6 +488,11 @@ fn list_filters_sql(params: &ListOperationsParams) -> String {
         IgnoredFilter::Included => "",
         IgnoredFilter::Only => "AND o.ignored = TRUE",
     };
+    let transfers = match params.transfers {
+        TransferFilter::Included => "",
+        TransferFilter::Excluded => "AND o.transfer_account_id IS NULL",
+        TransferFilter::Only => "AND o.transfer_account_id IS NOT NULL",
+    };
     let direction = match params.direction {
         None => "",
         Some(OperationDirection::Expense) => "AND o.amount < 0",
@@ -510,6 +530,7 @@ fn list_filters_sql(params: &ListOperationsParams) -> String {
            AND (cardinality($10::uuid[]) = 0 OR o.account_id = ANY($10))
            AND (cardinality($11::uuid[]) = 0 OR o.transfer_account_id = ANY($11))
            {ignored}
+           {transfers}
            {direction}
            {category}
            {budget}"

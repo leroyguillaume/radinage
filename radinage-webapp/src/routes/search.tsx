@@ -62,14 +62,18 @@ import {
 } from "@/lib/operation-parts";
 import {
 	activeFilterCount,
+	DATE_PRESETS,
+	datePresetRange,
 	defaultOrder,
 	IGNORED_FILTERS,
+	matchingDatePreset,
 	mergeFilters,
 	OPERATION_DIRECTIONS,
 	OPERATION_SORTS,
 	type OperationFilters,
 	type OperationSort,
 	parseOperationFilters,
+	TRANSFER_FILTERS,
 } from "@/lib/operation-search";
 import { budgetTypeTones } from "@/lib/tones";
 import type {
@@ -167,6 +171,95 @@ function AmountInput({
 	);
 }
 
+interface SegmentedFieldProps<T extends string> {
+	label: string;
+	/** Value shown when the filter is absent from the URL. */
+	defaultValue: string;
+	value: T | undefined;
+	choices: readonly T[];
+	options: { value: string; label: string }[];
+	onChange: (value: T | undefined) => void;
+}
+
+function SegmentedField<T extends string>({
+	label,
+	defaultValue,
+	value,
+	choices,
+	options,
+	onChange,
+}: SegmentedFieldProps<T>) {
+	return (
+		<Input.Wrapper label={label}>
+			<SegmentedControl
+				fullWidth
+				size="md"
+				value={value ?? defaultValue}
+				onChange={(next) => onChange(choices.find((c) => c === next))}
+				data={options}
+				styles={{ label: { minHeight: 40, alignContent: "center" } }}
+			/>
+		</Input.Wrapper>
+	);
+}
+
+function DateBoundsField({
+	filters,
+	onChange,
+}: {
+	filters: OperationFilters;
+	onChange: UpdateFilters;
+}) {
+	const { t, i18n } = useTranslation();
+	const today = new Date();
+	const activePreset = matchingDatePreset(filters, today);
+	return (
+		<Stack gap="xs">
+			<Group gap="sm" grow wrap="nowrap" align="flex-start">
+				<DatePickerInput
+					label={t("search.dateFrom")}
+					placeholder={t("search.dateFromPlaceholder")}
+					value={filters.dateFrom ?? null}
+					onChange={(dateFrom) => onChange({ dateFrom: dateFrom ?? undefined })}
+					maxDate={filters.dateTo}
+					locale={i18n.language}
+					valueFormat="DD/MM/YYYY"
+					clearable
+					size="md"
+					miw={0}
+				/>
+				<DatePickerInput
+					label={t("search.dateTo")}
+					placeholder={t("search.dateToPlaceholder")}
+					value={filters.dateTo ?? null}
+					onChange={(dateTo) => onChange({ dateTo: dateTo ?? undefined })}
+					minDate={filters.dateFrom}
+					locale={i18n.language}
+					valueFormat="DD/MM/YYYY"
+					clearable
+					size="md"
+					miw={0}
+				/>
+			</Group>
+			<Group gap={6}>
+				{DATE_PRESETS.map((preset) => (
+					<Button
+						key={preset}
+						size="xs"
+						mih={44}
+						radius="xl"
+						variant={preset === activePreset ? "light" : "default"}
+						aria-pressed={preset === activePreset}
+						onClick={() => onChange(datePresetRange(preset, today))}
+					>
+						{t(`search.datePresets.${preset}`)}
+					</Button>
+				))}
+			</Group>
+		</Stack>
+	);
+}
+
 interface FilterControlsProps {
 	filters: OperationFilters;
 	accounts: AccountResponse[];
@@ -189,16 +282,8 @@ function FilterControls({
 	budgets,
 	onChange,
 }: FilterControlsProps) {
-	const { t, i18n } = useTranslation();
+	const { t } = useTranslation();
 	const categoryById = new Map(categories.map((c) => [c.id, c]));
-	const [range, setRange] = useState<[string | null, string | null]>([
-		filters.dateFrom ?? null,
-		filters.dateTo ?? null,
-	]);
-
-	useEffect(() => {
-		setRange([filters.dateFrom ?? null, filters.dateTo ?? null]);
-	}, [filters.dateFrom, filters.dateTo]);
 
 	return (
 		<SimpleGrid cols={{ base: 1, sm: 2, lg: 3 }} spacing="md">
@@ -214,24 +299,18 @@ function FilterControls({
 					onCommit={(amountMax) => onChange({ amountMax })}
 				/>
 			</Group>
-			<Input.Wrapper label={t("search.direction.label")}>
-				<SegmentedControl
-					fullWidth
-					size="md"
-					value={filters.direction ?? "all"}
-					onChange={(value) =>
-						onChange({
-							direction: OPERATION_DIRECTIONS.find((d) => d === value),
-						})
-					}
-					data={[
-						{ value: "all", label: t("search.direction.all") },
-						{ value: "expense", label: t("search.direction.expense") },
-						{ value: "income", label: t("search.direction.income") },
-					]}
-					styles={{ label: { minHeight: 40, alignContent: "center" } }}
-				/>
-			</Input.Wrapper>
+			<SegmentedField
+				label={t("search.direction.label")}
+				defaultValue="all"
+				value={filters.direction}
+				choices={OPERATION_DIRECTIONS}
+				onChange={(direction) => onChange({ direction })}
+				options={[
+					{ value: "all", label: t("search.direction.all") },
+					{ value: "expense", label: t("search.direction.expense") },
+					{ value: "income", label: t("search.direction.income") },
+				]}
+			/>
 			<MultiSelect
 				label={t("search.categories")}
 				placeholder={
@@ -315,42 +394,31 @@ function FilterControls({
 				size="md"
 				comboboxProps={{ withinPortal: true }}
 			/>
-			<DatePickerInput
-				type="range"
-				label={t("search.dates")}
-				placeholder={t("search.allDates")}
-				value={range}
-				onChange={([from, to]) => {
-					setRange([from, to]);
-					if ((from === null) === (to === null)) {
-						onChange({
-							dateFrom: from ?? undefined,
-							dateTo: to ?? undefined,
-						});
-					}
-				}}
-				locale={i18n.language}
-				valueFormat="DD/MM/YYYY"
-				clearable
-				allowSingleDateInRange
-				size="md"
+			<DateBoundsField filters={filters} onChange={onChange} />
+			<SegmentedField
+				label={t("search.ignoredFilter.label")}
+				defaultValue="excluded"
+				value={filters.ignored}
+				choices={IGNORED_FILTERS}
+				onChange={(ignored) => onChange({ ignored })}
+				options={[
+					{ value: "excluded", label: t("search.ignoredFilter.excluded") },
+					{ value: "only", label: t("search.ignoredFilter.only") },
+					{ value: "included", label: t("search.ignoredFilter.included") },
+				]}
 			/>
-			<Input.Wrapper label={t("search.ignoredFilter.label")}>
-				<SegmentedControl
-					fullWidth
-					size="md"
-					value={filters.ignored ?? "excluded"}
-					onChange={(value) =>
-						onChange({ ignored: IGNORED_FILTERS.find((f) => f === value) })
-					}
-					data={[
-						{ value: "excluded", label: t("search.ignoredFilter.excluded") },
-						{ value: "only", label: t("search.ignoredFilter.only") },
-						{ value: "included", label: t("search.ignoredFilter.included") },
-					]}
-					styles={{ label: { minHeight: 40, alignContent: "center" } }}
-				/>
-			</Input.Wrapper>
+			<SegmentedField
+				label={t("search.transferFilter.label")}
+				defaultValue="excluded"
+				value={filters.transfers}
+				choices={TRANSFER_FILTERS}
+				onChange={(transfers) => onChange({ transfers })}
+				options={[
+					{ value: "excluded", label: t("search.transferFilter.excluded") },
+					{ value: "included", label: t("search.transferFilter.included") },
+					{ value: "only", label: t("search.transferFilter.only") },
+				]}
+			/>
 		</SimpleGrid>
 	);
 }
@@ -422,10 +490,18 @@ function useFilterChips(
 			patch: { amountMin: undefined, amountMax: undefined },
 		});
 	}
-	if (filters.dateFrom && filters.dateTo) {
+	const { dateFrom, dateTo } = filters;
+	if (dateFrom || dateTo) {
+		const from = dateFrom ? formatIsoDate(dateFrom, i18n.language) : "";
+		const to = dateTo ? formatIsoDate(dateTo, i18n.language) : "";
 		chips.push({
 			key: "dates",
-			label: `${formatIsoDate(filters.dateFrom, i18n.language)} – ${formatIsoDate(filters.dateTo, i18n.language)}`,
+			label:
+				dateFrom && dateTo
+					? `${from} – ${to}`
+					: dateFrom
+						? t("search.dateSince", { from })
+						: t("search.dateUntil", { to }),
 			patch: { dateFrom: undefined, dateTo: undefined },
 		});
 	}
@@ -434,6 +510,13 @@ function useFilterChips(
 			key: "ignored",
 			label: t(`search.ignoredFilter.${filters.ignored}Chip`),
 			patch: { ignored: undefined },
+		});
+	}
+	if (filters.transfers) {
+		chips.push({
+			key: "transfers",
+			label: t(`search.transferFilter.${filters.transfers}Chip`),
+			patch: { transfers: undefined },
 		});
 	}
 	return chips;

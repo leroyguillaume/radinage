@@ -21,7 +21,7 @@ pub use import_profile::{ImportProfileRepository, PgImportProfileRepository};
 pub use operation::{
     CategoryFilter, CategoryTotal, IgnoredFilter, ListOperationsParams, OperationDirection,
     OperationRepository, OperationSortField, OperationTotals, PgOperationRepository,
-    SummaryCategory, SummaryRow,
+    SummaryCategory, SummaryRow, TransferFilter,
 };
 pub use user::{PgUserRepository, UserRepository};
 
