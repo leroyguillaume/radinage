@@ -266,7 +266,7 @@ or summed (`GET /operations?categoryId=`, `GET /summary/categories`), never
 copied onto the operation: changing a budget's category re-sorts every
 operation linked to it, and an auto-matched operation needs no write beyond its
 link. A split operation has no category of its own, like it has no budget link;
-splitting clears it and each part carries its own. The operations page filters
+splitting clears it and each part carries its own. The monthly tracking page filters
 the month it already holds by the same rule, per part, in
 [operation-parts.ts](radinage-webapp/src/lib/operation-parts.ts).
 
@@ -284,7 +284,8 @@ dates, every filter optional, and returns the totals of every match with the
 page, computed by the same query as the count. A split operation matches a
 category or budget filter through any of its parts, but it is listed — and
 summed in `totals` — for its whole amount: the search answers "which bank
-operations", the statistics page "how much went where".
+operations", the category breakdowns of the statistics and monthly tracking
+pages "how much went where".
 
 **The forecast is computed by the API.** `GET /forecast` returns, for each
 month of a horizon of up to 24 months, income, expenses, savings, balance and
@@ -304,7 +305,7 @@ per month as `unbudgetedForecast` (part of `expenses`). Days without
 operations count as zero, so a short history lowers the rate rather than
 extrapolating from a few weeks, and unbudgeted income never offsets it. The
 window is anchored on today, not on the horizon, so every horizon and the
-operations page, which shows `unbudgetedRate` × the days of the month as the
+monthly tracking page, which shows `unbudgetedRate` × the days of the month as the
 daily operations' forecast, use the same rate. Budget-linked amounts count under
 their budget's type; an operation outside any budget counts as income or as an
 expense by its own sign, so a salary and a grocery run in the same month never

@@ -559,7 +559,7 @@ describe("SearchPage", () => {
 		expect(sheet.getByText("SUPERMARCHE")).toBeInTheDocument();
 		fireEvent.click(
 			sheet.getByRole("link", {
-				name: "Voir novembre 2025 dans les opérations",
+				name: "Voir novembre 2025 dans le suivi mensuel",
 			}),
 		);
 		await waitFor(() => {

@@ -38,6 +38,7 @@ import type { TFunction } from "i18next";
 import { type ReactNode, useId, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { CategoryBadge, CategorySelect } from "@/components/CategoryBadge";
+import { CategoryBreakdowns } from "@/components/CategoryBreakdown";
 import { ImportModal } from "@/components/ImportModal";
 import { useOperationActions } from "@/components/OperationActions";
 import { OperationRow } from "@/components/OperationRow";
@@ -52,6 +53,7 @@ import { formatAmount, formatIsoDate, formatSignedAmount } from "@/lib/format";
 import {
 	useBudgets,
 	useCategories,
+	useCategorySummary,
 	useForecast,
 	useMonthlyOperations,
 } from "@/lib/hooks";
@@ -463,6 +465,7 @@ function MonthlyOperationsPage() {
 	const operationsQuery = useMonthlyOperations(year, month, showIgnored);
 	const budgetsQuery = useBudgets();
 	const categoriesQuery = useCategories();
+	const categorySummaryQuery = useCategorySummary(year, month, year, month);
 
 	const forecastQuery = useForecast(year, month, 1);
 
@@ -735,6 +738,10 @@ function MonthlyOperationsPage() {
 								}
 							/>
 						))}
+						<CategoryBreakdowns
+							totals={categorySummaryQuery.data?.categories}
+							categories={categories}
+						/>
 					</>
 				)}
 
