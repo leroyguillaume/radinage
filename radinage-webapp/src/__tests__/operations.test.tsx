@@ -1863,7 +1863,7 @@ describe("transfers", () => {
 
 		expect(statText("Dépenses")).toMatch(/-20,00/);
 		expect(statText("Revenus")).toMatch(/0,00/);
-		expect(statText("Épargne")).toMatch(/}}300,00/);
+		expect(statText("Épargne")).toMatch(/300,00/);
 		expect(statText("Virements internes")).toMatch(/\+450,00/);
 	});
 
