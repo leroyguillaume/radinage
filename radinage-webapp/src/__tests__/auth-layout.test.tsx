@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import { AuthLayout } from "@/components/AuthLayout";
 import { i18n } from "@/i18n";
 import { theme } from "@/theme";
+import { PHONE_WIDTH, setViewportWidth } from "./viewport";
 
 function renderLayout() {
 	return render(
@@ -34,6 +35,14 @@ describe("AuthLayout", () => {
 		expect(
 			screen.getByText(i18n.t("auth.features.forecastTitle")),
 		).toBeInTheDocument();
+	});
+
+	it("leaves the product features out on a phone", () => {
+		setViewportWidth(PHONE_WIDTH);
+		renderLayout();
+		expect(screen.getByText("Radinage")).toBeInTheDocument();
+		expect(screen.queryByRole("list")).toBeNull();
+		expect(screen.queryByText(i18n.t("auth.features.importTitle"))).toBeNull();
 	});
 
 	it("renders its children in the form column", () => {

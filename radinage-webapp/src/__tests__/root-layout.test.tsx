@@ -15,6 +15,7 @@ import { useAuthStore } from "@/stores/auth";
 import { useLastSearchStore } from "@/stores/last-search";
 import { useNavStore } from "@/stores/nav";
 import { theme } from "@/theme";
+import { PHONE_WIDTH, setViewportWidth } from "./viewport";
 
 function renderLayout(path: string) {
 	const rootRoute = createRootRoute({ component: RootRoute.options.component });
@@ -51,11 +52,8 @@ function signIn(role: string) {
 	useAuthStore.setState({ isAuthenticated: true, role });
 }
 
-/** The side bar's menu: the first navigation, before the mobile tab bar. */
 function sideMenu(): HTMLElement {
-	const [side] = screen.getAllByRole("navigation", { name: "Menu" });
-	if (!side) throw new Error("no side menu");
-	return side;
+	return screen.getByRole("navigation", { name: "Menu" });
 }
 
 function tabBar(): HTMLElement {
@@ -80,15 +78,32 @@ afterEach(() => {
 });
 
 describe("RootLayout", () => {
-	it("marks the current section in the side menu and the tab bar", async () => {
+	it("marks the current section in the side menu", async () => {
 		signIn("user");
 		renderLayout("/operations");
 		await screen.findByText("page /operations");
 		const current = screen.getAllByRole("link", { current: "page" });
-		expect(current.map((link) => link.textContent)).toEqual([
-			"Suivi mensuel",
-			"Mois",
-		]);
+		expect(current.map((link) => link.textContent)).toEqual(["Suivi mensuel"]);
+		expect(screen.getByRole("complementary")).toContainElement(sideMenu());
+		expect(screen.queryByRole("banner")).toBeNull();
+		expect(
+			screen.queryByRole("navigation", { name: "Navigation rapide" }),
+		).toBeNull();
+	});
+
+	it("marks the current section in the tab bar on a phone", async () => {
+		setViewportWidth(PHONE_WIDTH);
+		signIn("user");
+		renderLayout("/operations");
+		await screen.findByText("page /operations");
+		const current = screen.getAllByRole("link", { current: "page" });
+		expect(current.map((link) => link.textContent)).toEqual(["Mois"]);
+		expect(within(tabBar()).getByRole("link", { current: "page" })).toBe(
+			current[0],
+		);
+		expect(screen.getByRole("banner")).toBeInTheDocument();
+		expect(screen.queryByRole("complementary")).toBeNull();
+		expect(screen.queryByRole("navigation", { name: "Menu" })).toBeNull();
 	});
 
 	it("groups the pages to follow apart from the ones to organize", async () => {
@@ -109,6 +124,7 @@ describe("RootLayout", () => {
 	});
 
 	it("keeps four daily pages in the tab bar and the rest behind its menu", async () => {
+		setViewportWidth(PHONE_WIDTH);
 		signIn("user");
 		renderLayout("/accounts");
 		await screen.findByText("page /accounts");
@@ -152,6 +168,17 @@ describe("RootLayout", () => {
 			"/budgets",
 			"/categories",
 		]);
+	});
+
+	it("brings each page back as it was last shown from the tab bar", async () => {
+		setViewportWidth(PHONE_WIDTH);
+		useLastSearchStore.setState({
+			searches: { "/operations": { year: 2025, month: 3 } },
+		});
+		signIn("user");
+		renderLayout("/summary");
+		await screen.findByText("page /summary");
+
 		expect(hrefs(tabBar())).toContain("/operations?year=2025&month=3");
 	});
 

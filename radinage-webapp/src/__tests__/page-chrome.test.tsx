@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 import { PageHeader } from "@/components/PageHeader";
 import { StatTile } from "@/components/StatTile";
 import { theme } from "@/theme";
+import { PHONE_WIDTH, setViewportWidth } from "./viewport";
 
 function renderWithTheme(ui: ReactNode) {
 	return render(<MantineProvider theme={theme}>{ui}</MantineProvider>);
@@ -34,7 +35,20 @@ describe("PageHeader", () => {
 		expect(screen.queryByRole("button")).not.toBeInTheDocument();
 	});
 
-	it("reveals the subtitle from its info button", async () => {
+	it("spells the subtitle out on a wide screen, without an info button", () => {
+		renderWithTheme(
+			<PageHeader
+				title="Résumé"
+				subtitle="Réel puis prévision"
+				subtitleInfoLabel="Comment c'est calculé"
+			/>,
+		);
+		expect(screen.getByText("Réel puis prévision")).toBeInTheDocument();
+		expect(screen.queryByRole("button")).not.toBeInTheDocument();
+	});
+
+	it("reveals the subtitle from its info button on a phone", async () => {
+		setViewportWidth(PHONE_WIDTH);
 		const user = userEvent.setup();
 		renderWithTheme(
 			<PageHeader
@@ -43,6 +57,7 @@ describe("PageHeader", () => {
 				subtitleInfoLabel="Comment c'est calculé"
 			/>,
 		);
+		expect(screen.queryByText("Réel puis prévision")).not.toBeInTheDocument();
 
 		await user.click(
 			screen.getByRole("button", { name: "Comment c'est calculé" }),

@@ -33,7 +33,7 @@ import { useLastSearchStore } from "@/stores/last-search";
 import { useOperationSectionsStore } from "@/stores/operation-sections";
 import { theme } from "@/theme";
 import { selectMantineOption } from "./mantine";
-import { resetViewport, setViewportWidth } from "./viewport";
+import { PHONE_WIDTH, setViewportWidth } from "./viewport";
 
 vi.mock("@/lib/api", () => ({
 	ApiError: class ApiError extends Error {
@@ -383,21 +383,16 @@ async function renderOperationsPage(year = "2026", month = "4") {
 	return { queryClient };
 }
 
-const DESKTOP_WIDTH = 1280;
-const PHONE_WIDTH = 390;
-
 const ALL_SECTIONS = ["income", "expense", "savings", "monthly", "transfers"];
 
 beforeEach(async () => {
 	await i18n.changeLanguage("fr");
-	setViewportWidth(DESKTOP_WIDTH);
 	setupMocks();
 	// Most tests look inside the sections, which start folded.
 	useOperationSectionsStore.setState({ open: ALL_SECTIONS });
 });
 
 afterEach(() => {
-	resetViewport();
 	vi.restoreAllMocks();
 });
 
