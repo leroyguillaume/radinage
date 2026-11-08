@@ -10,6 +10,25 @@ server {
         add_header Cache-Control "public, immutable";
     }
 
+    # The service worker, its manifest and the app shell must be revalidated
+    # on every load: a cached copy keeps installed apps on the previous build.
+    location = /sw.js {
+        add_header Cache-Control "no-cache";
+    }
+
+    location = /manifest.webmanifest {
+        # The image's mime.types has no entry for .webmanifest.
+        types {
+            application/manifest+json webmanifest;
+        }
+        add_header Cache-Control "no-cache";
+    }
+
+    # Also reached through the index directive and the SPA fallback below.
+    location = /index.html {
+        add_header Cache-Control "no-cache";
+    }
+
     # Proxy API requests to the backend
     location /api/ {
         proxy_pass http://${API_HOST};

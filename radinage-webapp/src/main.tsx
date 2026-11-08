@@ -5,6 +5,7 @@ import { RouterProvider } from "@tanstack/react-router";
 import "dayjs/locale/fr";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
+import { UpdatePrompt } from "./components/UpdatePrompt";
 import "./i18n";
 import { router } from "./router";
 import "./styles.css";
@@ -24,6 +25,7 @@ if (rootElement) {
 				>
 					<DatesProvider settings={{ locale: "fr" }}>
 						<RouterProvider router={router} />
+						<UpdatePrompt />
 					</DatesProvider>
 				</MantineProvider>
 			</QueryClientProvider>

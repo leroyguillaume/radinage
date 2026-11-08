@@ -8,8 +8,14 @@ import { StatTile } from "@/components/StatTile";
 import { theme } from "@/theme";
 import { PHONE_WIDTH, setViewportWidth } from "./viewport";
 
+// env="test": outside it, Popover hides its dropdown (display: none) once
+// floating-ui reports jsdom's zero-size target as detached, racing the query.
 function renderWithTheme(ui: ReactNode) {
-	return render(<MantineProvider theme={theme}>{ui}</MantineProvider>);
+	return render(
+		<MantineProvider theme={theme} env="test">
+			{ui}
+		</MantineProvider>,
+	);
 }
 
 describe("PageHeader", () => {
