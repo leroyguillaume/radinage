@@ -45,7 +45,13 @@ updates:
           - react-dom
           - "@types/react"
           - "@types/react-dom"
+      # Dependabot puts a dependency in its most specific matching group, not
+      # the first one, and a group without patterns outranks any wildcard:
+      # without "*" this catch-all swallows the lockstep groups above.
+      # https://github.com/dependabot/dependabot-core/issues/11093
       npm:
+        patterns:
+          - "*"
         update-types:
           - minor
           - patch
