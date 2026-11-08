@@ -52,6 +52,7 @@ import {
 } from "@/lib/format";
 import {
 	useAccounts,
+	useBelowBreakpoint,
 	useBudgets,
 	useCategories,
 	useOperationSearch,
@@ -536,7 +537,6 @@ function FilterChipRow({
 		<Box
 			component="ul"
 			aria-label={t("search.activeFilters")}
-			hiddenFrom="sm"
 			className="-mx-4 flex list-none gap-2 overflow-x-auto px-4 py-1"
 		>
 			{chips.map((chip) => (
@@ -588,12 +588,13 @@ function SearchTotals({
 	totals: OperationSearchTotals;
 }) {
 	const { t, i18n } = useTranslation();
+	const isMobile = useBelowBreakpoint("sm");
 	const range = dateRangeLabel(totals, i18n.language);
 	const expense = budgetTypeTones.expense;
 	const income = budgetTypeTones.income;
-	return (
-		<>
-			<SimpleGrid cols={3} spacing="sm" visibleFrom="sm">
+	if (!isMobile) {
+		return (
+			<SimpleGrid cols={3} spacing="sm">
 				<StatTile
 					label={t("search.totals.count")}
 					value={total}
@@ -613,25 +614,27 @@ function SearchTotals({
 					valueColor={income.text}
 				/>
 			</SimpleGrid>
-			<Stack gap={0} hiddenFrom="sm">
-				<Text size="sm" fw={600} className="tabular-nums">
-					{t("search.resultsCount", { count: total })}
-					{" · "}
-					<Text span inherit c={expense.text}>
-						{formatAmount(totals.expense)}
-					</Text>
-					{" · "}
-					<Text span inherit c={income.text}>
-						{formatAmount(totals.income)}
-					</Text>
+		);
+	}
+	return (
+		<Stack gap={0}>
+			<Text size="sm" fw={600} className="tabular-nums">
+				{t("search.resultsCount", { count: total })}
+				{" · "}
+				<Text span inherit c={expense.text}>
+					{formatAmount(totals.expense)}
 				</Text>
-				{range && (
-					<Text size="xs" c="dimmed">
-						{range}
-					</Text>
-				)}
-			</Stack>
-		</>
+				{" · "}
+				<Text span inherit c={income.text}>
+					{formatAmount(totals.income)}
+				</Text>
+			</Text>
+			{range && (
+				<Text size="xs" c="dimmed">
+					{range}
+				</Text>
+			)}
+		</Stack>
 	);
 }
 
@@ -864,6 +867,7 @@ function SearchPage() {
 	const navigate = useNavigate({ from: Route.fullPath });
 	useRememberSearch("/search", filters);
 	const [drawerOpened, drawer] = useDisclosure(false);
+	const isMobile = useBelowBreakpoint("sm");
 	const categories = useCategories().data ?? [];
 	const budgets = useBudgets().data ?? [];
 	const accounts = useAccounts().data ?? [];
@@ -957,25 +961,26 @@ function SearchPage() {
 									)
 								}
 							/>
-							<Button
-								hiddenFrom="sm"
-								variant="default"
-								size="lg"
-								px="sm"
-								onClick={drawer.open}
-								leftSection={<IconAdjustmentsHorizontal size={20} />}
-								rightSection={
-									filterCount > 0 && (
-										<Badge size="sm" circle variant="filled">
-											{filterCount}
-										</Badge>
-									)
-								}
-							>
-								{t("search.filters")}
-							</Button>
+							{isMobile && (
+								<Button
+									variant="default"
+									size="lg"
+									px="sm"
+									onClick={drawer.open}
+									leftSection={<IconAdjustmentsHorizontal size={20} />}
+									rightSection={
+										filterCount > 0 && (
+											<Badge size="sm" circle variant="filled">
+												{filterCount}
+											</Badge>
+										)
+									}
+								>
+									{t("search.filters")}
+								</Button>
+							)}
 						</Group>
-						<Box visibleFrom="sm">
+						{!isMobile && (
 							<Stack gap="md">
 								{controls}
 								<Group justify="flex-end">
@@ -989,11 +994,11 @@ function SearchPage() {
 									</Button>
 								</Group>
 							</Stack>
-						</Box>
+						)}
 					</Stack>
 				</Paper>
 
-				<FilterChipRow chips={chips} onChange={update} />
+				{isMobile && <FilterChipRow chips={chips} onChange={update} />}
 
 				{query.isPending ? (
 					<div className="flex items-center justify-center py-12">

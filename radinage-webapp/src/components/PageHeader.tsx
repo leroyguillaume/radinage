@@ -1,6 +1,7 @@
 import { ActionIcon, Group, Popover, Stack, Text, Title } from "@mantine/core";
 import { IconInfoCircle } from "@tabler/icons-react";
 import type { ReactNode } from "react";
+import { useBelowBreakpoint } from "@/lib/hooks";
 
 interface PageHeaderProps {
 	title: ReactNode;
@@ -19,7 +20,9 @@ export function PageHeader({
 	subtitleInfoLabel,
 	actions,
 }: PageHeaderProps) {
-	const collapsible = subtitle !== undefined && subtitleInfoLabel !== undefined;
+	const isMobile = useBelowBreakpoint("sm");
+	const collapsed =
+		isMobile && subtitle !== undefined && subtitleInfoLabel !== undefined;
 	const heading = (
 		<Title order={1} fz={{ base: 30, sm: 40 }} lts="-0.02em" lh={1.1}>
 			{title}
@@ -28,13 +31,12 @@ export function PageHeader({
 	return (
 		<Group justify="space-between" align="center" gap="md" wrap="wrap">
 			<Stack gap={4}>
-				{collapsible ? (
+				{collapsed ? (
 					<Group gap={4} wrap="nowrap">
 						{heading}
 						<Popover position="bottom-start" width={300} withArrow shadow="md">
 							<Popover.Target>
 								<ActionIcon
-									hiddenFrom="sm"
 									size={44}
 									radius="md"
 									variant="subtle"
@@ -53,11 +55,7 @@ export function PageHeader({
 				) : (
 					heading
 				)}
-				{subtitle && (
-					<Text c="dimmed" visibleFrom={collapsible ? "sm" : undefined}>
-						{subtitle}
-					</Text>
-				)}
+				{subtitle && !collapsed && <Text c="dimmed">{subtitle}</Text>}
 			</Stack>
 			{actions && (
 				<Group gap="sm" wrap="wrap">

@@ -19,6 +19,7 @@ import type {
 	YearMonth,
 } from "@/lib/types";
 import { theme } from "@/theme";
+import { PHONE_WIDTH, setViewportWidth } from "./viewport";
 
 vi.mock("@/lib/api", () => ({
 	ApiError: class ApiError extends Error {
@@ -925,22 +926,13 @@ describe("SummaryPage month breakdown", () => {
 });
 
 describe("SummaryPage on a phone", () => {
-	const desktopMatchMedia = window.matchMedia;
-
 	beforeEach(() => {
 		vi.useFakeTimers({ toFake: ["Date"] });
 		vi.setSystemTime(new Date(2026, 9, 15));
 		setupMocks(typicalForecast, (year, month) =>
 			Promise.resolve(breakdownOf(year, month)),
 		);
-		window.matchMedia = (query: string) => ({
-			...desktopMatchMedia(query),
-			matches: query.includes("max-width"),
-		});
-	});
-
-	afterEach(() => {
-		window.matchMedia = desktopMatchMedia;
+		setViewportWidth(PHONE_WIDTH);
 	});
 
 	function monthList(): HTMLElement {

@@ -900,8 +900,9 @@ export function useApplyTransferRule() {
 }
 
 /**
- * True below the theme `breakpoint`, matching `hiddenFrom`. Read on the first
- * render so a phone never paints the desktop layout first.
+ * True below the theme `breakpoint`, the boundary Mantine's responsive props
+ * switch at. Read on the first render so a phone never paints the desktop
+ * layout first.
  */
 export function useBelowBreakpoint(breakpoint: MantineBreakpoint): boolean {
 	const theme = useMantineTheme();

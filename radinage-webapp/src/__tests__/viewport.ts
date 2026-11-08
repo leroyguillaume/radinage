@@ -1,4 +1,5 @@
-const defaultMatchMedia = window.matchMedia;
+/** Below every theme breakpoint, `xs` included. */
+export const PHONE_WIDTH = 375;
 
 const WIDTH_QUERY =
 	/\((min|max)-width:\s*(?:calc\()?([\d.]+)(em|px)(?:\s*-\s*([\d.]+)px\))?\)/g;
@@ -18,11 +19,18 @@ function matchesWidth(query: string, width: number): boolean {
 /** Makes `matchMedia` answer width queries as a viewport `width` px wide would. */
 export function setViewportWidth(width: number) {
 	window.matchMedia = (query: string) => ({
-		...defaultMatchMedia(query),
 		matches: matchesWidth(query, width),
+		media: query,
+		onchange: null,
+		addListener: () => {},
+		removeListener: () => {},
+		addEventListener: () => {},
+		removeEventListener: () => {},
+		dispatchEvent: () => false,
 	});
 }
 
+/** Back to jsdom's own viewport, the one it matches CSS media queries against. */
 export function resetViewport() {
-	window.matchMedia = defaultMatchMedia;
+	setViewportWidth(window.innerWidth);
 }

@@ -428,6 +428,19 @@ every month.
 origin, so the browser needs no CORS and the API address is a deployment
 setting of the web app image rather than a build-time constant.
 
+**Viewport-dependent markup is rendered, not hidden.** Where the phone and the
+wide-screen layouts show different things (the side bar or the tab bar, the
+inline filters or the filters drawer, a spelled-out subtitle or its info
+button), the component branches on `useBelowBreakpoint`
+([src/lib/hooks.ts](radinage-webapp/src/lib/hooks.ts)) rather than hiding one
+variant with Mantine's `hiddenFrom`/`visibleFrom`. jsdom matches CSS media
+queries against a fixed 1024px viewport, so CSS-hidden markup cannot be
+exercised per viewport in tests; the hook reads `matchMedia`, which tests drive
+with `setViewportWidth`
+([src/\_\_tests\_\_/viewport.ts](radinage-webapp/src/__tests__/viewport.ts)).
+Styling that only rearranges what is on screen (spacing, columns) stays in
+responsive props and Tailwind breakpoints.
+
 **Configuration through clap.** Every setting of both Rust binaries is a
 `#[arg(long, env = ...)]` field in their `config.rs`, giving one typed place
 that defines flags, environment variables and defaults together.

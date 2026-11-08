@@ -28,6 +28,7 @@ import type {
 } from "@/lib/types";
 import { useLastSearchStore } from "@/stores/last-search";
 import { theme } from "@/theme";
+import { PHONE_WIDTH, setViewportWidth } from "./viewport";
 
 vi.mock("@/lib/api", () => ({
 	ApiError: class ApiError extends Error {
@@ -530,17 +531,6 @@ describe("SearchPage", () => {
 		vi.useRealTimers();
 	});
 
-	it("searches from a single date bound and names it in its chip", async () => {
-		await renderSearchPage("/search?dateFrom=2026-03-01&transfers=only");
-		await screen.findByText("LOYER FEVRIER");
-
-		expect(lastSearch().get("dateFrom")).toBe("2026-03-01");
-		expect(lastSearch().has("dateTo")).toBe(false);
-		const chips = screen.getByRole("list", { name: "Filtres actifs" });
-		expect(within(chips).getByText("Depuis le 01/03/2026")).toBeInTheDocument();
-		expect(within(chips).getByText("Virements seulement")).toBeInTheDocument();
-	});
-
 	it("does not send an invalid amount", async () => {
 		await renderSearchPage();
 		await screen.findByText("LOYER FEVRIER");
@@ -566,6 +556,17 @@ describe("SearchPage", () => {
 		expect(params.get("order")).toBe("asc");
 	});
 
+	it("lays the filters out inline on a wide screen, without chips", async () => {
+		await renderSearchPage("/search?direction=income");
+		await screen.findByText("LOYER FEVRIER");
+
+		expect(
+			screen.getByRole("radio", { name: "Revenus", checked: true }),
+		).toBeInTheDocument();
+		expect(screen.queryByRole("button", { name: /^Filtres/ })).toBeNull();
+		expect(screen.queryByRole("list", { name: "Filtres actifs" })).toBeNull();
+	});
+
 	it("shows the totals of every match", async () => {
 		await renderSearchPage();
 		await screen.findByText("LOYER FEVRIER");
@@ -575,9 +576,7 @@ describe("SearchPage", () => {
 		expect(screen.getByText("Total des revenus")).toBeInTheDocument();
 		expect(text).toContain("-854,20 €");
 		expect(text).toContain("2 500,00 €");
-		expect(
-			screen.getAllByText("28/11/2025 – 01/02/2026").length,
-		).toBeGreaterThan(0);
+		expect(screen.getByText("28/11/2025 – 01/02/2026")).toBeInTheDocument();
 	});
 
 	it("groups the results by year of their accounting date", async () => {
@@ -724,34 +723,75 @@ describe("SearchPage", () => {
 		).toBeInTheDocument();
 	});
 
-	it("counts the active filters and lets each be removed", async () => {
-		await renderSearchPage('/search?categoryIds=["c-food"]&direction=income');
-		await screen.findByText("LOYER FEVRIER");
+	describe("on a phone", () => {
+		beforeEach(() => {
+			setViewportWidth(PHONE_WIDTH);
+		});
 
-		expect(
-			screen.getByRole("button", { name: /^Filtres\s*2$/ }),
-		).toBeInTheDocument();
-		const chips = screen.getByRole("list", { name: "Filtres actifs" });
-		fireEvent.click(
-			within(chips).getByRole("button", {
-				name: "Retirer le filtre Revenus",
-			}),
-		);
+		it("searches from a single date bound and names it in its chip", async () => {
+			await renderSearchPage("/search?dateFrom=2026-03-01&transfers=only");
+			await screen.findByText("LOYER FEVRIER");
 
-		await waitFor(() => expect(lastSearch().has("direction")).toBe(false));
-		expect(lastSearch().getAll("categoryId")).toEqual(["c-food"]);
-	});
+			expect(lastSearch().get("dateFrom")).toBe("2026-03-01");
+			expect(lastSearch().has("dateTo")).toBe(false);
+			const chips = screen.getByRole("list", { name: "Filtres actifs" });
+			expect(
+				within(chips).getByText("Depuis le 01/03/2026"),
+			).toBeInTheDocument();
+			expect(
+				within(chips).getByText("Virements seulement"),
+			).toBeInTheDocument();
+		});
 
-	it("opens the filters in a drawer showing the result count", async () => {
-		await renderSearchPage();
-		await screen.findByText("LOYER FEVRIER");
+		it("counts the active filters and lets each be removed", async () => {
+			await renderSearchPage('/search?categoryIds=["c-food"]&direction=income');
+			await screen.findByText("LOYER FEVRIER");
 
-		fireEvent.click(screen.getByRole("button", { name: "Filtres" }));
+			expect(
+				screen.getByRole("button", { name: /^Filtres\s*2$/ }),
+			).toBeInTheDocument();
+			const chips = screen.getByRole("list", { name: "Filtres actifs" });
+			fireEvent.click(
+				within(chips).getByRole("button", {
+					name: "Retirer le filtre Revenus",
+				}),
+			);
 
-		const drawer = await screen.findByRole("dialog");
-		fireEvent.click(
-			within(drawer).getByRole("button", { name: "Voir 3 résultat(s)" }),
-		);
-		await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+			await waitFor(() => expect(lastSearch().has("direction")).toBe(false));
+			expect(lastSearch().getAll("categoryId")).toEqual(["c-food"]);
+		});
+
+		it("opens the filters in a drawer showing the result count", async () => {
+			await renderSearchPage();
+			await screen.findByText("LOYER FEVRIER");
+			expect(screen.queryByRole("radio", { name: "Seuls" })).toBeNull();
+
+			fireEvent.click(screen.getByRole("button", { name: "Filtres" }));
+
+			const drawer = await screen.findByRole("dialog");
+			expect(
+				within(drawer).getByRole("radio", { name: "Seuls" }),
+			).toBeInTheDocument();
+			fireEvent.click(
+				within(drawer).getByRole("button", { name: "Voir 3 résultat(s)" }),
+			);
+			await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+		});
+
+		it("sums the matches up in a single line", async () => {
+			await renderSearchPage();
+			await screen.findByText("LOYER FEVRIER");
+
+			expect(
+				screen.getByText(
+					(_, el) =>
+						el?.tagName === "P" &&
+						(el.textContent ?? "").replace(/\s/g, " ") ===
+							"3 résultat(s) · -854,20 € · 2 500,00 €",
+				),
+			).toBeInTheDocument();
+			expect(screen.getByText("28/11/2025 – 01/02/2026")).toBeInTheDocument();
+			expect(screen.queryByText("Total des dépenses")).toBeNull();
+		});
 	});
 });

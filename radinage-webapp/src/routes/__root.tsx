@@ -33,6 +33,7 @@ import {
 import { type ComponentType, Fragment, type ReactNode, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { BrandLogo } from "@/components/BrandLogo";
+import { useBelowBreakpoint } from "@/lib/hooks";
 import { useAuthStore } from "@/stores/auth";
 import { useLastSearchStore } from "@/stores/last-search";
 import { useNavStore } from "@/stores/nav";
@@ -353,6 +354,7 @@ function RootLayout() {
 	const collapsed = useNavStore((s) => s.collapsed);
 	const toggleCollapsed = useNavStore((s) => s.toggleCollapsed);
 	const [menuOpened, menu] = useDisclosure(false);
+	const isMobile = useBelowBreakpoint("sm");
 	const navigate = useNavigate();
 	const { t } = useTranslation();
 
@@ -375,10 +377,9 @@ function RootLayout() {
 	// dvh, not 100vh: on mobile browsers 100vh ignores the URL bar and hides the bottom tab bar
 	return (
 		<div className="flex h-dvh overflow-hidden">
-			{isAuthenticated && (
+			{isAuthenticated && !isMobile && (
 				<Box
 					component="aside"
-					visibleFrom="sm"
 					w={collapsed ? SIDE_WIDTH.collapsed : SIDE_WIDTH.expanded}
 					bg={palette.surface}
 					px={12}
@@ -411,10 +412,9 @@ function RootLayout() {
 				</Box>
 			)}
 			<div className="flex min-w-0 flex-1 flex-col">
-				{isAuthenticated && (
+				{isAuthenticated && isMobile && (
 					<Box
 						component="header"
-						hiddenFrom="sm"
 						bg={palette.surface}
 						px="md"
 						py={6}
@@ -428,11 +428,10 @@ function RootLayout() {
 				<div className="min-h-0 flex-1 overflow-hidden">
 					<Outlet />
 				</div>
-				{isAuthenticated && (
+				{isAuthenticated && isMobile && (
 					<Box
 						component="nav"
 						aria-label={t("nav.tabs")}
-						hiddenFrom="sm"
 						bg={palette.surface}
 						p={6}
 						style={{
