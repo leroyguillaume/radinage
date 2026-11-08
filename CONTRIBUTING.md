@@ -113,6 +113,22 @@ npx vitest run src/__tests__/budgets.test.tsx
 
 Every new behaviour comes with tests, and every bug fix with a test that fails without it.
 
+The service worker is not registered under `npm run dev`. To try the installable app and its update prompt, serve a production build from `radinage-webapp/`:
+
+```bash
+npm run build
+```
+
+```bash
+npm run preview
+```
+
+The PWA icons in `radinage-webapp/public/` (`pwa-*.png`, `maskable-icon-*.png`, `apple-touch-icon-*.png`) are generated from `logo.svg` and committed. After changing the logo, regenerate them from `radinage-webapp/` and commit the result:
+
+```bash
+npm run generate-pwa-assets
+```
+
 ## Pre-commit hooks
 
 Hooks must pass before a commit is pushed. Run them on the whole repository, or one hook at a time while iterating:

@@ -22,6 +22,7 @@ Radinage keeps a record of your bank operations and compares them with the budge
 - **Forecast**, over a calendar year: starting from the balance of your imported checking accounts or from zero, actuals for past months (operations outside any budget counted as income or expense by their own sign), the current month's actuals plus what its budgets still expect, budgets beyond it, spending outside budgets at your average of the last three months, the daily amount you can still spend outside budgets without the year ending in deficit, whatever the account balance (negative when the budgets alone already do), and the month the balance would first turn negative. Selecting a month opens its breakdown budget by budget: what each one expects, what is already linked to it and what the forecast counts, then spending outside budgets.
 - **Statistics**: income, expenses, savings and balance over any range of months, net worth month by month stacked by account, and income and expenses by category.
 - **Multi-user**: JWT authentication, an admin account and invitation links.
+- **Installable**: add the webapp to a phone's home screen (Safari on iOS: Share → Add to Home Screen; Chrome on Android or desktop: Install app) to open it full screen like a native app. A new version shows up as a prompt to reload; nothing is stored for offline use, so the app needs the network.
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for the design and the reasoning behind it.
 

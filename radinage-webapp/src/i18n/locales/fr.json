@@ -993,5 +993,11 @@
 			"missingCount_other": "{{count}} virements sans contrepartie",
 			"missingHint": "L'autre côté n'a pas été trouvé dans les relevés importés. Ouvre l'opération pour le lier."
 		}
+	},
+	"update": {
+		"title": "Nouvelle version disponible",
+		"message": "Recharge pour utiliser la dernière version de Radinage.",
+		"reload": "Recharger",
+		"dismiss": "Plus tard"
 	}
 }

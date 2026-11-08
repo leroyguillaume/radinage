@@ -11,7 +11,8 @@
 		"test:watch": "vitest",
 		"lint": "biome check .",
 		"format": "biome format --write .",
-		"check": "biome check --write ."
+		"check": "biome check --write .",
+		"generate-pwa-assets": "pwa-assets-generator"
 	},
 	"dependencies": {
 		"@emotion/react": "^11.14.0",
@@ -46,10 +47,13 @@
 		"@types/node": "^26.6.6",
 		"@types/react": "^19.3.0",
 		"@types/react-dom": "^19.3.0",
+		"@vite-pwa/assets-generator": "^2.0.0",
 		"@vitejs/plugin-react": "^6.2.1",
 		"jsdom": "^31.0.0",
 		"typescript": "~7.0.2",
 		"vite": "^8.3.6",
-		"vitest": "^5.1.0"
+		"vite-plugin-pwa": "^2.0.0",
+		"vitest": "^5.1.0",
+		"workbox-window": "^7.4.1"
 	}
 }

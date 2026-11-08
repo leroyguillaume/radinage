@@ -376,7 +376,7 @@ function RootLayout() {
 
 	// dvh, not 100vh: on mobile browsers 100vh ignores the URL bar and hides the bottom tab bar
 	return (
-		<div className="flex h-dvh overflow-hidden">
+		<div className="app-shell flex h-dvh overflow-hidden">
 			{isAuthenticated && !isMobile && (
 				<Box
 					component="aside"

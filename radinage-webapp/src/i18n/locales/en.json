@@ -993,5 +993,11 @@
 			"missingCount_other": "{{count}} transfers without their other side",
 			"missingHint": "The other side was not found in the imported statements. Open the operation to link it."
 		}
+	},
+	"update": {
+		"title": "New version available",
+		"message": "Reload to use the latest version of Radinage.",
+		"reload": "Reload",
+		"dismiss": "Later"
 	}
 }
