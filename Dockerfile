@@ -68,9 +68,12 @@ ENTRYPOINT ["radinage-api"]
 # =============================================================================
 # Target: radinage-webapp
 # =============================================================================
-FROM nginx:1.31.8-alpine3.24 AS webapp
+FROM nginx:1.31.9-alpine3.24 AS webapp
 
-RUN addgroup -g 65532 -S radinage && adduser -u 65532 -S radinage -G radinage \
+# The nginx image lags behind Alpine security updates; this clears CVE-2026-86144
+# (libxml2) until a newer nginx image ships it.
+RUN apk add --no-cache libxml2=2.13.9-r3 \
+    && addgroup -g 65532 -S radinage && adduser -u 65532 -S radinage -G radinage \
     && mkdir -p /var/cache/nginx /var/run /etc/nginx/templates \
     && chown -R radinage:radinage /var/cache/nginx /var/run /etc/nginx/conf.d /etc/nginx/templates
 
