@@ -8,7 +8,7 @@ Personal bank account tracking app. Rust API + React SPA.
 radinage-api/          Rust REST API (Axum + SQLx + PostgreSQL)
   src/main.rs          AppState<U,O,B> generic over repos, route registration
   src/config.rs        clap-based config, all env vars declared here
-  src/auth/            JWT middleware, password hashing (argon2)
+  src/auth/            session middleware (opaque tokens), password hashing (argon2)
   src/domain/          Core types: user, operation, budget
   src/handlers/        HTTP handlers — each defines its own *Response DTO
   src/repositories/    Trait-based repos (Pg* impls) + MockXxxRepository for tests

@@ -31,13 +31,6 @@ A personal bank account tracking application
 | apps.api.image.repository | string | `"radinage-api"` | Image repository |
 | apps.api.image.tag | string | `""` | Image tag — override `global.image.tag` |
 | apps.api.imagePullSecrets | list | `[]` | API image pull secrets — override `global.imagePullSecrets` |
-| apps.api.jwtExpirationSecs | string | `"86400"` | JWT token expiration in seconds |
-| apps.api.jwtSecret | object | `{"annotations":{},"create":true,"key":"secret","labels":{},"name":""}` | JWT signing key secret |
-| apps.api.jwtSecret.annotations | object | `{}` | Extra annotations for the Secret |
-| apps.api.jwtSecret.create | bool | `true` | Create the secret (Helm generates a random value, kept across upgrades) |
-| apps.api.jwtSecret.key | string | `"secret"` | Key inside the Secret |
-| apps.api.jwtSecret.labels | object | `{}` | Extra labels for the Secret |
-| apps.api.jwtSecret.name | string | `""` | Secret name (defaults to `<release>-jwt`) |
 | apps.api.logJson | bool | `false` | Emit logs in JSON format |
 | apps.api.maxAccountsPerUser | string | `"20"` | Maximum number of accounts per user |
 | apps.api.maxBudgetsPerUser | string | `"100"` | Maximum number of budgets per user |
@@ -59,6 +52,7 @@ A personal bank account tracking application
 | apps.api.rootPath | string | `"api"` | Root path prefix for API routes |
 | apps.api.service | object | `{}` | API service — override `global.service` |
 | apps.api.serviceAccount | object | `{}` | API ServiceAccount — override `global.serviceAccount` |
+| apps.api.sessionLifetimeSecs | string | `"86400"` | Session lifetime in seconds, from login to the token's expiry |
 | apps.api.tolerations | list | `[]` | API tolerations — override `global.tolerations` |
 | apps.api.volumeMounts | list | `[]` | API volume mounts for the container |
 | apps.api.volumes | list | `[]` | API volumes to mount |

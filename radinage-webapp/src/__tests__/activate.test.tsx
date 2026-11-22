@@ -170,7 +170,7 @@ describe("ActivatePage", () => {
 
 	it("activates account and shows success on valid submission", async () => {
 		apiFetchMock.mockResolvedValueOnce({
-			token: "jwt-token-123",
+			token: "session-token-123",
 			role: "user",
 		});
 
@@ -228,7 +228,7 @@ describe("ActivatePage", () => {
 
 	it("disables submit button after successful activation", async () => {
 		apiFetchMock.mockResolvedValueOnce({
-			token: "jwt-token",
+			token: "session-token",
 			role: "user",
 		});
 

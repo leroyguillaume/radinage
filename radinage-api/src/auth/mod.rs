@@ -1,14 +1,13 @@
-pub mod claims;
 pub mod middleware;
 
 use crate::{
-    auth::claims::JwtClaims,
-    domain::user::UserRole,
+    config::Config,
     error::{AppError, AppResult},
+    repositories::UserRepository,
 };
 use argon2::{Argon2, PasswordHash, PasswordHasher, PasswordVerifier};
-use jsonwebtoken::{EncodingKey, Header, encode};
-use std::time::{SystemTime, UNIX_EPOCH};
+use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
+use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 pub fn hash_password(password: &str) -> AppResult<String> {
@@ -26,52 +25,37 @@ pub fn verify_password(password: &str, hash: &str) -> AppResult<bool> {
         .is_ok())
 }
 
-/// Decode a JWT and return the claims (for testing only).
-#[cfg(test)]
-pub fn decode_token(
-    jwt_secret: &str,
-    token: &str,
-) -> Result<crate::auth::claims::JwtClaims, jsonwebtoken::errors::Error> {
-    let key = jsonwebtoken::DecodingKey::from_secret(jwt_secret.as_bytes());
-    jsonwebtoken::decode::<crate::auth::claims::JwtClaims>(
-        token,
-        &key,
-        &jsonwebtoken::Validation::default(),
-    )
-    .map(|d| d.claims)
+/// A new session token: 256 bits from the operating system's CSPRNG, base64url-encoded.
+pub fn generate_session_token() -> AppResult<String> {
+    let mut bytes = [0u8; 32];
+    getrandom::fill(&mut bytes)
+        .map_err(|e| AppError::Internal(format!("random generator error: {e}")))?;
+    Ok(URL_SAFE_NO_PAD.encode(bytes))
 }
 
-/// Generate a JWT using only the config values (no AppState required).
-pub fn generate_token_from_config(
-    config: &crate::config::Config,
+/// The SHA-256 digest under which a session token is stored and looked up.
+pub fn hash_session_token(token: &str) -> Vec<u8> {
+    Sha256::digest(token.as_bytes()).to_vec()
+}
+
+/// Open a session for a user and return its token, which only the caller ever sees.
+pub async fn open_session(
+    user_repo: &impl UserRepository,
+    config: &Config,
     user_id: Uuid,
-    role: UserRole,
 ) -> AppResult<String> {
-    let expiration = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_secs()
-        + config.jwt_expiration_secs;
-
-    let claims = JwtClaims {
-        sub: user_id,
-        exp: expiration as usize,
-        role,
-    };
-
-    encode(
-        &Header::default(),
-        &claims,
-        &EncodingKey::from_secret(config.jwt_secret.as_bytes()),
-    )
-    .map_err(|e| AppError::Internal(format!("JWT encode error: {e}")))
+    let token = generate_session_token()?;
+    let expires_at = chrono::Utc::now() + config.session_lifetime();
+    user_repo
+        .create_session(&hash_session_token(&token), user_id, expires_at)
+        .await?;
+    Ok(token)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::user::UserRole;
-    use crate::test_util::make_test_config;
+    use crate::{repositories::MockUserRepository, test_util::make_test_config};
 
     #[test]
     fn hash_and_verify_correct_password() {
@@ -100,28 +84,43 @@ mod tests {
     }
 
     #[test]
-    fn generate_token_produces_decodable_jwt() {
-        let config = make_test_config();
-        let user_id = Uuid::new_v4();
-        let token = generate_token_from_config(&config, user_id, UserRole::Admin).unwrap();
-        let claims = decode_token(&config.jwt_secret, &token).unwrap();
-        assert_eq!(claims.sub, user_id);
-        assert_eq!(claims.role, UserRole::Admin);
+    fn session_token_carries_256_random_bits() {
+        let token = generate_session_token().unwrap();
+        assert_eq!(URL_SAFE_NO_PAD.decode(&token).unwrap().len(), 32);
+        assert_ne!(token, generate_session_token().unwrap());
     }
 
     #[test]
-    fn generate_token_user_role() {
-        let config = make_test_config();
-        let user_id = Uuid::new_v4();
-        let token = generate_token_from_config(&config, user_id, UserRole::User).unwrap();
-        let claims = decode_token(&config.jwt_secret, &token).unwrap();
-        assert_eq!(claims.role, UserRole::User);
+    fn session_token_hash_is_its_sha256() {
+        let hash = hash_session_token("abc");
+        assert_eq!(
+            URL_SAFE_NO_PAD.encode(&hash),
+            "ungWv48Bz-pBQUDeXa4iI7ADYaOWF3qctBD_YfIAFa0"
+        );
     }
 
-    #[test]
-    fn token_with_wrong_secret_fails_decode() {
+    #[tokio::test]
+    async fn open_session_stores_only_the_token_hash_until_the_lifetime_ends() {
         let config = make_test_config();
-        let token = generate_token_from_config(&config, Uuid::new_v4(), UserRole::User).unwrap();
-        assert!(decode_token("completely-different-secret-key!!", &token).is_err());
+        let user_id = Uuid::new_v4();
+        let before = chrono::Utc::now();
+        let stored = std::sync::Arc::new(std::sync::Mutex::new(None));
+
+        let mut repo = MockUserRepository::new();
+        let sink = stored.clone();
+        repo.expect_create_session()
+            .once()
+            .returning(move |hash, owner, expires_at| {
+                *sink.lock().unwrap() = Some((hash.to_vec(), owner, expires_at));
+                Box::pin(async { Ok(()) })
+            });
+
+        let token = open_session(&repo, &config, user_id).await.unwrap();
+
+        let (hash, owner, expires_at) = stored.lock().unwrap().take().unwrap();
+        assert_eq!(hash, hash_session_token(&token));
+        assert_eq!(owner, user_id);
+        assert!(expires_at >= before + config.session_lifetime());
+        assert!(expires_at <= chrono::Utc::now() + config.session_lifetime());
     }
 }

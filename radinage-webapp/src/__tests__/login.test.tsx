@@ -122,7 +122,7 @@ describe("LoginPage", () => {
 
 	it("logs in successfully and updates auth state", async () => {
 		apiFetchMock.mockResolvedValueOnce({
-			token: "test-jwt-token",
+			token: "test-session-token",
 			role: "user",
 		});
 
@@ -138,7 +138,7 @@ describe("LoginPage", () => {
 			expect(useAuthStore.getState().isAuthenticated).toBe(true);
 		});
 
-		expect(useAuthStore.getState().token).toBe("test-jwt-token");
+		expect(useAuthStore.getState().token).toBe("test-session-token");
 		expect(useAuthStore.getState().role).toBe("user");
 	});
 

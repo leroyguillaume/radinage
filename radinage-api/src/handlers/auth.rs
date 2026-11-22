@@ -1,5 +1,6 @@
 use crate::{
-    AppState, auth,
+    AppState,
+    auth::{self, middleware::SessionToken},
     domain::user::UserRole,
     error::{AppError, AppResult},
     repositories::UserRepository,
@@ -22,7 +23,8 @@ pub struct LoginRequest {
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct LoginResponse {
-    /// JWT Bearer token to include in the `Authorization` header of subsequent requests.
+    /// Opaque session token to send as a Bearer token in the `Authorization` header of
+    /// subsequent requests, until it expires or is revoked.
     pub token: String,
     /// The role granted to the authenticated user.
     pub role: UserRole,
@@ -41,7 +43,7 @@ pub struct ActivateRequest {
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ActivateResponse {
-    /// JWT Bearer token for immediate authentication after activation.
+    /// Opaque session token for immediate authentication after activation.
     pub token: String,
     /// The role granted to the activated user.
     pub role: UserRole,
@@ -60,7 +62,7 @@ pub async fn activate<U: UserRepository, O, B, P, C, R, A>(
     let password_hash = auth::hash_password(&body.password)?;
     state.user_repo.activate(user_id, &password_hash).await?;
 
-    let token = auth::generate_token_from_config(&state.config, user_id, UserRole::User)?;
+    let token = auth::open_session(&state.user_repo, &state.config, user_id).await?;
     Ok((
         StatusCode::OK,
         Json(ActivateResponse {
@@ -86,11 +88,22 @@ pub async fn login<U: UserRepository, O, B, P, C, R, A>(
         return Err(AppError::Unauthorized);
     }
 
-    let token = auth::generate_token_from_config(&state.config, creds.id, creds.role)?;
+    let token = auth::open_session(&state.user_repo, &state.config, creds.id).await?;
     Ok(Json(LoginResponse {
         token,
         role: creds.role,
     }))
+}
+
+pub async fn logout<U: UserRepository, O, B, P, C, R, A>(
+    State(state): State<AppState<U, O, B, P, C, R, A>>,
+    SessionToken(token): SessionToken,
+) -> AppResult<StatusCode> {
+    state
+        .user_repo
+        .delete_session(&auth::hash_session_token(&token))
+        .await?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 #[cfg(test)]
@@ -100,9 +113,7 @@ mod tests {
         repositories::{
             MockBudgetRepository, MockOperationRepository, MockUserRepository, UserCredentials,
         },
-        test_util::{
-            build_test_router, json_request, make_test_config, make_test_state, response_json,
-        },
+        test_util::{build_test_router, json_request, make_test_state, response_json},
     };
     use axum::http::StatusCode;
     use tower::ServiceExt;
@@ -116,6 +127,13 @@ mod tests {
         }
     }
 
+    fn expect_session(repo: &mut MockUserRepository, owner: Uuid) {
+        repo.expect_create_session()
+            .withf(move |hash, user_id, _| hash.len() == 32 && *user_id == owner)
+            .once()
+            .returning(|_, _, _| Box::pin(async { Ok(()) }));
+    }
+
     fn login_json(username: &str, password: &str) -> String {
         serde_json::to_string(&LoginRequest {
             username: username.to_string(),
@@ -127,7 +145,9 @@ mod tests {
     #[tokio::test]
     async fn login_with_correct_credentials_returns_token() {
         let creds = make_credentials(UserRole::User);
+        let owner = creds.id;
         let mut user_repo = MockUserRepository::new();
+        expect_session(&mut user_repo, owner);
         user_repo
             .expect_find_by_username()
             .once()
@@ -207,11 +227,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn activate_with_valid_token_sets_password_and_returns_jwt() {
+    async fn activate_with_valid_token_sets_password_and_returns_token() {
         let user_id = Uuid::new_v4();
         let token = Uuid::new_v4();
 
         let mut user_repo = MockUserRepository::new();
+        expect_session(&mut user_repo, user_id);
         let uid = user_id;
         user_repo
             .expect_find_by_invitation_token()
@@ -270,7 +291,9 @@ mod tests {
     #[tokio::test]
     async fn login_admin_role_preserved_in_token() {
         let creds = make_credentials(UserRole::Admin);
+        let owner = creds.id;
         let mut user_repo = MockUserRepository::new();
+        expect_session(&mut user_repo, owner);
         user_repo
             .expect_find_by_username()
             .once()
@@ -296,45 +319,6 @@ mod tests {
         assert_eq!(resp.status(), StatusCode::OK);
         let json: LoginResponse = response_json(resp).await;
         assert_eq!(json.role, UserRole::Admin);
-    }
-
-    #[tokio::test]
-    async fn activate_returns_decodable_jwt_for_correct_user() {
-        let user_id = Uuid::new_v4();
-        let token = Uuid::new_v4();
-
-        let mut user_repo = MockUserRepository::new();
-        let uid = user_id;
-        user_repo
-            .expect_find_by_invitation_token()
-            .once()
-            .returning(move |_| Box::pin(async move { Ok(Some(uid)) }));
-        user_repo
-            .expect_activate()
-            .once()
-            .returning(|_, _| Box::pin(async { Ok(()) }));
-
-        let app = build_test_router(make_test_state(
-            user_repo,
-            MockOperationRepository::new(),
-            MockBudgetRepository::new(),
-        ));
-
-        let body = serde_json::to_string(&ActivateRequest {
-            token,
-            password: "newpass123".to_string(),
-        })
-        .unwrap();
-        let req = json_request("POST", "/auth/activate", Some(&body), None);
-        let resp = app.oneshot(req).await.unwrap();
-
-        assert_eq!(resp.status(), StatusCode::OK);
-        let json: ActivateResponse = response_json(resp).await;
-
-        let config = make_test_config();
-        let claims = auth::decode_token(&config.jwt_secret, &json.token).unwrap();
-        assert_eq!(claims.sub, user_id);
-        assert_eq!(claims.role, UserRole::User);
     }
 
     #[tokio::test]
@@ -384,6 +368,7 @@ mod tests {
         let token = Uuid::new_v4();
 
         let mut user_repo = MockUserRepository::new();
+        expect_session(&mut user_repo, user_id);
         let uid = user_id;
         user_repo
             .expect_find_by_invitation_token()
@@ -410,5 +395,40 @@ mod tests {
         let resp = app.oneshot(req).await.unwrap();
 
         assert_eq!(resp.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn logout_deletes_the_session_of_the_token() {
+        let mut user_repo = MockUserRepository::new();
+        user_repo
+            .expect_delete_session()
+            .withf(|hash| hash == auth::hash_session_token("my-token").as_slice())
+            .once()
+            .returning(|_| Box::pin(async { Ok(()) }));
+
+        let app = build_test_router(make_test_state(
+            user_repo,
+            MockOperationRepository::new(),
+            MockBudgetRepository::new(),
+        ));
+
+        let req = json_request("DELETE", "/auth/session", None, Some("Bearer my-token"));
+        let resp = app.oneshot(req).await.unwrap();
+
+        assert_eq!(resp.status(), StatusCode::NO_CONTENT);
+    }
+
+    #[tokio::test]
+    async fn logout_without_token_returns_unauthorized() {
+        let app = build_test_router(make_test_state(
+            MockUserRepository::new(),
+            MockOperationRepository::new(),
+            MockBudgetRepository::new(),
+        ));
+
+        let req = json_request("DELETE", "/auth/session", None, None);
+        let resp = app.oneshot(req).await.unwrap();
+
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
     }
 }
