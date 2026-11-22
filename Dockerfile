@@ -5,7 +5,7 @@
 FROM rust:1.100.0-alpine3.23 AS chef
 
 RUN apk add --no-cache musl-dev=1.2.5-r24 openssl-dev=3.5.9-r0 openssl-libs-static=3.5.9-r0 \
-    && cargo install cargo-chef@0.1.77 --locked
+    && cargo install cargo-chef@0.1.77 cargo-auditable@0.7.7 --locked
 
 WORKDIR /usr/src/local/radinage
 
@@ -31,7 +31,7 @@ RUN cargo chef cook --release --recipe-path recipe.json
 COPY Cargo.toml Cargo.lock ./
 COPY radinage-api/ radinage-api/
 
-RUN cargo build --release
+RUN cargo auditable build --release
 
 # =============================================================================
 # Stage 2: Node builder (webapp)
