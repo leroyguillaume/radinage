@@ -97,7 +97,12 @@ jobs:
           tags: radinage-${{ matrix.target }}:scan
           load: true
           cache-from: type=gha,scope=${{ matrix.target }}-${{ matrix.platform.arch }}
-          cache-to: type=gha,mode=max,scope=${{ matrix.target }}-${{ matrix.platform.arch }}
+          # Only main writes: a PR's cache is readable by that PR alone, and its
+          # gigabytes of layers evict main's from the 10 GB repository quota.
+          cache-to: >-
+            ${{ github.ref == 'refs/heads/main'
+            && format('type=gha,mode=max,scope={0}-{1}', matrix.target, matrix.platform.arch)
+            || '' }}
 
       - name: scan the image
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
