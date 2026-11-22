@@ -142,7 +142,7 @@ gh attestation verify oci://ghcr.io/leroyguillaume/radinage-webapp:2.4.0 --repo 
 ```
 
 ```bash
-gh attestation verify oci://ghcr.io/leroyguillaume/charts/radinage:1.8.0 --repo leroyguillaume/radinage
+gh attestation verify oci://ghcr.io/leroyguillaume/charts/radinage:1.9.0 --repo leroyguillaume/radinage
 ```
 
 The Helm chart reads the database connection string from an existing Secret, `radinage-db` with a `url` key by default:
@@ -152,7 +152,7 @@ kubectl create secret generic radinage-db --from-literal=url='postgresql://USER:
 ```
 
 ```bash
-helm install radinage oci://ghcr.io/leroyguillaume/charts/radinage --version 1.8.0 --set global.domain=radinage.example.com
+helm install radinage oci://ghcr.io/leroyguillaume/charts/radinage --version 1.9.0 --set global.domain=radinage.example.com
 ```
 
 Every chart value is documented in [helm/radinage/README.md](helm/radinage/README.md).
