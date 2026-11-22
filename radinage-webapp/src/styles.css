@@ -94,3 +94,15 @@
 	background: var(--mantine-color-leaf-1);
 	color: var(--mantine-color-forest-8);
 }
+
+/* Mantine's default modal widths (440–780px) leave form fields cramped on
+   desktop: widen every named size, small screens keep Mantine's behaviour. */
+@media (min-width: 62em) {
+	.mantine-Modal-root {
+		--modal-size-xs: 400px;
+		--modal-size-sm: 500px;
+		--modal-size-md: 640px;
+		--modal-size-lg: 860px;
+		--modal-size-xl: 1040px;
+	}
+}
