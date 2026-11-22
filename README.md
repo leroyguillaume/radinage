@@ -63,6 +63,7 @@ The API (`radinage-api`) reads its configuration from environment variables, or 
 | `CORS_ORIGINS` | no | — | Comma-separated allowed CORS origins |
 | `ROOT_PATH` | no | — | Path prefix the API is served under |
 | `SESSION_LIFETIME_SECS` | no | `86400` | Session lifetime in seconds, from login to the token's expiry |
+| `INVITATION_EXPIRATION_SECS` | no | `259200` | Lifetime of invitation and reset links in seconds |
 | `MAX_BUDGETS_PER_USER` | no | `100` | Maximum number of budgets per user |
 | `MAX_IMPORT_PROFILES_PER_USER` | no | `20` | Maximum number of import profiles per user |
 | `MAX_CATEGORIES_PER_USER` | no | `50` | Maximum number of categories per user |

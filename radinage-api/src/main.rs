@@ -944,6 +944,7 @@ pub(crate) mod test_util {
             log_filter: "error".to_string(),
             log_json: false,
             session_lifetime_secs: 3600,
+            invitation_expiration_secs: 3600,
             admin_username: "admin".to_string(),
             admin_password: "admin123".to_string(),
             cors_origins: Vec::new(),

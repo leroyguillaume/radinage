@@ -80,4 +80,4 @@ pub use import_profile::MockImportProfileRepository;
 #[cfg(test)]
 pub use operation::MockOperationRepository;
 #[cfg(test)]
-pub use user::{MockUserRepository, UserCredentials};
+pub use user::{MockUserRepository, PendingInvitation, UserCredentials};

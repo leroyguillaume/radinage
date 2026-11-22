@@ -34,6 +34,8 @@ spec:
               value: {{ $app.rootPath | quote }}
             - name: SESSION_LIFETIME_SECS
               value: {{ $app.sessionLifetimeSecs | quote }}
+            - name: INVITATION_EXPIRATION_SECS
+              value: {{ $app.invitationExpirationSecs | quote }}
             - name: ADMIN_USERNAME
               value: {{ $app.adminUsername | quote }}
             - name: MAX_BUDGETS_PER_USER

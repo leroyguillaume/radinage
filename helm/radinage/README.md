@@ -31,6 +31,7 @@ A personal bank account tracking application
 | apps.api.image.repository | string | `"radinage-api"` | Image repository |
 | apps.api.image.tag | string | `""` | Image tag — override `global.image.tag` |
 | apps.api.imagePullSecrets | list | `[]` | API image pull secrets — override `global.imagePullSecrets` |
+| apps.api.invitationExpirationSecs | string | `"259200"` | Lifetime of invitation and password-reset links in seconds |
 | apps.api.logJson | bool | `false` | Emit logs in JSON format |
 | apps.api.maxAccountsPerUser | string | `"20"` | Maximum number of accounts per user |
 | apps.api.maxBudgetsPerUser | string | `"100"` | Maximum number of budgets per user |

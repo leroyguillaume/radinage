@@ -782,7 +782,7 @@
 		"success": "Compte activé avec succès !",
 		"resetSuccess": "Mot de passe réinitialisé avec succès !",
 		"resetSubmit": "Réinitialiser le mot de passe",
-		"errorInvalidToken": "Ce lien d'invitation est invalide ou a déjà été utilisé",
+		"errorInvalidToken": "Ce lien d'invitation est invalide, expiré ou déjà utilisé",
 		"errorPasswordMismatch": "Les mots de passe ne correspondent pas",
 		"errorMissingToken": "Lien d'invitation invalide : jeton manquant"
 	},

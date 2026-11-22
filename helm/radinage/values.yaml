@@ -124,6 +124,8 @@ apps:
     rootPath: api
     # -- (string) Session lifetime in seconds, from login to the token's expiry
     sessionLifetimeSecs: "86400"
+    # -- (string) Lifetime of invitation and password-reset links in seconds
+    invitationExpirationSecs: "259200"
     # -- (string) Admin account username
     adminUsername: admin
     # -- (string) Maximum number of budgets per user

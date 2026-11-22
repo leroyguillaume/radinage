@@ -782,7 +782,7 @@
 		"success": "Account activated successfully!",
 		"resetSuccess": "Password reset successfully!",
 		"resetSubmit": "Reset password",
-		"errorInvalidToken": "This invitation link is invalid or has already been used",
+		"errorInvalidToken": "This invitation link is invalid, expired or already used",
 		"errorPasswordMismatch": "Passwords do not match",
 		"errorMissingToken": "Invalid invitation link: missing token"
 	},

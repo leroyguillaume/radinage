@@ -6,9 +6,9 @@ use crate::{
     repositories::UserRepository,
 };
 use axum::{Json, extract::State, http::StatusCode};
+use chrono::Utc;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
@@ -34,7 +34,7 @@ pub struct LoginResponse {
 #[serde(rename_all = "camelCase")]
 pub struct ActivateRequest {
     /// The invitation token received in the shareable link.
-    pub token: Uuid,
+    pub token: String,
     /// The password the user wants to set for their account.
     pub password: String,
 }
@@ -55,8 +55,10 @@ pub async fn activate<U: UserRepository, O, B, P, C, R, A>(
 ) -> AppResult<(StatusCode, Json<ActivateResponse>)> {
     let user_id = state
         .user_repo
-        .find_by_invitation_token(body.token)
+        .find_by_invitation_token(&auth::invitation::hash_token(&body.token))
         .await?
+        .filter(|invitation| invitation.expires_at > Utc::now())
+        .map(|invitation| invitation.user_id)
         .ok_or(AppError::NotFound)?;
 
     let password_hash = auth::hash_password(&body.password)?;
@@ -111,12 +113,43 @@ mod tests {
     use super::*;
     use crate::{
         repositories::{
-            MockBudgetRepository, MockOperationRepository, MockUserRepository, UserCredentials,
+            MockBudgetRepository, MockOperationRepository, MockUserRepository, PendingInvitation,
+            UserCredentials,
         },
         test_util::{build_test_router, json_request, make_test_state, response_json},
     };
     use axum::http::StatusCode;
+    use chrono::{DateTime, TimeDelta};
     use tower::ServiceExt;
+    use uuid::Uuid;
+
+    const TOKEN: &str = "invitation-token";
+
+    /// A user repository holding one invitation for `TOKEN`, expiring at `expires_at`.
+    fn repo_with_invitation(user_id: Uuid, expires_at: DateTime<Utc>) -> MockUserRepository {
+        let mut user_repo = MockUserRepository::new();
+        user_repo
+            .expect_find_by_invitation_token()
+            .once()
+            .withf(|hash| hash == auth::invitation::hash_token(TOKEN).as_slice())
+            .returning(move |_| {
+                Box::pin(async move {
+                    Ok(Some(PendingInvitation {
+                        user_id,
+                        expires_at,
+                    }))
+                })
+            });
+        user_repo
+    }
+
+    fn activate_json(token: &str, password: &str) -> String {
+        serde_json::to_string(&ActivateRequest {
+            token: token.to_string(),
+            password: password.to_string(),
+        })
+        .unwrap()
+    }
 
     fn make_credentials(role: UserRole) -> UserCredentials {
         let hash = auth::hash_password("correct_pass").unwrap();
@@ -229,15 +262,9 @@ mod tests {
     #[tokio::test]
     async fn activate_with_valid_token_sets_password_and_returns_token() {
         let user_id = Uuid::new_v4();
-        let token = Uuid::new_v4();
 
-        let mut user_repo = MockUserRepository::new();
+        let mut user_repo = repo_with_invitation(user_id, Utc::now() + TimeDelta::hours(1));
         expect_session(&mut user_repo, user_id);
-        let uid = user_id;
-        user_repo
-            .expect_find_by_invitation_token()
-            .once()
-            .returning(move |_| Box::pin(async move { Ok(Some(uid)) }));
         user_repo
             .expect_activate()
             .once()
@@ -249,11 +276,7 @@ mod tests {
             MockBudgetRepository::new(),
         ));
 
-        let body = serde_json::to_string(&ActivateRequest {
-            token,
-            password: "newpass123".to_string(),
-        })
-        .unwrap();
+        let body = activate_json(TOKEN, "newpass123");
         let req = json_request("POST", "/auth/activate", Some(&body), None);
         let resp = app.oneshot(req).await.unwrap();
 
@@ -277,11 +300,26 @@ mod tests {
             MockBudgetRepository::new(),
         ));
 
-        let body = serde_json::to_string(&ActivateRequest {
-            token: Uuid::new_v4(),
-            password: "pass".to_string(),
-        })
-        .unwrap();
+        let body = activate_json("unknown-token", "pass");
+        let req = json_request("POST", "/auth/activate", Some(&body), None);
+        let resp = app.oneshot(req).await.unwrap();
+
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn activate_with_expired_token_returns_not_found() {
+        let mut user_repo =
+            repo_with_invitation(Uuid::new_v4(), Utc::now() - TimeDelta::seconds(1));
+        user_repo.expect_activate().never();
+
+        let app = build_test_router(make_test_state(
+            user_repo,
+            MockOperationRepository::new(),
+            MockBudgetRepository::new(),
+        ));
+
+        let body = activate_json(TOKEN, "newpass123");
         let req = json_request("POST", "/auth/activate", Some(&body), None);
         let resp = app.oneshot(req).await.unwrap();
 
@@ -329,7 +367,7 @@ mod tests {
             MockBudgetRepository::new(),
         ));
 
-        let body = r#"{"token": "not-a-uuid", "password": "p"}"#;
+        let body = r#"{"token": 42, "password": "p"}"#;
         let req = json_request("POST", "/auth/activate", Some(body), None);
         let resp = app.oneshot(req).await.unwrap();
 
@@ -365,15 +403,9 @@ mod tests {
     #[tokio::test]
     async fn activate_stores_argon2_hash_not_plaintext() {
         let user_id = Uuid::new_v4();
-        let token = Uuid::new_v4();
 
-        let mut user_repo = MockUserRepository::new();
+        let mut user_repo = repo_with_invitation(user_id, Utc::now() + TimeDelta::hours(1));
         expect_session(&mut user_repo, user_id);
-        let uid = user_id;
-        user_repo
-            .expect_find_by_invitation_token()
-            .once()
-            .returning(move |_| Box::pin(async move { Ok(Some(uid)) }));
         user_repo
             .expect_activate()
             .once()
@@ -386,11 +418,7 @@ mod tests {
             MockBudgetRepository::new(),
         ));
 
-        let body = serde_json::to_string(&ActivateRequest {
-            token,
-            password: "my_password".to_string(),
-        })
-        .unwrap();
+        let body = activate_json(TOKEN, "my_password");
         let req = json_request("POST", "/auth/activate", Some(&body), None);
         let resp = app.oneshot(req).await.unwrap();
 
