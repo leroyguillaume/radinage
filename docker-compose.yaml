@@ -18,7 +18,6 @@ services:
       target: api
     environment:
       DATABASE_URL: postgres://radinage:radinage@postgres:5432/radinage
-      JWT_SECRET: changeit
       ADMIN_PASSWORD: admin
       WEBAPP_URL: http://localhost:8080
       ROOT_PATH: api

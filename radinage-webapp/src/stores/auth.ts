@@ -12,6 +12,9 @@ interface AuthState {
 	role: string | null;
 	isAuthenticated: boolean;
 	login: (username: string, password: string) => Promise<void>;
+	/** Revoke the session on the API, then forget it here. */
+	signOut: () => Promise<void>;
+	/** Forget the session here only, for a token the API already rejects. */
 	logout: () => void;
 }
 
@@ -23,7 +26,7 @@ function getStoredValue(key: string): string | null {
 	}
 }
 
-export const useAuthStore = create<AuthState>((set) => ({
+export const useAuthStore = create<AuthState>((set, get) => ({
 	token: getStoredValue("auth_token"),
 	role: getStoredValue("auth_role"),
 	isAuthenticated: getStoredValue("auth_token") !== null,
@@ -41,6 +44,15 @@ export const useAuthStore = create<AuthState>((set) => ({
 			// localStorage may not be available
 		}
 		set({ token: data.token, role: data.role, isAuthenticated: true });
+	},
+
+	signOut: async () => {
+		try {
+			await apiFetch<void>("/auth/session", { method: "DELETE" });
+		} catch {
+			// An unrevoked token stays valid on the API until it expires: still sign out here.
+		}
+		get().logout();
 	},
 
 	logout: () => {

@@ -2,7 +2,8 @@ use crate::{
     domain::user::UserRole,
     error::{AppError, AppResult},
 };
-use sqlx::{PgPool, Row};
+use chrono::{DateTime, Utc};
+use sqlx::{PgPool, Row, postgres::PgRow};
 use uuid::Uuid;
 
 /// User credentials returned from a database lookup.
@@ -91,6 +92,32 @@ pub trait UserRepository: Send + Sync + 'static {
         username: &str,
         password_hash: &str,
     ) -> impl std::future::Future<Output = AppResult<bool>> + Send;
+
+    /// Store a session under the SHA-256 of its token, purging expired sessions on the way.
+    fn create_session(
+        &self,
+        token_hash: &[u8],
+        user_id: Uuid,
+        expires_at: DateTime<Utc>,
+    ) -> impl std::future::Future<Output = AppResult<()>> + Send;
+
+    /// Find the owner of an unexpired session and their current role.
+    fn find_session_user(
+        &self,
+        token_hash: &[u8],
+    ) -> impl std::future::Future<Output = AppResult<Option<(Uuid, UserRole)>>> + Send;
+
+    /// Delete a session. Deleting one that does not exist is not an error.
+    fn delete_session(
+        &self,
+        token_hash: &[u8],
+    ) -> impl std::future::Future<Output = AppResult<()>> + Send;
+}
+
+fn parse_role(row: &PgRow) -> AppResult<UserRole> {
+    let role: String = row.try_get("role")?;
+    role.parse()
+        .map_err(|_| AppError::Internal("invalid role in database".to_string()))
 }
 
 /// PostgreSQL-backed user repository.
@@ -239,17 +266,11 @@ impl UserRepository for PgUserRepository {
 
         match row {
             None => Ok(None),
-            Some(r) => {
-                let role_str: String = r.try_get("role")?;
-                let role = role_str
-                    .parse()
-                    .map_err(|_| AppError::Internal("invalid role in database".to_string()))?;
-                Ok(Some(UserCredentials {
-                    id: r.try_get("id")?,
-                    password_hash: r.try_get("password_hash")?,
-                    role,
-                }))
-            }
+            Some(r) => Ok(Some(UserCredentials {
+                id: r.try_get("id")?,
+                password_hash: r.try_get("password_hash")?,
+                role: parse_role(&r)?,
+            })),
         }
     }
 
@@ -275,6 +296,44 @@ impl UserRepository for PgUserRepository {
             }
             other => AppError::Database(other),
         })?;
+        Ok(())
+    }
+
+    async fn create_session(
+        &self,
+        token_hash: &[u8],
+        user_id: Uuid,
+        expires_at: DateTime<Utc>,
+    ) -> AppResult<()> {
+        sqlx::query("DELETE FROM sessions WHERE expires_at <= now()")
+            .execute(&self.pool)
+            .await?;
+        sqlx::query("INSERT INTO sessions (token_hash, user_id, expires_at) VALUES ($1, $2, $3)")
+            .bind(token_hash)
+            .bind(user_id)
+            .bind(expires_at)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    async fn find_session_user(&self, token_hash: &[u8]) -> AppResult<Option<(Uuid, UserRole)>> {
+        let row = sqlx::query(
+            "SELECT u.id, u.role FROM sessions s JOIN users u ON u.id = s.user_id \
+             WHERE s.token_hash = $1 AND s.expires_at > now()",
+        )
+        .bind(token_hash)
+        .fetch_optional(&self.pool)
+        .await?;
+        row.map(|r| Ok((r.try_get("id")?, parse_role(&r)?)))
+            .transpose()
+    }
+
+    async fn delete_session(&self, token_hash: &[u8]) -> AppResult<()> {
+        sqlx::query("DELETE FROM sessions WHERE token_hash = $1")
+            .bind(token_hash)
+            .execute(&self.pool)
+            .await?;
         Ok(())
     }
 }
@@ -568,5 +627,90 @@ mod tests {
 
         let creds = repo.find_by_username("admin_user").await.unwrap().unwrap();
         assert_eq!(creds.role, UserRole::Admin);
+    }
+
+    async fn user_with_session(repo: &PgUserRepository, expires_at: DateTime<Utc>) -> Uuid {
+        let id = Uuid::new_v4();
+        repo.create(id, "carol", "hash", UserRole::Admin)
+            .await
+            .unwrap();
+        repo.create_session(b"token-hash", id, expires_at)
+            .await
+            .unwrap();
+        id
+    }
+
+    fn in_an_hour() -> DateTime<Utc> {
+        Utc::now() + chrono::TimeDelta::hours(1)
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn live_session_resolves_to_its_owner(pool: PgPool) {
+        let repo = PgUserRepository::new(pool);
+        let id = user_with_session(&repo, in_an_hour()).await;
+
+        let found = repo.find_session_user(b"token-hash").await.unwrap();
+        assert_eq!(found, Some((id, UserRole::Admin)));
+        assert_eq!(repo.find_session_user(b"other").await.unwrap(), None);
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn expired_session_is_not_found(pool: PgPool) {
+        let repo = PgUserRepository::new(pool);
+        user_with_session(&repo, Utc::now() - chrono::TimeDelta::seconds(1)).await;
+
+        assert_eq!(repo.find_session_user(b"token-hash").await.unwrap(), None);
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn deleted_session_is_not_found(pool: PgPool) {
+        let repo = PgUserRepository::new(pool);
+        user_with_session(&repo, in_an_hour()).await;
+
+        repo.delete_session(b"token-hash").await.unwrap();
+        repo.delete_session(b"token-hash").await.unwrap();
+
+        assert_eq!(repo.find_session_user(b"token-hash").await.unwrap(), None);
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn session_reads_the_current_role(pool: PgPool) {
+        let repo = PgUserRepository::new(pool.clone());
+        let id = user_with_session(&repo, in_an_hour()).await;
+
+        sqlx::query("UPDATE users SET role = 'user' WHERE id = $1")
+            .bind(id)
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let found = repo.find_session_user(b"token-hash").await.unwrap();
+        assert_eq!(found, Some((id, UserRole::User)));
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn deleting_the_user_ends_their_sessions(pool: PgPool) {
+        let repo = PgUserRepository::new(pool);
+        let id = user_with_session(&repo, in_an_hour()).await;
+
+        repo.delete(id).await.unwrap();
+
+        assert_eq!(repo.find_session_user(b"token-hash").await.unwrap(), None);
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn opening_a_session_purges_expired_ones(pool: PgPool) {
+        let repo = PgUserRepository::new(pool.clone());
+        let id = user_with_session(&repo, Utc::now() - chrono::TimeDelta::seconds(1)).await;
+
+        repo.create_session(b"fresh", id, in_an_hour())
+            .await
+            .unwrap();
+
+        let hashes: Vec<Vec<u8>> = sqlx::query_scalar("SELECT token_hash FROM sessions")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+        assert_eq!(hashes, vec![b"fresh".to_vec()]);
     }
 }

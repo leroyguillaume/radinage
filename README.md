@@ -21,7 +21,7 @@ Radinage keeps a record of your bank operations and compares them with the budge
 - **Ignore rules**: leave operations out of every total, budget and forecast automatically, by label (prefix, suffix or substring) and optionally exact amount, as they are created or imported; apply a new rule to your history, or create one from an operation's sheet. Operations can also be ignored by hand.
 - **Forecast**, over a calendar year: starting from the balance of your imported checking accounts or from zero, actuals for past months (operations outside any budget counted as income or expense by their own sign), the current month's actuals plus what its budgets still expect, budgets beyond it, spending outside budgets at your average of the last three months, the daily amount you can still spend outside budgets without the year ending in deficit, whatever the account balance (negative when the budgets alone already do), and the month the balance would first turn negative. Selecting a month opens its breakdown budget by budget: what each one expects, what is already linked to it and what the forecast counts, then spending outside budgets.
 - **Statistics**: income, expenses, savings and balance over any range of months, net worth month by month stacked by account, and income and expenses by category.
-- **Multi-user**: JWT authentication, an admin account and invitation links.
+- **Multi-user**: sessions revoked on logout, an admin account and invitation links.
 - **Installable**: add the webapp to a phone's home screen (Safari on iOS: Share → Add to Home Screen; Chrome on Android or desktop: Install app) to open it full screen like a native app. A new version shows up as a prompt to reload; nothing is stored for offline use, so the app needs the network.
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for the design and the reasoning behind it.
@@ -56,14 +56,13 @@ The API (`radinage-api`) reads its configuration from environment variables, or 
 | Variable | Required | Default | Description |
 | --- | --- | --- | --- |
 | `DATABASE_URL` | yes | — | PostgreSQL connection string |
-| `JWT_SECRET` | yes | — | Secret used to sign JWTs |
 | `ADMIN_PASSWORD` | yes | — | Password of the admin account created at startup |
 | `WEBAPP_URL` | yes | — | Public URL of the webapp, used to build invitation and reset links |
 | `ADMIN_USERNAME` | no | `admin` | Username of the admin account |
 | `LISTEN_ADDR` | no | `0.0.0.0:3000` | Address the HTTP server listens on |
 | `CORS_ORIGINS` | no | — | Comma-separated allowed CORS origins |
 | `ROOT_PATH` | no | — | Path prefix the API is served under |
-| `JWT_EXPIRATION_SECS` | no | `86400` | Token lifetime in seconds |
+| `SESSION_LIFETIME_SECS` | no | `86400` | Session lifetime in seconds, from login to the token's expiry |
 | `MAX_BUDGETS_PER_USER` | no | `100` | Maximum number of budgets per user |
 | `MAX_IMPORT_PROFILES_PER_USER` | no | `20` | Maximum number of import profiles per user |
 | `MAX_CATEGORIES_PER_USER` | no | `50` | Maximum number of categories per user |

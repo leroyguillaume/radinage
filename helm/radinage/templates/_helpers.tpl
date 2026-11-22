@@ -71,15 +71,6 @@ annotations:
 {{- end }}
 
 {{/*
-JWT Secret name. Defaults to <release>-jwt if not set.
-Usage: {{ include "radinage.jwtSecretName" . }}
-*/}}
-{{- define "radinage.jwtSecretName" -}}
-{{- $name := .Values.apps.api.jwtSecret.name -}}
-{{- default (printf "%s-jwt" .Release.Name) $name -}}
-{{- end }}
-
-{{/*
 Admin password Secret name. Defaults to <release>-admin-password if not set.
 Usage: {{ include "radinage.adminPasswordSecretName" . }}
 */}}

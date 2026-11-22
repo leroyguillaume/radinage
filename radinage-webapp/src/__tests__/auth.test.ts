@@ -36,7 +36,7 @@ describe("useAuthStore", () => {
 
 	it("login stores token and role in state", async () => {
 		apiFetchMock.mockResolvedValue({
-			token: "jwt-token-123",
+			token: "session-token-123",
 			role: "admin",
 		});
 
@@ -44,7 +44,7 @@ describe("useAuthStore", () => {
 
 		const state = useAuthStore.getState();
 		expect(state.isAuthenticated).toBe(true);
-		expect(state.token).toBe("jwt-token-123");
+		expect(state.token).toBe("session-token-123");
 		expect(state.role).toBe("admin");
 	});
 
@@ -91,6 +91,33 @@ describe("useAuthStore", () => {
 		useAuthStore.getState().logout();
 
 		expect(useLastSearchStore.getState().searches).toEqual({});
+	});
+
+	it("signOut revokes the session on the API, then clears state", async () => {
+		apiFetchMock.mockResolvedValue({ token: "t", role: "r" });
+		await useAuthStore.getState().login("u", "p");
+		apiFetchMock.mockReset();
+		apiFetchMock.mockImplementation(async () => {
+			// The token must still be there for the revocation request to carry it.
+			expect(useAuthStore.getState().isAuthenticated).toBe(true);
+		});
+
+		await useAuthStore.getState().signOut();
+
+		expect(apiFetchMock).toHaveBeenCalledWith("/auth/session", {
+			method: "DELETE",
+		});
+		expect(useAuthStore.getState().isAuthenticated).toBe(false);
+		expect(useAuthStore.getState().token).toBeNull();
+	});
+
+	it("signOut clears state even when the revocation fails", async () => {
+		useAuthStore.setState({ token: "t", role: "r", isAuthenticated: true });
+		apiFetchMock.mockRejectedValue(new TypeError("Failed to fetch"));
+
+		await useAuthStore.getState().signOut();
+
+		expect(useAuthStore.getState().isAuthenticated).toBe(false);
 	});
 
 	it("logout is idempotent", () => {

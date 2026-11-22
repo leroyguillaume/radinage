@@ -350,7 +350,7 @@ export const Route = createRootRoute({
 
 function RootLayout() {
 	const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
-	const logout = useAuthStore((s) => s.logout);
+	const signOut = useAuthStore((s) => s.signOut);
 	const collapsed = useNavStore((s) => s.collapsed);
 	const toggleCollapsed = useNavStore((s) => s.toggleCollapsed);
 	const [menuOpened, menu] = useDisclosure(false);
@@ -368,9 +368,9 @@ function RootLayout() {
 		}
 	}, [isAuthenticated, navigate]);
 
-	function handleLogout() {
+	async function handleLogout() {
 		menu.close();
-		logout();
+		await signOut();
 		navigate({ to: "/login" });
 	}
 

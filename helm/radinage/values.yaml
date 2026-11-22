@@ -122,8 +122,8 @@ apps:
     logJson: false
     # -- (string) Root path prefix for API routes
     rootPath: api
-    # -- (string) JWT token expiration in seconds
-    jwtExpirationSecs: "86400"
+    # -- (string) Session lifetime in seconds, from login to the token's expiry
+    sessionLifetimeSecs: "86400"
     # -- (string) Admin account username
     adminUsername: admin
     # -- (string) Maximum number of budgets per user
@@ -149,18 +149,6 @@ apps:
       name: radinage-db
       # -- (string) Key inside the Secret
       key: url
-    # -- (object) JWT signing key secret
-    jwtSecret:
-      # -- (bool) Create the secret (Helm generates a random value, kept across upgrades)
-      create: true
-      # -- (string) Secret name (defaults to `<release>-jwt`)
-      name: ""
-      # -- (object) Extra labels for the Secret
-      labels: {}
-      # -- (object) Extra annotations for the Secret
-      annotations: {}
-      # -- (string) Key inside the Secret
-      key: secret
     # -- (object) Admin password secret
     adminPasswordSecret:
       # -- (bool) Create the secret (Helm generates a random value, kept across upgrades)

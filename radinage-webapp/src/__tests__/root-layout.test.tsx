@@ -8,7 +8,7 @@ import {
 } from "@tanstack/react-router";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { i18n } from "@/i18n";
 import { Route as RootRoute } from "@/routes/__root";
 import { useAuthStore } from "@/stores/auth";
@@ -75,6 +75,7 @@ afterEach(() => {
 	useNavStore.setState({ collapsed: false });
 	useLastSearchStore.setState({ searches: {} });
 	localStorage.clear();
+	vi.unstubAllGlobals();
 });
 
 describe("RootLayout", () => {
@@ -203,6 +204,28 @@ describe("RootLayout", () => {
 		renderLayout("/summary");
 		await screen.findByText("page /summary");
 		expect(screen.queryByRole("link", { name: "Admin" })).toBeNull();
+	});
+
+	it("revokes the session on logout", async () => {
+		const fetchMock = vi.fn(async () => new Response(null, { status: 204 }));
+		vi.stubGlobal("fetch", fetchMock);
+		localStorage.setItem("auth_token", "session-token");
+		signIn("user");
+		renderLayout("/summary");
+		await screen.findByText("page /summary");
+
+		await userEvent
+			.setup()
+			.click(screen.getByRole("button", { name: "Se déconnecter" }));
+
+		await waitFor(() =>
+			expect(useAuthStore.getState().isAuthenticated).toBe(false),
+		);
+		expect(fetchMock).toHaveBeenCalledWith(
+			"/api/auth/session",
+			expect.objectContaining({ method: "DELETE" }),
+		);
+		expect(localStorage.getItem("auth_token")).toBeNull();
 	});
 
 	it("collapses the side menu to named icons and remembers it", async () => {

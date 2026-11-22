@@ -15,7 +15,7 @@ use aide::{
     },
     openapi::{Info, OpenApi, ReferenceOr, SecurityScheme, Server, Tag},
 };
-use axum::{Extension, Json, Router, response::Html, routing::get};
+use axum::{Extension, Json, Router, middleware::from_fn_with_state, response::Html, routing::get};
 use clap::Parser;
 use config::Config;
 use repositories::{
@@ -205,7 +205,7 @@ where
         tags: vec![
             Tag {
                 name: "Auth".to_string(),
-                description: Some("Authenticate and obtain a JWT token. The returned token must be sent as a Bearer token in the `Authorization` header of all other requests.".to_string()),
+                description: Some("Open and close sessions. Logging in returns an opaque token that must be sent as a Bearer token in the `Authorization` header of all other requests, until it expires or is revoked by logging out.".to_string()),
                 ..Tag::default()
             },
             Tag {
@@ -276,8 +276,17 @@ where
             post_with(handlers::auth::login, |op| {
                 op.tag("Auth")
                     .summary("Login")
-                    .description("Authenticate with username and password. Returns a JWT token to use as Bearer authentication on all other endpoints.")
+                    .description("Authenticate with username and password. Returns a session token to use as Bearer authentication on all other endpoints.")
                     .id("login")
+            }),
+        )
+        .api_route(
+            "/auth/session",
+            delete_with(handlers::auth::logout, |op| {
+                op.tag("Auth")
+                    .summary("Logout")
+                    .description("Revoke the session of the Bearer token sent. The token is rejected from then on, even if it has already expired or been revoked.")
+                    .id("logout")
             }),
         )
         .api_route(
@@ -285,7 +294,7 @@ where
             post_with(handlers::auth::activate, |op| {
                 op.tag("Auth")
                     .summary("Activate account")
-                    .description("Activate a user account created via invitation. Accepts the invitation token and a password. Returns a JWT token for immediate authentication.")
+                    .description("Activate a user account created via invitation. Accepts the invitation token and a password. Returns a session token for immediate authentication.")
                     .id("activate")
             }),
         )
@@ -841,7 +850,7 @@ where
         // Documentation
         .route("/docs", get(scalar_docs))
         .finish_api(&mut api)
-        .with_state(state);
+        .with_state(state.clone());
 
     // Add Bearer auth security scheme
     let components = api.components.get_or_insert_with(Default::default);
@@ -849,8 +858,8 @@ where
         "bearerAuth".to_string(),
         ReferenceOr::Item(SecurityScheme::Http {
             scheme: "bearer".to_string(),
-            bearer_format: Some("JWT".to_string()),
-            description: Some("JWT token obtained from /auth/login".to_string()),
+            bearer_format: None,
+            description: Some("Session token obtained from /auth/login".to_string()),
             extensions: Default::default(),
         }),
     );
@@ -860,6 +869,10 @@ where
     router
         .route("/openapi.json", get(serve_openapi))
         .layer(Extension(api))
+        .layer(from_fn_with_state(
+            state,
+            auth::middleware::authenticate::<U, O, B, P, C, R, A>,
+        ))
 }
 
 async fn serve_openapi(Extension(api): Extension<Arc<OpenApi>>) -> Json<OpenApi> {
@@ -904,9 +917,13 @@ pub(crate) mod test_util {
             MockUserRepository,
         },
     };
-    use axum::{Router, routing};
+    use axum::{Router, middleware::from_fn_with_state, routing};
     use http::Request;
     use serde::de::DeserializeOwned;
+    use std::{
+        collections::HashMap,
+        sync::{LazyLock, Mutex},
+    };
     use uuid::Uuid;
 
     /// Concrete test state using mock repositories.
@@ -926,8 +943,7 @@ pub(crate) mod test_util {
             listen_addr: "0.0.0.0:3000".to_string(),
             log_filter: "error".to_string(),
             log_json: false,
-            jwt_secret: "test-secret-key-at-least-32-bytes!".to_string(),
-            jwt_expiration_secs: 3600,
+            session_lifetime_secs: 3600,
             admin_username: "admin".to_string(),
             admin_password: "admin123".to_string(),
             cors_origins: Vec::new(),
@@ -1086,7 +1102,7 @@ pub(crate) mod test_util {
         account_repo: MockAccountRepository,
     ) -> TestState {
         AppState::new(
-            user_repo,
+            resolving_test_sessions(user_repo),
             op_repo,
             budget_repo,
             profile_repo,
@@ -1104,6 +1120,7 @@ pub(crate) mod test_util {
             // Public
             .route("/auth/login", routing::post(handlers::auth::login))
             .route("/auth/activate", routing::post(handlers::auth::activate))
+            .route("/auth/session", routing::delete(handlers::auth::logout))
             // Admin
             .route(
                 "/users",
@@ -1291,13 +1308,31 @@ pub(crate) mod test_util {
             // Data export / import
             .route("/data/export", routing::get(handlers::data::export_data))
             .route("/data/import", routing::post(handlers::data::import_data))
-            .with_state(state)
+            .with_state(state.clone())
+            .layer(from_fn_with_state(state, auth::middleware::authenticate))
     }
 
-    /// Generate a valid `Authorization: Bearer <token>` header value.
+    /// Sessions opened by [`auth_header`], by token hash, which every test state resolves.
+    static SESSIONS: LazyLock<Mutex<TestSessions>> = LazyLock::new(Mutex::default);
+
+    type TestSessions = HashMap<Vec<u8>, (Uuid, UserRole)>;
+
+    /// Resolve the sessions opened by [`auth_header`], after any expectation already set.
+    fn resolving_test_sessions(mut user_repo: MockUserRepository) -> MockUserRepository {
+        user_repo.expect_find_session_user().returning(|hash| {
+            let session = SESSIONS.lock().unwrap().get(hash).copied();
+            Box::pin(async move { Ok(session) })
+        });
+        user_repo
+    }
+
+    /// Open a session and return its `Authorization: Bearer <token>` header value.
     pub fn auth_header(user_id: Uuid, role: UserRole) -> String {
-        let config = make_test_config();
-        let token = auth::generate_token_from_config(&config, user_id, role).unwrap();
+        let token = auth::generate_session_token().unwrap();
+        SESSIONS
+            .lock()
+            .unwrap()
+            .insert(auth::hash_session_token(&token), (user_id, role));
         format!("Bearer {token}")
     }
 

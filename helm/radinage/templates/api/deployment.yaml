@@ -32,8 +32,8 @@ spec:
               value: "0.0.0.0:{{ $app.port }}"
             - name: ROOT_PATH
               value: {{ $app.rootPath | quote }}
-            - name: JWT_EXPIRATION_SECS
-              value: {{ $app.jwtExpirationSecs | quote }}
+            - name: SESSION_LIFETIME_SECS
+              value: {{ $app.sessionLifetimeSecs | quote }}
             - name: ADMIN_USERNAME
               value: {{ $app.adminUsername | quote }}
             - name: MAX_BUDGETS_PER_USER
@@ -53,11 +53,6 @@ spec:
                 secretKeyRef:
                   name: {{ $app.databaseSecret.name }}
                   key: {{ $app.databaseSecret.key }}
-            - name: JWT_SECRET
-              valueFrom:
-                secretKeyRef:
-                  name: {{ include "radinage.jwtSecretName" $ }}
-                  key: {{ $app.jwtSecret.key }}
             - name: ADMIN_PASSWORD
               valueFrom:
                 secretKeyRef:

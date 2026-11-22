@@ -46,13 +46,15 @@ handler → service → repository → database:
   `IgnoreRuleRepository`), each
   with a `Pg*` implementation and a mockall-generated mock for handler tests.
   Transfer rules belong to the account whose operations they match, so
-  `AccountRepository` holds them too.
+  `AccountRepository` holds them too; sessions belong to their user, so
+  `UserRepository` holds them.
 - [src/domain/](radinage-api/src/domain/) holds users, accounts, operations,
   budgets, categories, ignore rules, transfers and import profiles,
   including the `BudgetLink` and `BudgetKind` enums that carry most of the
   domain's shape.
-- [src/auth/](radinage-api/src/auth/) hashes passwords with Argon2 and issues
-  and verifies HS256 JWTs carrying the user id and role.
+- [src/auth/](radinage-api/src/auth/) hashes passwords with Argon2, opens
+  sessions and resolves each request's bearer token to its user in a
+  middleware ahead of every route.
 - [src/error.rs](radinage-api/src/error.rs) maps `AppError` to a status code and
   a `{"error": ...}` body; a database error is logged and returned as a
   generic 500 so SQL details never reach the client.
@@ -96,10 +98,12 @@ local PostgreSQL.
 ## Data flow
 
 **An authenticated request.** The SPA sends `/api/...` with
-`Authorization: Bearer <jwt>`. nginx forwards it unchanged to the API, whose
-router is nested under its root path. The `AuthUser` extractor validates the
-signature and expiry and yields the user id and role; no database lookup is
-involved. The handler passes that user id to every operation and budget
+`Authorization: Bearer <token>`. nginx forwards it unchanged to the API, whose
+router is nested under its root path. The authentication middleware hashes the
+token with SHA-256 and looks the hash up among unexpired sessions, joined to
+`users` so the role is the user's current one; the `AuthUser` extractor then
+yields the user id and role, or answers 401 when no session matched. The
+handler passes that user id to every operation and budget
 lookup, which filters on it in SQL, so another user's row is
 indistinguishable from a missing one (404). The domain value is converted to a `*Response` DTO
 before serialisation.
@@ -221,8 +225,13 @@ are transfers with cannot be deleted. The schema is
 defined by
 [radinage-api/migrations/](radinage-api/migrations/).
 
-The API process is otherwise stateless: no session table, no cache. The
-browser keeps the JWT and role in `localStorage`.
+The API process is otherwise stateless: sessions live in PostgreSQL with the
+rest of the data, and there is no cache. A login stores a row in `sessions`:
+the SHA-256 of a 256-bit random token, its owner and its expiry
+(`SESSION_LIFETIME_SECS` after the login). Only the client ever holds the
+token itself; the browser keeps it and the role in `localStorage`. Logging out
+deletes the row (`DELETE /auth/session`), deleting a user deletes theirs, and
+each login purges the expired ones.
 
 ## Design decisions
 
@@ -241,10 +250,17 @@ a dedicated `*Response` type that omits it. This keeps the internal ownership
 key out of the public contract and lets the domain evolve without changing the
 JSON.
 
-**Stateless JWT.** Authentication needs no database round-trip and works the
-same behind any number of API replicas. The trade-off is that a token stays
-valid until it expires: role changes, password resets and user deletion do not
-revoke tokens already issued.
+**Opaque session tokens, checked against the database on every request.** A
+session can be revoked the moment it should end, a role change applies from
+the next request, and deleting a user cuts their access at once; no signing
+key exists to leak or rotate. The cost is one indexed lookup per authenticated
+request, cheap next to the queries the request runs anyway, and it holds
+behind any number of replicas because they all share the one PostgreSQL. Only
+the token's SHA-256 is stored, so a read of the table yields nothing that
+authenticates; a fast hash suffices because the token carries 256 random bits,
+which leave nothing to brute-force. The lookup happens in a middleware rather
+than in the extractor, so handlers stay free of any bound on the user
+repository.
 
 **A split keeps the bank operation.** Parts live beside the operation instead
 of replacing it with several operations, so the imported row still exists for
@@ -505,6 +521,7 @@ that defines flags, environment variables and defaults together.
 - Duplicate detection is exact on (account, date, amount, label); two
   genuinely distinct operations of one account sharing all three are treated
   as one.
-- Tokens cannot be revoked before expiry.
+- Changing or resetting a password ends no session: the user's sessions last
+  until they log out or expire.
 - The installed app does not work offline: its shell loads, but every page
   needs the API to show data.

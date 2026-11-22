@@ -20,13 +20,9 @@ pub struct Config {
     #[arg(long, env = "LOG_JSON", default_value_t = false)]
     pub log_json: bool,
 
-    /// JWT signing secret.
-    #[arg(long, env = "JWT_SECRET")]
-    pub jwt_secret: String,
-
-    /// JWT token expiration in seconds.
-    #[arg(long, env = "JWT_EXPIRATION_SECS", default_value_t = 86400)]
-    pub jwt_expiration_secs: u64,
+    /// Session lifetime in seconds, from login to the token's expiry.
+    #[arg(long, env = "SESSION_LIFETIME_SECS", default_value_t = 86400)]
+    pub session_lifetime_secs: u64,
 
     /// Admin account username (used for initial seeding).
     #[arg(long, env = "ADMIN_USERNAME", default_value = "admin")]
@@ -76,8 +72,8 @@ pub struct Config {
 }
 
 impl Config {
-    pub fn jwt_expiration(&self) -> Duration {
-        Duration::from_secs(self.jwt_expiration_secs)
+    pub fn session_lifetime(&self) -> Duration {
+        Duration::from_secs(self.session_lifetime_secs)
     }
 
     /// Returns the normalized root path with a leading "/" suitable for nesting.
