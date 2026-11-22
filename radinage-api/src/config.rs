@@ -24,6 +24,10 @@ pub struct Config {
     #[arg(long, env = "SESSION_LIFETIME_SECS", default_value_t = 86400)]
     pub session_lifetime_secs: u64,
 
+    /// Lifetime of invitation and password-reset links, in seconds.
+    #[arg(long, env = "INVITATION_EXPIRATION_SECS", default_value_t = 259_200)]
+    pub invitation_expiration_secs: u64,
+
     /// Admin account username (used for initial seeding).
     #[arg(long, env = "ADMIN_USERNAME", default_value = "admin")]
     pub admin_username: String,
@@ -74,6 +78,10 @@ pub struct Config {
 impl Config {
     pub fn session_lifetime(&self) -> Duration {
         Duration::from_secs(self.session_lifetime_secs)
+    }
+
+    pub fn invitation_expiration(&self) -> Duration {
+        Duration::from_secs(self.invitation_expiration_secs)
     }
 
     /// Returns the normalized root path with a leading "/" suitable for nesting.

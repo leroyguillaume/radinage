@@ -39,7 +39,7 @@ pub struct UserResponse {
     pub invitation_link: Option<String>,
 }
 
-fn build_invitation_link(webapp_url: &str, token: Uuid) -> String {
+fn build_invitation_link(webapp_url: &str, token: &str) -> String {
     let base = webapp_url.trim_end_matches('/');
     format!("{base}/activate?token={token}")
 }
@@ -63,12 +63,21 @@ pub async fn create_user<U: UserRepository, O, B, P, C, R, A>(
             None
         }
         None => {
-            let token = Uuid::new_v4();
+            let invitation = auth::invitation::issue(state.config.invitation_expiration())?;
             state
                 .user_repo
-                .create_with_invitation(id, &body.username, token, UserRole::User)
+                .create_with_invitation(
+                    id,
+                    &body.username,
+                    &invitation.token_hash,
+                    invitation.expires_at,
+                    UserRole::User,
+                )
                 .await?;
-            Some(build_invitation_link(&state.config.webapp_url, token))
+            Some(build_invitation_link(
+                &state.config.webapp_url,
+                &invitation.token,
+            ))
         }
     };
 
@@ -151,18 +160,22 @@ pub async fn reset_password<U: UserRepository, O, B, P, C, R, A>(
         ));
     }
 
-    let token = Uuid::new_v4();
+    let invitation = auth::invitation::issue(state.config.invitation_expiration())?;
     let found = state
         .user_repo
-        .set_reset_token(&body.username, token)
+        .set_reset_token(
+            &body.username,
+            &invitation.token_hash,
+            invitation.expires_at,
+        )
         .await?;
     if !found {
         return Err(AppError::NotFound);
     }
 
-    let base = state.config.webapp_url.trim_end_matches('/');
+    let link = build_invitation_link(&state.config.webapp_url, &invitation.token);
     Ok(Json(ResetPasswordResponse {
-        reset_link: format!("{base}/activate?token={token}&reset=true"),
+        reset_link: format!("{link}&reset=true"),
     }))
 }
 
@@ -229,6 +242,23 @@ mod tests {
     };
     use tower::ServiceExt;
 
+    thread_local! {
+        /// Token hash the mocked repository received, read back to compare with the link.
+        static STORED_HASH: std::cell::RefCell<Vec<u8>> = const { std::cell::RefCell::new(Vec::new()) };
+    }
+
+    /// The test config issues links valid for one hour.
+    fn is_about_one_hour_from_now(expires_at: chrono::DateTime<chrono::Utc>) -> bool {
+        let remaining = expires_at - chrono::Utc::now();
+        remaining > chrono::TimeDelta::minutes(59) && remaining <= chrono::TimeDelta::hours(1)
+    }
+
+    fn assert_stored_hash_matches(token: &str) {
+        let stored = STORED_HASH.with(|stored| stored.borrow().clone());
+        assert_eq!(stored, auth::invitation::hash_token(token));
+        assert_ne!(stored, token.as_bytes());
+    }
+
     fn create_user_json(username: &str, password: Option<&str>) -> String {
         serde_json::to_string(&CreateUserRequest {
             username: username.to_string(),
@@ -270,7 +300,13 @@ mod tests {
         user_repo
             .expect_create_with_invitation()
             .once()
-            .returning(|_, _, _, _| Box::pin(async { Ok(()) }));
+            .withf(|_, _, hash, expires_at, _| {
+                hash.len() == 32 && is_about_one_hour_from_now(*expires_at)
+            })
+            .returning(|_, _, hash, _, _| {
+                STORED_HASH.with(|stored| *stored.borrow_mut() = hash.to_vec());
+                Box::pin(async { Ok(()) })
+            });
 
         let app = build_test_router(make_test_state(
             user_repo,
@@ -289,7 +325,10 @@ mod tests {
         assert_eq!(json.username, "newuser");
         assert!(json.invitation_link.is_some());
         let link = json.invitation_link.unwrap();
-        assert!(link.starts_with("http://localhost:5173/activate?token="));
+        let token = link
+            .strip_prefix("http://localhost:5173/activate?token=")
+            .unwrap();
+        assert_stored_hash_matches(token);
     }
 
     #[tokio::test]
@@ -335,22 +374,14 @@ mod tests {
 
     #[test]
     fn build_invitation_link_format() {
-        let token = Uuid::parse_str("550e8400-e29b-41d4-a716-446655440000").unwrap();
-        let link = build_invitation_link("https://app.example.com", token);
-        assert_eq!(
-            link,
-            "https://app.example.com/activate?token=550e8400-e29b-41d4-a716-446655440000"
-        );
+        let link = build_invitation_link("https://app.example.com", "abc_-123");
+        assert_eq!(link, "https://app.example.com/activate?token=abc_-123");
     }
 
     #[test]
     fn build_invitation_link_strips_trailing_slash() {
-        let token = Uuid::parse_str("550e8400-e29b-41d4-a716-446655440000").unwrap();
-        let link = build_invitation_link("https://app.example.com/", token);
-        assert_eq!(
-            link,
-            "https://app.example.com/activate?token=550e8400-e29b-41d4-a716-446655440000"
-        );
+        let link = build_invitation_link("https://app.example.com/", "abc_-123");
+        assert_eq!(link, "https://app.example.com/activate?token=abc_-123");
     }
 
     #[tokio::test]
@@ -359,7 +390,7 @@ mod tests {
         user_repo
             .expect_create_with_invitation()
             .once()
-            .returning(|_, username, _, _| {
+            .returning(|_, username, _, _, _| {
                 let msg = format!("username '{username}' already exists");
                 Box::pin(async { Err(AppError::Conflict(msg)) })
             });
@@ -466,7 +497,13 @@ mod tests {
         user_repo
             .expect_set_reset_token()
             .once()
-            .returning(|_, _| Box::pin(async { Ok(true) }));
+            .withf(|_, hash, expires_at| {
+                hash.len() == 32 && is_about_one_hour_from_now(*expires_at)
+            })
+            .returning(|_, hash, _| {
+                STORED_HASH.with(|stored| *stored.borrow_mut() = hash.to_vec());
+                Box::pin(async { Ok(true) })
+            });
 
         let app = build_test_router(make_test_state(
             user_repo,
@@ -481,11 +518,12 @@ mod tests {
 
         assert_eq!(resp.status(), StatusCode::OK);
         let json: ResetPasswordResponse = response_json(resp).await;
-        assert!(
-            json.reset_link
-                .starts_with("http://localhost:5173/activate?token=")
-        );
-        assert!(json.reset_link.ends_with("&reset=true"));
+        let token = json
+            .reset_link
+            .strip_prefix("http://localhost:5173/activate?token=")
+            .and_then(|rest| rest.strip_suffix("&reset=true"))
+            .unwrap();
+        assert_stored_hash_matches(token);
     }
 
     #[tokio::test]

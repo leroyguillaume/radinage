@@ -13,6 +13,13 @@ pub struct UserCredentials {
     pub role: UserRole,
 }
 
+/// A user whose invitation (or reset) token is still unconsumed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PendingInvitation {
+    pub user_id: Uuid,
+    pub expires_at: DateTime<Utc>,
+}
+
 /// Data access interface for users.
 #[cfg_attr(test, mockall::automock)]
 pub trait UserRepository: Send + Sync + 'static {
@@ -31,21 +38,22 @@ pub trait UserRepository: Send + Sync + 'static {
         role: UserRole,
     ) -> impl std::future::Future<Output = AppResult<()>> + Send;
 
-    /// Insert a new user with an invitation token (no password yet).
+    /// Insert a new user with the hash of an invitation token (no password yet).
     /// Returns `AppError::Conflict` on duplicate username.
     fn create_with_invitation(
         &self,
         id: Uuid,
         username: &str,
-        invitation_token: Uuid,
+        token_hash: &[u8],
+        expires_at: DateTime<Utc>,
         role: UserRole,
     ) -> impl std::future::Future<Output = AppResult<()>> + Send;
 
-    /// Find a user by invitation token. Returns `None` if no match.
+    /// Find the pending invitation whose token hashes to `token_hash`, expired or not.
     fn find_by_invitation_token(
         &self,
-        token: Uuid,
-    ) -> impl std::future::Future<Output = AppResult<Option<Uuid>>> + Send;
+        token_hash: &[u8],
+    ) -> impl std::future::Future<Output = AppResult<Option<PendingInvitation>>> + Send;
 
     /// Activate a user account: set password hash and clear invitation token.
     fn activate(
@@ -78,12 +86,13 @@ pub trait UserRepository: Send + Sync + 'static {
     /// Delete a user by ID. Returns `false` if the user does not exist.
     fn delete(&self, id: Uuid) -> impl std::future::Future<Output = AppResult<bool>> + Send;
 
-    /// Set a reset token on an existing user, clearing the current password.
+    /// Set the hash of a reset token on an existing user, clearing the current password.
     /// Returns `false` if the username does not exist.
     fn set_reset_token(
         &self,
         username: &str,
-        token: Uuid,
+        token_hash: &[u8],
+        expires_at: DateTime<Utc>,
     ) -> impl std::future::Future<Output = AppResult<bool>> + Send;
 
     /// Create an admin user if none exists yet. Returns `true` if a new admin was created.
@@ -137,20 +146,23 @@ impl UserRepository for PgUserRepository {
         &self,
         id: Uuid,
         username: &str,
-        invitation_token: Uuid,
+        token_hash: &[u8],
+        expires_at: DateTime<Utc>,
         role: UserRole,
     ) -> AppResult<()> {
         // Store a placeholder hash that can never match any password.
         let placeholder_hash = "!not-activated";
         sqlx::query(
-            "INSERT INTO users (id, username, password_hash, role, invitation_token) \
-             VALUES ($1, $2, $3, $4, $5)",
+            "INSERT INTO users \
+             (id, username, password_hash, role, invitation_token_hash, invitation_expires_at) \
+             VALUES ($1, $2, $3, $4, $5, $6)",
         )
         .bind(id)
         .bind(username)
         .bind(placeholder_hash)
         .bind(role.as_str())
-        .bind(invitation_token)
+        .bind(token_hash)
+        .bind(expires_at)
         .execute(&self.pool)
         .await
         .map_err(|e| match e {
@@ -162,23 +174,35 @@ impl UserRepository for PgUserRepository {
         Ok(())
     }
 
-    async fn find_by_invitation_token(&self, token: Uuid) -> AppResult<Option<Uuid>> {
-        let row = sqlx::query("SELECT id FROM users WHERE invitation_token = $1")
-            .bind(token)
-            .fetch_optional(&self.pool)
-            .await?;
+    async fn find_by_invitation_token(
+        &self,
+        token_hash: &[u8],
+    ) -> AppResult<Option<PendingInvitation>> {
+        let row = sqlx::query(
+            "SELECT id, invitation_expires_at FROM users WHERE invitation_token_hash = $1",
+        )
+        .bind(token_hash)
+        .fetch_optional(&self.pool)
+        .await?;
         match row {
             None => Ok(None),
-            Some(r) => Ok(Some(r.try_get("id")?)),
+            Some(r) => Ok(Some(PendingInvitation {
+                user_id: r.try_get("id")?,
+                expires_at: r.try_get("invitation_expires_at")?,
+            })),
         }
     }
 
     async fn activate(&self, user_id: Uuid, password_hash: &str) -> AppResult<()> {
-        sqlx::query("UPDATE users SET password_hash = $1, invitation_token = NULL WHERE id = $2")
-            .bind(password_hash)
-            .bind(user_id)
-            .execute(&self.pool)
-            .await?;
+        sqlx::query(
+            "UPDATE users \
+             SET password_hash = $1, invitation_token_hash = NULL, invitation_expires_at = NULL \
+             WHERE id = $2",
+        )
+        .bind(password_hash)
+        .bind(user_id)
+        .execute(&self.pool)
+        .await?;
         Ok(())
     }
 
@@ -230,12 +254,20 @@ impl UserRepository for PgUserRepository {
             .collect())
     }
 
-    async fn set_reset_token(&self, username: &str, token: Uuid) -> AppResult<bool> {
+    async fn set_reset_token(
+        &self,
+        username: &str,
+        token_hash: &[u8],
+        expires_at: DateTime<Utc>,
+    ) -> AppResult<bool> {
         let affected = sqlx::query(
-            "UPDATE users SET invitation_token = $1, password_hash = '!not-activated' \
-             WHERE username = $2",
+            "UPDATE users \
+             SET invitation_token_hash = $1, invitation_expires_at = $2, \
+             password_hash = '!not-activated' \
+             WHERE username = $3",
         )
-        .bind(token)
+        .bind(token_hash)
+        .bind(expires_at)
         .bind(username)
         .execute(&self.pool)
         .await?
@@ -341,7 +373,21 @@ impl UserRepository for PgUserRepository {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::auth::invitation::IssuedInvitation;
+    use crate::auth::invitation::{hash_token, issue};
+    use chrono::{SubsecRound, TimeDelta};
     use sqlx::PgPool;
+    use std::time::Duration;
+
+    const HOUR: Duration = Duration::from_secs(3600);
+
+    /// What a lookup returns for `invitation`, at the microsecond precision Postgres keeps.
+    fn pending(user_id: Uuid, invitation: &IssuedInvitation) -> Option<PendingInvitation> {
+        Some(PendingInvitation {
+            user_id,
+            expires_at: invitation.expires_at.trunc_subsecs(6),
+        })
+    }
 
     #[sqlx::test(migrations = "./migrations")]
     async fn find_by_username_returns_none_when_not_found(pool: PgPool) {
@@ -384,18 +430,27 @@ mod tests {
     async fn create_with_invitation_and_activate(pool: PgPool) {
         let repo = PgUserRepository::new(pool);
         let id = Uuid::new_v4();
-        let token = Uuid::new_v4();
-        repo.create_with_invitation(id, "invited", token, UserRole::User)
-            .await
-            .unwrap();
+        let invitation = issue(HOUR).unwrap();
+        repo.create_with_invitation(
+            id,
+            "invited",
+            &invitation.token_hash,
+            invitation.expires_at,
+            UserRole::User,
+        )
+        .await
+        .unwrap();
 
         // User exists but cannot login (placeholder hash)
         let creds = repo.find_by_username("invited").await.unwrap().unwrap();
         assert_eq!(creds.id, id);
 
         // Token lookup works
-        let found = repo.find_by_invitation_token(token).await.unwrap();
-        assert_eq!(found, Some(id));
+        let found = repo
+            .find_by_invitation_token(&hash_token(&invitation.token))
+            .await
+            .unwrap();
+        assert_eq!(found, pending(id, &invitation));
 
         // Activate sets the real password
         repo.activate(id, "real_hash").await.unwrap();
@@ -403,15 +458,82 @@ mod tests {
         assert_eq!(creds.password_hash, "real_hash");
 
         // Token is cleared
-        let found = repo.find_by_invitation_token(token).await.unwrap();
+        let found = repo
+            .find_by_invitation_token(&hash_token(&invitation.token))
+            .await
+            .unwrap();
         assert!(found.is_none());
     }
 
     #[sqlx::test(migrations = "./migrations")]
     async fn find_by_invitation_token_returns_none_for_unknown(pool: PgPool) {
         let repo = PgUserRepository::new(pool);
-        let result = repo.find_by_invitation_token(Uuid::new_v4()).await.unwrap();
+        let result = repo
+            .find_by_invitation_token(&hash_token("unknown"))
+            .await
+            .unwrap();
         assert!(result.is_none());
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn invitation_is_stored_as_hash_and_found_by_hash(pool: PgPool) {
+        let repo = PgUserRepository::new(pool.clone());
+        let id = Uuid::new_v4();
+        let invitation = issue(HOUR).unwrap();
+        repo.create_with_invitation(
+            id,
+            "hashed",
+            &invitation.token_hash,
+            invitation.expires_at,
+            UserRole::User,
+        )
+        .await
+        .unwrap();
+
+        let stored: Vec<u8> =
+            sqlx::query_scalar("SELECT invitation_token_hash FROM users WHERE id = $1")
+                .bind(id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(stored, hash_token(&invitation.token));
+        assert_ne!(stored, invitation.token.as_bytes());
+
+        assert_eq!(
+            repo.find_by_invitation_token(&hash_token(&invitation.token))
+                .await
+                .unwrap(),
+            pending(id, &invitation)
+        );
+        assert!(
+            repo.find_by_invitation_token(invitation.token.as_bytes())
+                .await
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn find_by_invitation_token_returns_expired_invitation(pool: PgPool) {
+        let repo = PgUserRepository::new(pool);
+        let id = Uuid::new_v4();
+        let mut invitation = issue(HOUR).unwrap();
+        invitation.expires_at = Utc::now() - TimeDelta::hours(1);
+        repo.create_with_invitation(
+            id,
+            "expired",
+            &invitation.token_hash,
+            invitation.expires_at,
+            UserRole::User,
+        )
+        .await
+        .unwrap();
+
+        let found = repo
+            .find_by_invitation_token(&invitation.token_hash)
+            .await
+            .unwrap();
+        assert_eq!(found, pending(id, &invitation));
     }
 
     #[sqlx::test(migrations = "./migrations")]
@@ -422,7 +544,13 @@ mod tests {
             .unwrap();
 
         let err = repo
-            .create_with_invitation(Uuid::new_v4(), "taken", Uuid::new_v4(), UserRole::User)
+            .create_with_invitation(
+                Uuid::new_v4(),
+                "taken",
+                &hash_token("token"),
+                Utc::now(),
+                UserRole::User,
+            )
             .await
             .unwrap_err();
         assert!(matches!(err, AppError::Conflict(_)));
@@ -434,10 +562,16 @@ mod tests {
 
         let repo = PgUserRepository::new(pool);
         let id = Uuid::new_v4();
-        let token = Uuid::new_v4();
-        repo.create_with_invitation(id, "pending", token, UserRole::User)
-            .await
-            .unwrap();
+        let invitation = issue(HOUR).unwrap();
+        repo.create_with_invitation(
+            id,
+            "pending",
+            &invitation.token_hash,
+            invitation.expires_at,
+            UserRole::User,
+        )
+        .await
+        .unwrap();
 
         let creds = repo.find_by_username("pending").await.unwrap().unwrap();
         // The placeholder hash must not validate any password attempt
@@ -452,12 +586,18 @@ mod tests {
 
         let repo = PgUserRepository::new(pool);
         let id = Uuid::new_v4();
-        let token = Uuid::new_v4();
+        let invitation = issue(HOUR).unwrap();
 
         // 1. Admin creates user with invitation
-        repo.create_with_invitation(id, "newuser", token, UserRole::User)
-            .await
-            .unwrap();
+        repo.create_with_invitation(
+            id,
+            "newuser",
+            &invitation.token_hash,
+            invitation.expires_at,
+            UserRole::User,
+        )
+        .await
+        .unwrap();
 
         // 2. Cannot login yet (placeholder hash)
         let creds = repo.find_by_username("newuser").await.unwrap().unwrap();
@@ -474,7 +614,7 @@ mod tests {
 
         // 5. Token is consumed, cannot activate again
         assert!(
-            repo.find_by_invitation_token(token)
+            repo.find_by_invitation_token(&hash_token(&invitation.token))
                 .await
                 .unwrap()
                 .is_none()
@@ -544,8 +684,12 @@ mod tests {
             .unwrap();
 
         // Reset generates a token and invalidates the password
-        let token = Uuid::new_v4();
-        assert!(repo.set_reset_token("resetme", token).await.unwrap());
+        let invitation = issue(HOUR).unwrap();
+        assert!(
+            repo.set_reset_token("resetme", &invitation.token_hash, invitation.expires_at)
+                .await
+                .unwrap()
+        );
 
         // Old password no longer works
         let creds = repo.find_by_username("resetme").await.unwrap().unwrap();
@@ -553,8 +697,10 @@ mod tests {
 
         // Token lookup works
         assert_eq!(
-            repo.find_by_invitation_token(token).await.unwrap(),
-            Some(id)
+            repo.find_by_invitation_token(&hash_token(&invitation.token))
+                .await
+                .unwrap(),
+            pending(id, &invitation)
         );
 
         // Activate with new password
@@ -566,7 +712,7 @@ mod tests {
 
         // Token consumed
         assert!(
-            repo.find_by_invitation_token(token)
+            repo.find_by_invitation_token(&hash_token(&invitation.token))
                 .await
                 .unwrap()
                 .is_none()
@@ -576,7 +722,12 @@ mod tests {
     #[sqlx::test(migrations = "./migrations")]
     async fn set_reset_token_unknown_user_returns_false(pool: PgPool) {
         let repo = PgUserRepository::new(pool);
-        assert!(!repo.set_reset_token("ghost", Uuid::new_v4()).await.unwrap());
+        assert!(
+            !repo
+                .set_reset_token("ghost", &hash_token("token"), Utc::now())
+                .await
+                .unwrap()
+        );
     }
 
     #[sqlx::test(migrations = "./migrations")]
