@@ -45,6 +45,11 @@ updates:
           - react-dom
           - "@types/react"
           - "@types/react-dom"
+      # Each react-i18next major requires the matching i18next major.
+      i18next:
+        patterns:
+          - i18next
+          - react-i18next
       # Dependabot puts a dependency in its most specific matching group, not
       # the first one, and a group without patterns outranks any wildcard:
       # without "*" this catch-all swallows the lockstep groups above.
