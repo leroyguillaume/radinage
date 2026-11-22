@@ -169,8 +169,9 @@ Migrations 001 to 011 are excluded from `sqlfluff`: the API checksums every appl
 | [build](.github/workflows/build.yaml) | PRs and pushes to `main` that touch the images' sources, manual | builds the two images natively for amd64 and arm64 and scans each with `trivy image`; pushes only on a manual run asked to, or from `release` | `docker build --target api .`, then `trivy image` on the result |
 | [release](.github/workflows/release.yaml) | tag `v*` | checks the tag against the committed version, runs `build` with push, creates the GitHub release with generated notes (stable tags only) | — |
 | [chart](.github/workflows/chart.yaml) | tag `chart-*`, manual | checks the tag against `Chart.yaml` and the README, publishes the chart to `oci://ghcr.io/leroyguillaume/charts` | `helm package helm/radinage` |
+| [scorecard](.github/workflows/scorecard.yaml) | push to `main`, weekly, branch protection rule changes | OpenSSF Scorecard analysis, published to the Scorecard API and code scanning | — |
 
-`quality` and `security` run on every PR and must be green to merge. `build` only runs when the images' sources change, so it is never a merge requirement.
+`quality` and `security` run on every PR and must be green to merge. `build` only runs when the images' sources change, and `scorecard` never runs on a PR, so neither is a merge requirement.
 
 Only runs on `main` save the Rust build cache and the Docker layer cache; every other run, PRs and release tags included, reads `main`'s. GitHub lets a PR read its own caches and the default branch's, nobody else's, so a PR-saved cache only ever serves that PR's reruns, while its few gigabytes evict `main`'s from the repository's 10 GB quota.
 

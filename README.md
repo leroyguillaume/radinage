@@ -4,7 +4,7 @@
 
 # Radinage
 
-[![quality](https://github.com/leroyguillaume/radinage/actions/workflows/quality.yaml/badge.svg)](https://github.com/leroyguillaume/radinage/actions/workflows/quality.yaml)
+[![quality](https://github.com/leroyguillaume/radinage/actions/workflows/quality.yaml/badge.svg)](https://github.com/leroyguillaume/radinage/actions/workflows/quality.yaml) [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/leroyguillaume/radinage/badge)](https://scorecard.dev/viewer/?uri=github.com/leroyguillaume/radinage)
 
 A self-hosted personal bank account tracker: import your bank statements, sort them into budgets, and see what you can still spend this year.
 
