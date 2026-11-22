@@ -93,6 +93,7 @@ pre-commit run cargo-clippy --all-files
 | `trivy-chart` | misconfigurations in the rendered chart; [.trivy/](.trivy/) and [.trivyignore](.trivyignore) hold its configuration | edit the chart |
 | `helm-lint`, `helm-docs` | the chart lints, and its README matches `values.yaml` | edit the chart; `helm-docs` regenerates the README |
 | `actionlint` | GitHub workflows | edit the workflow |
+| `renovate-config-validator` | [renovate.json](renovate.json) is valid and uses no renamed option | `npx --package renovate renovate-config-validator --migrate` rewrites a stale key |
 | `shellcheck` | shell scripts | edit the script |
 | `sqlfluff-lint` | new SQL migrations, configured in [.sqlfluff](.sqlfluff) | `sqlfluff fix <file>` |
 | `cargo-fmt`, `cargo-clippy` | Rust formatting, zero Clippy warnings | `cargo fmt` fixes itself; Clippy needs a code change |
@@ -113,16 +114,33 @@ Migrations 001 to 011 are excluded from `sqlfluff`: the API checksums every appl
 | [release](.github/workflows/release.yaml) | tag `v*` | checks the tag against the committed version, runs `build` with push, creates the GitHub release with generated notes and the images' SBOMs (stable tags only) | — |
 | [chart](.github/workflows/chart.yaml) | tag `chart-*`, manual | checks the tag against `Chart.yaml` and the README, publishes the chart to `oci://ghcr.io/leroyguillaume/charts` and attests it there | `helm package helm/radinage` |
 | [scorecard](.github/workflows/scorecard.yaml) | push to `main`, weekly, branch protection rule changes | OpenSSF Scorecard analysis, published to the Scorecard API and code scanning | — |
+| [renovate](.github/workflows/renovate.yaml) | daily, manual | runs Renovate on the repository, see [Dependency updates](#dependency-updates) | — |
 
-`quality` and `security` run on every PR and must be green to merge. `build` only runs when the images' sources change, and `scorecard` never runs on a PR, so neither is a merge requirement.
+`quality` and `security` run on every PR and must be green to merge. `build` only runs when the images' sources change, and `scorecard` and `renovate` never run on a PR, so none of them is a merge requirement.
 
 Only runs on `main` save the Rust build cache and the Docker layer cache; every other run, PRs and release tags included, reads `main`'s. GitHub lets a PR read its own caches and the default branch's, nobody else's, so a PR-saved cache only ever serves that PR's reruns, while its few gigabytes evict `main`'s from the repository's 10 GB quota.
 
 Every job installs its tools with mise from [mise.lock](mise.lock), which records each download's checksum, and runs the same tasks as a contributor.
 
-The workflows use the built-in `GITHUB_TOKEN` and no other secret. Pushing images and the chart needs `packages: write`, granted only to the jobs that publish. A PR from a fork gets a read-only token, so its `security` run cannot upload results to code scanning; the scan itself still runs.
+The workflows use the built-in `GITHUB_TOKEN`, except `renovate`. Pushing images and the chart needs `packages: write`, granted only to the jobs that publish. A PR from a fork gets a read-only token, so its `security` run cannot upload results to code scanning; the scan itself still runs.
 
-[Dependabot](.github/dependabot.yaml) opens weekly update PRs for Cargo, npm, Docker, Docker Compose and GitHub Actions.
+### Dependency updates
+
+[Renovate](https://docs.renovatebot.com/) runs self-hosted from the `renovate` workflow, configured in [renovate.json](renovate.json). It covers Cargo, npm, the Dockerfile and Compose images, GitHub Actions, pre-commit hooks and mise, and opens:
+
+- new versions once they are three days old, on Monday mornings: one PR per ecosystem for minor and patch bumps, one PR per major, and one per group of packages released in lockstep;
+- a weekly lock file maintenance PR, which moves the transitive dependencies;
+- a security PR as soon as a Dependabot alert has a fix, labelled `security`.
+
+Bot PRs carry the `dependencies` label and are reviewed and merged by hand, like any other: nothing automerges. The [dependency dashboard](https://github.com/leroyguillaume/radinage/issues?q=is%3Aissue+in%3Atitle+%22Dependency+dashboard%22) issue lists every pending update, including the ones Renovate holds back.
+
+The workflow authenticates with the `RENOVATE_TOKEN` secret, a fine-grained personal access token on this repository: PRs opened with `GITHUB_TOKEN` would not trigger CI. It needs read and write on contents, commit statuses, pull requests, issues (the dashboard) and workflows (to bump actions), and read on Dependabot alerts.
+
+To see what Renovate would do, for instance after changing [renovate.json](renovate.json), run the workflow manually with `dryRun` ticked and `logLevel` set to `debug`, then read the job log:
+
+```bash
+gh workflow run renovate.yaml -f dryRun=true -f logLevel=debug
+```
 
 ## Submitting a change
 
