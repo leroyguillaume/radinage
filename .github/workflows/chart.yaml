@@ -65,14 +65,20 @@ jobs:
           VERSION: ${{ steps.version.outputs.version }}
         run: helm package "$CHART_DIR" --version "$VERSION"
 
+      # actions/attest reads Docker's credentials only; Helm falls back to them.
+      - name: log in to GHCR
+        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
       - name: push the chart to GHCR
         id: push
         env:
           VERSION: ${{ steps.version.outputs.version }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           OWNER: ${{ github.repository_owner }}
         run: |
-          printf '%s' "$GITHUB_TOKEN" | helm registry login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
           output="$(helm push "radinage-${VERSION}.tgz" "oci://ghcr.io/${OWNER}/charts" 2>&1)"
           printf '%s\n' "$output"
           digest="$(sed -n 's/^Digest: //p' <<< "$output")"
