@@ -1,0 +1,83 @@
+# yaml-language-server: $schema=https://taskfile.dev/schema.json
+version: '3'
+
+set:
+  - errexit
+  - nounset
+  - pipefail
+
+tasks:
+  default:
+    cmds:
+      - task --list
+    silent: true
+
+  setup:
+    desc: Install the webapp dependencies and the git hooks
+    cmds:
+      - task: webapp:deps
+      - pre-commit install
+
+  lint:
+    desc: Run every pre-commit hook on the whole repository
+    deps:
+      - webapp:deps
+    cmds:
+      - pre-commit run --all-files
+
+  test:
+    desc: Run the API and webapp test suites
+    cmds:
+      - task: test:api
+      - task: test:webapp
+
+  test:api:
+    desc: Run the Rust tests against the PostgreSQL in DATABASE_URL
+    cmds:
+      - cargo test {{.CLI_ARGS}}
+
+  test:webapp:
+    desc: Run the webapp tests
+    deps:
+      - webapp:deps
+    dir: radinage-webapp
+    cmds:
+      - npm test -- {{.CLI_ARGS}}
+
+  build:
+    desc: Build the API and the webapp
+    deps:
+      - webapp:deps
+    cmds:
+      - cargo build
+      - npm --prefix radinage-webapp run build
+
+  run:api:
+    desc: Start the API against the PostgreSQL in DATABASE_URL
+    cmds:
+      - cargo run -p radinage-api
+
+  run:webapp:
+    desc: Start the webapp dev server on localhost:5173
+    deps:
+      - webapp:deps
+    dir: radinage-webapp
+    cmds:
+      - npm run dev
+
+  release:
+    desc: Bump, commit and tag a release, then ask before pushing
+    interactive: true
+    cmds:
+      - scripts/release.sh {{.CLI_ARGS}}
+
+  webapp:deps:
+    internal: true
+    dir: radinage-webapp
+    sources:
+      - package.json
+      - package-lock.json
+    generates:
+      - node_modules/.package-lock.json
+    cmds:
+      - npm ci
