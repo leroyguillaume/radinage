@@ -1,0 +1,197 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "dependencyDashboard": {
+    "enabled": true,
+    "title": "Dependency dashboard"
+  },
+  "extends": [
+    "config:recommended"
+  ],
+  "group": {
+    "commitMessageTopic": "the {{{groupName}}} group"
+  },
+  "labels": [
+    "dependencies"
+  ],
+  "lockFileMaintenance": {
+    "enabled": true
+  },
+  "minimumReleaseAge": "3 days",
+  "packageRules": [
+    {
+      "commitMessageAction": "bump",
+      "commitMessageTopic": "{{depName}}",
+      "description": "Commit subjects follow the repository's `<area>: bump <dependency> to <version>` style; manager defaults would otherwise win over top-level settings",
+      "matchPackageNames": [
+        "*"
+      ]
+    },
+    {
+      "commitMessagePrefix": "cargo:",
+      "description": "Rust crates",
+      "matchManagers": [
+        "cargo"
+      ]
+    },
+    {
+      "commitMessagePrefix": "webapp:",
+      "description": "Webapp packages",
+      "matchManagers": [
+        "npm"
+      ]
+    },
+    {
+      "commitMessagePrefix": "docker:",
+      "description": "Base images of the Dockerfile and the Compose file",
+      "matchManagers": [
+        "dockerfile",
+        "docker-compose"
+      ]
+    },
+    {
+      "commitMessagePrefix": "ci:",
+      "description": "Workflow actions, pre-commit hooks and the tools pinned in mise.toml",
+      "matchManagers": [
+        "github-actions",
+        "pre-commit",
+        "mise"
+      ]
+    },
+    {
+      "commitMessageAction": "refresh",
+      "commitMessagePrefix": "deps:",
+      "commitMessageTopic": "the lockfiles",
+      "description": "Lock file maintenance spans every manager",
+      "matchUpdateTypes": [
+        "lockFileMaintenance"
+      ]
+    },
+    {
+      "description": "Minor and patch crate bumps land as one PR; each major gets its own",
+      "groupName": "cargo",
+      "matchManagers": [
+        "cargo"
+      ],
+      "matchUpdateTypes": [
+        "minor",
+        "patch"
+      ]
+    },
+    {
+      "description": "Minor and patch webapp bumps land as one PR; each major gets its own",
+      "groupName": "npm",
+      "matchManagers": [
+        "npm"
+      ],
+      "matchUpdateTypes": [
+        "minor",
+        "patch"
+      ]
+    },
+    {
+      "description": "Minor and patch action bumps land as one PR; each major gets its own",
+      "groupName": "github-actions",
+      "matchManagers": [
+        "github-actions"
+      ],
+      "matchUpdateTypes": [
+        "minor",
+        "patch"
+      ]
+    },
+    {
+      "description": "Minor and patch hook bumps land as one PR; each major gets its own",
+      "groupName": "pre-commit",
+      "matchManagers": [
+        "pre-commit"
+      ],
+      "matchUpdateTypes": [
+        "minor",
+        "patch"
+      ]
+    },
+    {
+      "description": "A 0.x minor bump is breaking under Cargo and npm semver, so it gets its own PR like a major",
+      "groupName": null,
+      "matchCurrentVersion": "/^0\\./",
+      "matchManagers": [
+        "cargo",
+        "npm"
+      ],
+      "matchUpdateTypes": [
+        "minor"
+      ]
+    },
+    {
+      "description": "Mantine packages only work against the matching @mantine/core release",
+      "groupName": "mantine",
+      "matchPackageNames": [
+        "@mantine/*"
+      ]
+    },
+    {
+      "description": "The router, its Vite plugin and devtools are released in lockstep",
+      "groupName": "tanstack-router",
+      "matchPackageNames": [
+        "@tanstack/router*",
+        "@tanstack/react-router*"
+      ]
+    },
+    {
+      "description": "React and its type definitions move together",
+      "groupName": "react",
+      "matchPackageNames": [
+        "react",
+        "react-dom",
+        "@types/react",
+        "@types/react-dom"
+      ]
+    },
+    {
+      "description": "Each react-i18next major requires the matching i18next major",
+      "groupName": "i18next",
+      "matchPackageNames": [
+        "i18next",
+        "react-i18next"
+      ]
+    },
+    {
+      "commitMessagePrefix": "toolchain:",
+      "description": "The Rust toolchain in mise.toml and the rust image of the Dockerfile move together",
+      "groupName": "rust",
+      "matchDepNames": [
+        "rust"
+      ]
+    },
+    {
+      "commitMessagePrefix": "toolchain:",
+      "description": "Node.js in mise.toml and the node image of the Dockerfile move together",
+      "groupName": "node",
+      "matchDepNames": [
+        "node"
+      ]
+    },
+    {
+      "commitMessagePrefix": "docker:",
+      "description": "The tests' PostgreSQL service in CI runs the same version as the Compose file",
+      "groupName": "postgres",
+      "matchDepNames": [
+        "postgres"
+      ]
+    }
+  ],
+  "prConcurrentLimit": 5,
+  "pre-commit": {
+    "enabled": true
+  },
+  "schedule": [
+    "before 4am on monday"
+  ],
+  "semanticCommits": "disabled",
+  "timezone": "Europe/Paris",
+  "vulnerabilityAlerts": {
+    "addLabels": [
+      "security"
+    ]
+  }
+}
