@@ -30,20 +30,23 @@ radinage-webapp/       React 19 + TypeScript SPA
 ## Build & check commands
 
 ```bash
-# Rust — from project root
-cargo build                          # compile the API
-cargo test                           # run all tests
-cargo clippy -- -D warnings          # lint (must be zero warnings)
-cargo fmt                            # format
+# Tools — from project root, pinned in mise.toml / mise.lock
+mise install                         # Rust, Node.js, pre-commit, Task, hook binaries
 
-# Frontend — from radinage-webapp/
-npm install                          # install deps
-npm run dev                          # dev server (localhost:5173)
-npm run build                        # tsc + vite build
-npm test                             # vitest
-npx biome check .                    # lint + format check
-npx biome format --write .           # auto-format
-npx biome check --fix .              # auto-fix lint
+# Tasks — from project root, defined in Taskfile.yml
+task --list                          # every task
+task setup                           # npm ci + pre-commit install
+task lint                            # pre-commit run --all-files (fmt, clippy, biome, tsc, …)
+task test                            # Rust + webapp suites (needs docker compose postgres)
+task test:api -- <filter>            # cargo test, args after --
+task test:webapp -- <file>           # vitest run, args after --
+task build                           # cargo build + vite build
+task run:api                         # cargo run (export the required env vars)
+task run:webapp                      # vite dev server (localhost:5173)
+
+# Single hooks while iterating
+pre-commit run cargo-clippy --all-files
+pre-commit run biome-check --all-files
 
 # Docker
 docker compose --profile radinage up # full stack (postgres + api + webapp)

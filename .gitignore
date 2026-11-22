@@ -19,3 +19,10 @@ radinage-webapp/dist/
 # OS
 .DS_Store
 Thumbs.db
+
+# mise
+mise.local.toml
+mise.local.lock
+
+# Task
+.task/

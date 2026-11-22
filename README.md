@@ -36,8 +36,7 @@ To run the stack with Docker Compose:
 
 To run the services from source:
 
-- [Rust](https://www.rust-lang.org/tools/install) 1.94
-- [Node.js](https://nodejs.org/en/download) 25
+- [mise](https://mise.jdx.dev/installing-mise.html), which installs Rust, Node.js and Task at the versions in [mise.toml](mise.toml)
 - PostgreSQL 18, or Docker to run it
 
 ### Installation
@@ -102,26 +101,32 @@ Sign in to the webapp as `admin` with the `ADMIN_PASSWORD` set in [docker-compos
 
 #### From source
 
-Start PostgreSQL alone:
+Install the tools, trusting the repository's `mise.toml` first:
+
+```bash
+mise trust
+```
+
+```bash
+mise install
+```
+
+Start PostgreSQL alone; mise points `DATABASE_URL` at it:
 
 ```bash
 docker compose up -d postgres
 ```
 
-Start the API from `radinage-api/`, with the required variables above exported:
+Start the API, with the other required variables above exported:
 
 ```bash
-cargo run
+task run:api
 ```
 
-Start the webapp from `radinage-webapp/`; it serves on <http://localhost:5173> and proxies `/api` to the API:
+Start the webapp; it serves on <http://localhost:5173> and proxies `/api` to the API:
 
 ```bash
-npm install
-```
-
-```bash
-npm run dev
+task run:webapp
 ```
 
 ### Deployment

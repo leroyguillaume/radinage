@@ -29,7 +29,7 @@ repos:
       - id: pretty-format-toml
         args:
           - --autofix
-        exclude: ^(helm/|radinage-webapp/|Cargo.lock$)
+        exclude: ^(helm/|radinage-webapp/|Cargo.lock$|mise\.(toml|lock)$)
 
   - repo: https://github.com/adrienverge/yamllint
     rev: v1.38.0
@@ -57,8 +57,19 @@ repos:
         # 001-011 would make the API refuse to start on any existing database.
         exclude: ^radinage-api/migrations/0(0[1-9]|1[01])_
 
+  - repo: https://github.com/python-jsonschema/check-jsonschema
+    rev: a76b92851fc9eede9f9bc4073eb55202f34eb0df  # frozen: 0.39.0
+    hooks:
+      - id: check-taskfile
+
   - repo: local
     hooks:
+      - id: mise-fmt
+        name: mise fmt
+        entry: mise fmt
+        language: system
+        files: ^mise\.toml$
+        pass_filenames: false
       - id: no-co-authors
         name: no co-authors in commit message
         entry: '^\s*co-authored-by:|\bgenerated with\b'
