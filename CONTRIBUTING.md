@@ -172,6 +172,8 @@ Migrations 001 to 011 are excluded from `sqlfluff`: the API checksums every appl
 
 `quality` and `security` run on every PR and must be green to merge. `build` only runs when the images' sources change, so it is never a merge requirement.
 
+Only runs on `main` save the Rust build cache and the Docker layer cache; every other run, PRs and release tags included, reads `main`'s. GitHub lets a PR read its own caches and the default branch's, nobody else's, so a PR-saved cache only ever serves that PR's reruns, while its few gigabytes evict `main`'s from the repository's 10 GB quota.
+
 The workflows use the built-in `GITHUB_TOKEN` and no other secret. Pushing images and the chart needs `packages: write`, granted only to the jobs that publish. A PR from a fork gets a read-only token, so its `security` run cannot upload results to code scanning; the scan itself still runs.
 
 [Dependabot](.github/dependabot.yaml) opens weekly update PRs for Cargo, npm, Docker, Docker Compose and GitHub Actions.
