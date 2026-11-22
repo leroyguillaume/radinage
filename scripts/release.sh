@@ -111,14 +111,18 @@ if $chart; then
 	helm-docs --chart-search-root "$chart_dir"
 	# An rc must not become what the README tells people to install.
 	if [ "${version#*-}" = "$version" ]; then
-		sed -i.bak -E "s/(helm install .*--version )[^ ]+/\1$version/" README.md
+		sed -i.bak -E "s/(helm install .*--version )[^ ]+/\1$version/; s#(/charts/radinage:)[^ ]+#\1$version#" README.md
 		rm README.md.bak
 	fi
 	git add "$chart_dir/Chart.yaml" "$chart_dir/README.md" README.md
 else
 	cargo set-version --workspace "$version"
 	(cd radinage-webapp && npm version "$version" --no-git-tag-version >/dev/null)
-	git add Cargo.toml Cargo.lock radinage-webapp/package.json radinage-webapp/package-lock.json
+	if [ "${version#*-}" = "$version" ]; then
+		sed -i.bak -E "s#(/radinage-(api|webapp):)[^ ]+#\1$version#" README.md
+		rm README.md.bak
+	fi
+	git add Cargo.toml Cargo.lock radinage-webapp/package.json radinage-webapp/package-lock.json README.md
 fi
 
 git commit --quiet --message "$subject"

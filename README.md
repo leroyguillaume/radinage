@@ -131,7 +131,19 @@ task run:webapp
 
 ### Deployment
 
-Images are published to GHCR for `linux/amd64` and `linux/arm64`: `ghcr.io/leroyguillaume/radinage-api` and `ghcr.io/leroyguillaume/radinage-webapp`.
+Images are published to GHCR for `linux/amd64` and `linux/arm64`: `ghcr.io/leroyguillaume/radinage-api` and `ghcr.io/leroyguillaume/radinage-webapp`. Each image and the chart carry a provenance attestation signed by this repository's release workflow; each image also carries an attested CycloneDX SBOM, attached to its GitHub release as well. Check them with the [GitHub CLI](https://cli.github.com/) before deploying:
+
+```bash
+gh attestation verify oci://ghcr.io/leroyguillaume/radinage-api:2.3.0 --repo leroyguillaume/radinage
+```
+
+```bash
+gh attestation verify oci://ghcr.io/leroyguillaume/radinage-webapp:2.3.0 --repo leroyguillaume/radinage
+```
+
+```bash
+gh attestation verify oci://ghcr.io/leroyguillaume/charts/radinage:1.8.0 --repo leroyguillaume/radinage
+```
 
 The Helm chart reads the database connection string from an existing Secret, `radinage-db` with a `url` key by default:
 
